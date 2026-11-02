@@ -44,3 +44,18 @@ Other work comes first; this fills the gaps.
 - 2 Nov 2026: fixed-function UART transmitter + self-checking test bench (the known-good reference).
   PASS on 46 bytes at two baud rates. Checked the test can fail: a broken stop bit and a
   bit time one clock short were both caught. Size: 123 cells (31 flip-flops), about 0.5% of the budget.
+- 2 Nov 2026: bench board found: **Nandland Go Board** (iCE40 HX1K VQ100, 25 MHz, 1280 logic cells,
+  16 block RAMs, USB serial on the same lead). `fpga/go_board/`: hello test sends
+  "Hello from Gosforth Skies" at 115200 once a second (hold switch 1 for nonstop). Simulated: the decoded
+  line is correct. Built: 149/1280 cells (11%), timing good to 124 MHz. Not yet flashed.
+  Note: the whole two-engine chip won't fit a 1K part; the board tests one engine at a time.
+
+## Flashing the Go Board (first time only)
+
+iceprog/openFPGALoader talk to the board's FTDI chip through libusb, so on Windows
+interface 0 of the "Dual RS232-HS" device needs the WinUSB driver (Zadig does this).
+Leave interface 1 alone: that's the serial port we read the output on.
+That's a driver change on the PC, so Mark does it himself. Then:
+
+    fpga/go_board/build.sh prog
+    # serial terminal (PuTTY etc.) on the board's COM port, 115200 8N1

@@ -1,0 +1,13 @@
+# Nandland Go Board: iCE40 HX1K, VQ100 package, 25 MHz oscillator.
+# Pins agreed by two independent sources (olofk/serv data/go_board.pcf and
+# jeffadickson/SharpHDL boards/GoBoard/classroom.pcf); Nandland's own file is no longer online.
+set_io i_clk      15
+set_io o_led[0]   56
+set_io o_led[1]   57
+set_io o_led[2]   59
+set_io o_led[3]   60
+set_io i_sw[0]    53
+set_io i_sw[1]    51
+set_io i_sw[2]    54
+set_io i_sw[3]    52
+set_io o_uart_tx  74
