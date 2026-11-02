@@ -49,6 +49,7 @@ Other work comes first; this fills the gaps.
   "Hello from Gosforth Skies" at 115200 once a second (hold switch 1 for nonstop). Simulated: the decoded
   line is correct. Built: 149/1280 cells (11%), timing good to 124 MHz.
   **Flashed and working on the real board:** 5 s on COM5 = 5 clean lines, 135 characters, no errors.
+  Nonstop test (switch 1 held, back-to-back bytes): 115,804 characters, 4,288 complete lines, all correct.
   (Scripts: `flash.ps1`, `listen.ps1`, `check_driver.ps1`; run them from an ordinary PowerShell window.)
   Note: the whole two-engine chip won't fit a 1K part; the board tests one engine at a time.
 
