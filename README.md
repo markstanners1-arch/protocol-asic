@@ -142,3 +142,19 @@ That's a driver change on the PC, so Mark does it himself. Then:
   5-6 MHz fail by exactly one bit late (beyond the board's speed, as expected).
   Bench notes: the ESP32 (CH340 board) needed manual download mode (fixed later with a capacitor EN-GND: uploads now hands-free) and
   `esp32/upload_noreset.ps1`; moving the Go Board to another USB socket brings back the FTDI driver (re-run Zadig).
+- 2 Nov 2026: **input glitch filter** designed (`docs/input_filter.md`), modelled (`model/glitch_filter.py`) and built
+  (`src/glitch_filter.v`): a new level must hold for N+1 filter ticks, one tick every 2^P clocks (20 ns to ~10 ms
+  at 50 MHz with one design). Model vs Verilog identical on 300 random pulse trains (252K clocks x 4 inputs), and
+  the spec's promise checked directly (short pulses never pass, long levels always do); two planted bugs caught.
+  **Bench: switch-bounce meter on the Go Board** (`fpga/go_board/bounce_top.v` + `bounce_listen.ps1`, log in
+  `bounce_log.csv`). Mark pressed switch 1 84 times across the settings:
+  - The Go Board's buttons bounce rarely (5 of 84 events, 6 %), mostly on release: one extra pulse, spread over
+    1 us to 1.5 ms.
+  - Filter off: the bounce got through (3 edges). Filter on (any setting from ~82 us): every bouncy event came
+    out as exactly 1 edge.
+  - Filter delay matched the design on hardware, including the expected spread from the prescaler:
+    ~82 us setting 77-81 us, ~655 us setting 615-654 us, ~2.6 ms setting 2,465-2,602 us, ~10.5 ms setting
+    10,030-10,470 us (theory: between N x 2^P and (N+1) x 2^P clocks).
+  - Conclusion for these switches: ~0.65 ms cleans every bounce seen, with a delay nobody would notice.
+  - Not yet: the filter wired into `chip.v` with a host register; a worse switch (toggle or microswitch on the PMOD)
+    to see a real bouncer.
