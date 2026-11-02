@@ -6,6 +6,7 @@
 //   J4-9  SCK   -> GPIO 18       J4-11 GND  -> GND
 //   J4-6  engine pin 0 (engine A's UART out)  -> GPIO 16 (Serial2 RX)
 //   J4-4  IRQ   -> GPIO 4        (J4-1 and J4-2 are 3.3 V: leave them alone)
+//   J4-26 (G15) engine pin 15 <- GPIO 17   (glitch filter test: the ESP32 sends pulses into the chip)
 //
 // What it does, at three baud rates:
 //   1. loads engine B with programs/measure_baud.asm and starts it (it watches engine pin 0)
@@ -18,7 +19,7 @@
 #include <SPI.h>
 #include "programs.h"
 
-const int PIN_CS = 5, PIN_SCK = 18, PIN_MISO = 19, PIN_MOSI = 23, PIN_IRQ = 4, PIN_RX2 = 16;
+const int PIN_CS = 5, PIN_SCK = 18, PIN_MISO = 19, PIN_MOSI = 23, PIN_IRQ = 4, PIN_RX2 = 16, PIN_PULSE = 17;
 const uint32_t SPI_HZ = 1000000;           // chip clock 12 MHz / 8 = 1.5 MHz limit
 const float CHIP_HZ = 12e6;
 
@@ -103,12 +104,47 @@ void runAt(uint32_t baud) {
   check("IRQ pin after reading", digitalRead(PIN_IRQ), 0);
 }
 
+// Glitch filter on real hardware: engine B times low pulses on engine pin 15, which the ESP32 drives.
+void pulseLow(int us) { noInterrupts(); digitalWrite(PIN_PULSE, LOW); delayMicroseconds(us); digitalWrite(PIN_PULSE, HIGH); interrupts(); delay(2); }
+void filterTest() {
+  Serial.println();
+  Serial.println("-- glitch filter: engine B times low pulses on engine pin 15 (driven by the ESP32)");
+  writeReg(ENG_A, R_CTRL, 0); writeReg(ENG_B, R_CTRL, 0);
+  loadProgram(ENG_B, PROG_MEASURE_PULSE, PROG_MEASURE_PULSE_LEN);
+  writeReg(ENG_B, R_CLKDIV, 0);
+  writeReg(ENG_B, R_WRAP, wrapReg(0, PROG_MEASURE_PULSE_WRAP_BOTTOM, PROG_MEASURE_PULSE_WRAP_TOP));
+  writeReg(ENG_B, R_OUTCFG, 0); writeReg(ENG_B, R_MISC, 0);
+  writeReg(ENG_B, R_INCFG, 15);                                   // in_base = engine pin 15
+  const int R_FILTER = 0x29;
+  for (int on = 0; on < 2; on++) {
+    writeReg(ENG_A, R_FILTER, on ? 0x2F : 0x00);                  // on: N=15, P=2 -> 64-clock hold = 5.3 us at 12 MHz
+    check(on ? "FILTER read back (5.3 us hold)" : "FILTER read back (off)", readReg(ENG_B, R_FILTER), on ? 0x2F : 0);
+    writeReg(ENG_B, R_CTRL, 0); writeReg(ENG_B, R_CTRL, 1);       // restart B, empty FIFO
+    delay(2);
+    for (int k = 0; k < 2; k++) {
+      int us = k ? 20 : 2;
+      while ((readReg(ENG_B, R_STATUS) >> 4) & 7) readReg(ENG_B, R_RX);   // drain
+      pulseLow(us);
+      int lvl = (readReg(ENG_B, R_STATUS) >> 4) & 7;
+      int clocks = lvl ? readReg(ENG_B, R_RX) : 0;
+      Serial.printf("  filter %-3s %2d us pulse: engine B saw %s", on ? "on" : "off", us, lvl ? "it, " : "nothing");
+      if (lvl) Serial.printf("%d clocks = %.1f us", clocks, clocks / 12.0);
+      bool expectSeen = !(on && us == 2);
+      bool ok = expectSeen ? (lvl == 1 && fabs(clocks / 12.0 - us) < 1.5 + 0.1 * us) : (lvl == 0);
+      if (!ok) errors++;
+      Serial.println(ok ? "   ok" : "   WRONG");
+    }
+  }
+  writeReg(ENG_A, R_FILTER, 0);
+}
+
 void runAll() {
   errors = 0;
   Serial.println("\n==== Whole chip on the MachXO3L kit: two engines + SPI host port ====");
   runAt(115200);
   runAt(57600);
   runAt(19200);
+  filterTest();
   Serial.printf("\n==== %s (%d problems) ====\nSend 'r' to run again.\n", errors ? "FAIL" : "PASS", errors);
 }
 
@@ -117,6 +153,7 @@ void setup() {
   delay(1500);
   pinMode(PIN_CS, OUTPUT); digitalWrite(PIN_CS, HIGH);
   pinMode(PIN_IRQ, INPUT);
+  pinMode(PIN_PULSE, OUTPUT); digitalWrite(PIN_PULSE, HIGH);
   SPI.begin(PIN_SCK, PIN_MISO, PIN_MOSI, -1);
   runAll();
 }
