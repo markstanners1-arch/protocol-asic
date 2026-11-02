@@ -13,6 +13,8 @@ How a microcontroller (the RP2040 on the Tiny Tapeout board, an ESP32, a Raspber
 | `uo_out[1]` | IRQ: high while either engine's RX FIFO holds data | out |
 
 SPI **mode 0** (clock idles low, data sampled on the rising edge, changed on the falling edge), MSB first.
+MISO only ever changes just after a **falling** edge, so a host may sample it anywhere between the rising
+edge and the next falling edge. (The ESP32 samples late; see the bench notes in the README.)
 The chip samples SCK with its own clock, so **SCK must be at most 1/8 of the chip clock**
 (e.g. 6 MHz SPI for a 50 MHz chip). This keeps the whole chip in one clock domain: no crossing hazards.
 

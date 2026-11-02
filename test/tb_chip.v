@@ -17,13 +17,15 @@ module tb_chip;
     wire irq  = uo_out[1];
 
     localparam HALF = 8;               // SCK half period in chip clocks: SCK = clk/16
+    integer LATE = 0;                  // +late=1: sample MISO at the falling edge, like the ESP32
     integer errors = 0;
     reg [15:0] init [0:169];
 
     task spi_bit(input b, output r);
         begin
             mosi = b; repeat (HALF) @(posedge clk);
-            sck = 1; r = miso; repeat (HALF) @(posedge clk);
+            sck = 1; if (!LATE) r = miso; repeat (HALF) @(posedge clk);
+            if (LATE) r = miso;
             sck = 0;
         end
     endtask
@@ -86,6 +88,7 @@ module tb_chip;
     reg [7:0] msg [0:6];
     initial begin
         $readmemh("chip_init.hex", init);
+        if (!$value$plusargs("late=%d", LATE)) LATE = 0;
         msg[0]="U"; msg[1]="H"; msg[2]="e"; msg[3]="l"; msg[4]="l"; msg[5]="o"; msg[6]="!";
         repeat (5) @(posedge clk); rst_n = 1; repeat (5) @(posedge clk);
 

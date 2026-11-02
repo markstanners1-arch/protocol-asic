@@ -7,11 +7,12 @@ module tb_spi_test;
     wire miso;
     wire [3:0] led; wire [6:0] s1, s2;
     spi_test_top dut (.i_clk(clk), .pmod_cs(cs_n), .pmod_mosi(mosi), .pmod_miso(miso), .pmod_sck(sck), .o_led(led), .o_seg1(s1), .o_seg2(s2));
-    integer HALF, errors = 0, checks = 0;
+    integer HALF, LATE, errors = 0, checks = 0;   // LATE=1: host samples MISO at the falling edge (like the ESP32)
     real phase;
     task bitx(input b, output r); begin
         mosi = b; #(HALF*40.0 + phase);
-        sck = 1; r = miso; #(HALF*40.0);
+        sck = 1; if (!LATE) r = miso; #(HALF*40.0);
+        if (LATE) r = miso;
         sck = 0; end endtask
     task begin_(input [7:0] c); integer i; reg r; begin cs_n = 0; #200; for (i = 7; i >= 0; i = i - 1) bitx(c[i], r); end endtask
     task word(input [15:0] w, output [15:0] g); integer i; reg r; begin for (i = 15; i >= 0; i = i - 1) begin bitx(w[i], r); g[i] = r; end end endtask
@@ -23,6 +24,7 @@ module tb_spi_test;
     integer k, e, a;
     initial begin
         if (!$value$plusargs("half=%d", HALF)) HALF = 4;
+        if (!$value$plusargs("late=%d", LATE)) LATE = 0;
         phase = 7.3;                                   // SCK not lined up with the chip clock
         #20000;
         rd(0, 6'h29, g); chk(g, 16'hA5C3);
@@ -38,7 +40,7 @@ module tb_spi_test;
         rd(0, 6'h28, g); chk(g, 4);
         begin_(8'hA7); for (k = 0; k < 4; k = k + 1) begin word(0, g); chk(g, 16'hBEE0 + k); end end_;
         rd(0, 6'h28, g); chk(g, 0);
-        $display("SCK = 25 MHz / %0d = %0.2f MHz: %0d checks, %0d errors %s", 2*HALF, 25.0/(2*HALF), checks, errors, errors ? "FAIL" : "PASS");
+        $display("%s host, SCK = 25 MHz / %0d = %0.2f MHz: %0d checks, %0d errors %s", LATE ? "late " : "early", 2*HALF, 25.0/(2*HALF), checks, errors, errors ? "FAIL" : "PASS");
         $finish;
     end
 endmodule

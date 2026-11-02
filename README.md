@@ -130,3 +130,15 @@ That's a driver change on the PC, so Mark does it himself. Then:
   `esp32/spi_host_test` (compiles, ESP32 core 3.2.0) hammers it at 0.25-10 MHz. Simulation predicts it works
   to ~4.2 MHz and fails by 6.25 MHz (design spec: 3.1 MHz on the 25 MHz board). Wiring: PMOD 1 CS-GPIO5,
   2 MOSI-GPIO23, 3 MISO-GPIO19, 4 SCK-GPIO18, 5 GND-GND. Not yet run on the bench.
+- 2 Nov 2026: **segment 1 on the bench: real SPI from an ESP32 into the host port on the Go Board.**
+  First run (after a wiring slip: three ESP32 leads one pin along) showed a **real bug simulation had missed**:
+  at 0.25-3 MHz about half the reads had the **last bit wrong** (A5C2 for A5C3), while 4-6 MHz passed.
+  Cause: the ESP32 samples MISO late in the bit; the port loaded the next word just after a *rising* edge,
+  so a late sampler saw the next word's first bit. The simulated host sampled exactly on the rising edge, so
+  it never saw it. Fixed the usual way: reproduced it in simulation first (added a late-sampling host to both
+  test benches), then made MISO change **only after falling edges**; both early and late hosts now pass in
+  simulation, the whole-chip test passes both ways, and the original bug planted back is caught by the late host.
+  **Bench after the fix, two runs: 0 errors in 15,372 checks from 0.25 to 4 MHz** (spec 3.1 MHz, so ~30 % margin);
+  5-6 MHz fail by exactly one bit late (beyond the board's speed, as expected).
+  Bench notes: the ESP32 (CH340 board) needs manual download mode (hold BOOT, tap EN, release) and
+  `esp32/upload_noreset.ps1`; moving the Go Board to another USB socket brings back the FTDI driver (re-run Zadig).

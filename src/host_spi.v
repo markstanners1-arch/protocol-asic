@@ -1,6 +1,9 @@
 // SPI slave host port (docs/host_port.md). Mode 0, MSB first.
 // SCK, CS and MOSI are sampled with the chip clock (2 flip-flop synchronisers), so the whole
 // port runs in the chip's clock domain. SCK must be at most clk/8.
+// MISO only ever changes just after a falling edge of SCK (SPI mode 0), so a host may sample it
+// anywhere from the rising edge up to the next falling edge. (Found on the bench, 2 Nov 2026: the ESP32
+// samples late; loading the next word just after a rising edge corrupted the last bit at low speeds.)
 //
 // Out to the chip: a simple register bus.
 //   wr      one-clock pulse: write wdata to (eng, addr)
@@ -51,6 +54,8 @@ module host_spi (
     reg [15:0] shout;         // outgoing bits, MSB on MISO
     reg        shift_ok;      // a falling edge may move MISO on (not the one straight after a load)
     reg        rd_next;       // load the next word one clock after a pop
+    reg [15:0] nextw;         // the next word to send, waiting for a falling edge
+    reg        have_next;
 
     assign miso = shout[15];
 
@@ -63,7 +68,7 @@ module host_spi (
         pop <= 1'b0;
         if (!rst_n || !cs_active) begin
             in_cmd <= 1'b1; bitn <= 4'd0; shin <= 16'd0; shout <= 16'd0; shift_ok <= 1'b0;
-            rd <= 1'b0; rd_next <= 1'b0;
+            rd <= 1'b0; rd_next <= 1'b0; have_next <= 1'b0; nextw <= 16'd0;
             if (!rst_n) begin is_read <= 1'b0; eng <= 1'b0; addr <= 6'd0; wdata <= 16'd0; end
         end else begin
             if (sck_rise) begin
@@ -95,8 +100,11 @@ module host_spi (
                 end
             end
             if (wr || pop) addr <= next_addr;          // after a write or a completed read, move on
-            if (rd) shout <= rdata;                    // the word being read goes out next
-            else if (sck_fall && shift_ok) shout <= {shout[14:0], 1'b0};
+            if (rd) begin nextw <= rdata; have_next <= 1'b1; end   // fetched; goes out at the next falling edge
+            if (sck_fall) begin
+                if (have_next) begin shout <= nextw; have_next <= 1'b0; end
+                else if (shift_ok) shout <= {shout[14:0], 1'b0};
+            end
         end
     end
 
