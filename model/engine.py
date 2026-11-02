@@ -30,6 +30,7 @@ class Config:
     side_base: int = 0
     side_count: int = 0
     side_opt: bool = False
+    side_dir: bool = False       # side-set writes directions (open drain) instead of levels
     in_base: int = 0
     jmp_pin: int = 0
     out_right: bool = True
@@ -40,7 +41,7 @@ class Config:
     def for_program(cls, prog, **kw):
         """Take the wrap and side-set settings from an assembled program."""
         return cls(wrap_bottom=prog.wrap_bottom, wrap_top=prog.wrap_top,
-                   side_count=prog.side_count, side_opt=prog.side_opt, **kw)
+                   side_count=prog.side_count, side_opt=prog.side_opt, side_dir=prog.side_dir, **kw)
 
 
 # Ada-style range declarations: every register and its legal range.
@@ -286,7 +287,9 @@ class Engine:
             elif act == 4: self.isr, self.isr_count = self.sw, 16
 
         # side-set happens on every executed step, stalled or not, and wins over the instruction
-        if side_en:
+        if side_en and c.side_dir:
+            self.out_dir = self._write(self.out_dir, c.side_base, c.side_count, side_val)
+        elif side_en:
             self.out_val = self._write(self.out_val, c.side_base, c.side_count, side_val)
 
         self.stalled = stall

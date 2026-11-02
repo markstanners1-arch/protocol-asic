@@ -21,7 +21,7 @@ SUITE = r"D:\Tools\oss-cad-suite"
 BUILD = os.path.join(ROOT, "test", "build")
 ENV = dict(os.environ, PATH=os.pathsep.join([os.path.join(SUITE, "bin"), os.path.join(SUITE, "lib"), os.environ["PATH"]]))
 CFG_FIELDS = ["clkdiv", "start", "wrap_bottom", "wrap_top", "out_base", "out_count", "set_base", "set_count",
-              "side_base", "side_count", "side_opt", "in_base", "jmp_pin", "out_right", "in_right", "fault_addr"]
+              "side_base", "side_count", "side_opt", "side_dir", "in_base", "jmp_pin", "out_right", "in_right", "fault_addr"]
 OPNAMES = ["jmp", "wait", "in", "out", "push/pull", "mov", "set", "time"]
 
 
@@ -50,7 +50,7 @@ def random_test(rnd, ncycles):
     cfg = dict(clkdiv=rnd.choice([0, 0, 0, 1, 2, 3]), start=rnd.randrange(32), wrap_bottom=wb, wrap_top=wt,
                out_base=rnd.randrange(32), out_count=rnd.randrange(17), set_base=rnd.randrange(32),
                set_count=rnd.randrange(6), side_base=rnd.randrange(32), side_count=rnd.randrange(3),
-               side_opt=rnd.randrange(2), in_base=rnd.randrange(32), jmp_pin=rnd.randrange(32),
+               side_opt=rnd.randrange(2), side_dir=rnd.randrange(2), in_base=rnd.randrange(32), jmp_pin=rnd.randrange(32),
                out_right=rnd.randrange(2), in_right=rnd.randrange(2), fault_addr=rnd.randrange(32))
     pins = rnd.getrandbits(32)
     stim = []
@@ -66,7 +66,7 @@ def random_test(rnd, ncycles):
 
 
 def run_model(prog, cfg, stim):
-    c = Config(**{k: (bool(v) if k in ("side_opt", "out_right", "in_right") else v) for k, v in cfg.items()})
+    c = Config(**{k: (bool(v) if k in ("side_opt", "side_dir", "out_right", "in_right") else v) for k, v in cfg.items()})
     eng = Engine(prog, c)
     lines = []
     for pins, push, pop in stim:

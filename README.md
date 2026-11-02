@@ -234,3 +234,18 @@ That's a driver change on the PC, so Mark does it himself. Then:
   (master data bits not inverted; watcher on the wrong pin) caught. Two things found on the way: the bench slave must
   count SCL *rises* (the fall inside START is not a data clock), and the filter test before it left a 64-clock hold
   that swallowed every 20-clock I2C edge, so the I2C section resets FILTER first. A real host must remember the same.
+- 2 Nov 2026 (late): **ISA v0.2: `side_dir`** (Mark's call). One config bit (MISC bit 13): when set, side-set writes
+  the side pins' *directions* instead of their levels, so a bus line can be open drain (side 1 = pull low, 0 = let go)
+  from the side-set, which costs no instruction. Why: the ESP32 as an I2C slave stretches the clock, and a push-pull
+  SCL would fight it electrically. Proven three ways: model and Verilog identical on 400,000 random clocks with the
+  bit randomised (plus 120,000 with the SRAM build); a planted Verilog bug ignoring the bit was caught in 71 of 200
+  programs; whole-chip test both host timings. Assembler: `.side_set 1 opt pindirs`.
+  **I2C master rewritten open drain on both lines, honouring clock stretching**: after every SCL release it waits
+  for SCL to really be high (`wait 1, rel 31`: the pin below SDA, so the pair sits anywhere). Model test: the slave
+  now stretches SCL for 7 and 300 clocks after every ACK, every byte still right; the whole-chip bench slave stretches
+  90 clocks mid-byte and after each ACK. A planted master that ignores stretching is caught by both (the chip test
+  only once the bench stretched *mid-byte*: after an ACK the master was already waiting for the slow SPI host, so the
+  stretch never overlapped it; a test that cannot fail is not a test). Use clkdiv >= 2 for exact 10-tick bits (the
+  2-clock synchroniser delays the engine's view of its own release by a tick below that). The bench UART monitor is
+  now switched off once uio[0] is reused for SCL. `src/` recopied to the Tiny Tapeout repo (push held until the two
+  running layout jobs report, so the baseline numbers are from the v0.1 engine).

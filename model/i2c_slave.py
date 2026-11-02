@@ -4,15 +4,19 @@
   write: START, address+W, pointer byte, data bytes (into regs[pointer], pointer + 1 each) ..., STOP
   read:  START, address+R, data bytes from regs[pointer] (pointer + 1 each, until the master NAKs), STOP
 
-Feed it the bus levels every clock with clock(scl, sda); it returns True while it is pulling SDA low.
+Feed it the bus levels every clock with clock(scl, sda); it returns (sda_low, scl_low): whether it is pulling
+SDA low, and whether it is stretching the clock (holding SCL low). With stretch = N it holds SCL low for N clocks
+after every ACK clock, like a slow slave thinking about what it just got.
 It samples SDA on SCL's rising edge and changes SDA just after SCL's falling edge, as the standard says.
 Everything it sees is logged (events) so a test can check the transaction byte by byte.
 """
 
 
 class I2CSlave:
-    def __init__(self, address=0x50, nregs=16):
+    def __init__(self, address=0x50, nregs=16, stretch=0):
         self.address = address
+        self.stretch = stretch
+        self.stretch_left = 0
         self.regs = [0] * nregs
         self.pointer = 0
         self.scl = 1
@@ -45,6 +49,7 @@ class I2CSlave:
             self.drive_low = self.selected
         elif self.state == "ack_addr":
             self.drive_low = False
+            self.stretch_left = self.stretch
             if not self.selected:
                 self.state = "idle"
             elif self.reading:
@@ -67,6 +72,7 @@ class I2CSlave:
             self.drive_low = True
         elif self.state == "ack_write":
             self.drive_low = False
+            self.stretch_left = self.stretch
             self.state = "write"
             self.shift, self.nbits = 0, 0
         elif self.state == "read":
@@ -76,6 +82,7 @@ class I2CSlave:
             else:
                 self.drive_low = not ((self.shift >> (7 - self.nbits)) & 1)
         elif self.state == "ack_read":
+            self.stretch_left = self.stretch
             if self.master_ack:
                 self.state = "read"
                 self._load_read_byte()
@@ -92,7 +99,7 @@ class I2CSlave:
         self.drive_low = not ((self.shift >> 7) & 1)      # first bit goes out now (SCL is low)
 
     def clock(self, scl, sda):
-        """One system clock with the bus at these levels. Returns True while the slave pulls SDA low."""
+        """One system clock with the bus at these levels. Returns (sda_low, scl_low)."""
         if self.scl and scl:                              # SDA moving while SCL is high: START or STOP
             if self.sda and not sda:
                 self.events.append(("start", None))
@@ -107,4 +114,7 @@ class I2CSlave:
         elif self.scl and not scl:
             self._falling()
         self.scl, self.sda = scl, sda
-        return self.drive_low
+        scl_low = self.stretch_left > 0
+        if scl_low:
+            self.stretch_left -= 1
+        return self.drive_low, scl_low

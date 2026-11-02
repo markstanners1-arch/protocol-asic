@@ -6,11 +6,11 @@ sys.path.insert(0, os.path.join(ROOT, "model"))
 from asm import assemble
 
 def regs(clkdiv=0, start=0, wb=0, wt=31, out_base=0, out_count=0, set_base=0, set_count=0, side_base=0,
-         side_count=0, side_opt=0, out_right=0, in_right=0, in_base=0, jmp_pin=0, fault_addr=0):
+         side_count=0, side_opt=0, out_right=0, in_right=0, side_dir=0, in_base=0, jmp_pin=0, fault_addr=0):
     return [clkdiv,
             start | wb << 5 | wt << 10,
             out_base | out_count << 5 | set_base << 10,
-            set_count | side_base << 3 | side_count << 8 | side_opt << 10 | out_right << 11 | in_right << 12,
+            set_count | side_base << 3 | side_count << 8 | side_opt << 10 | out_right << 11 | in_right << 12 | side_dir << 13,
             in_base | jmp_pin << 5 | fault_addr << 10]
 
 ua = assemble(open(os.path.join(ROOT, "programs", "uart_tx.asm")).read())

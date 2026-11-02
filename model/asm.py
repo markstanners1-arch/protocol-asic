@@ -1,6 +1,6 @@
 """Assembler for the engine instruction set (docs/isa.md, v0.1).
 
-    prog = assemble(text)       ->  Program(words, wrap_bottom, wrap_top, side_count, labels)
+    prog = assemble(text)       ->  Program(words, wrap_bottom, wrap_top, side_count, side_opt, side_dir, labels)
 
 Directives: .side_set N [opt]   .wrap_target   .wrap
 Syntax per line:  [label:]  op args  [side N]  [[D]]   ; comment
@@ -29,6 +29,7 @@ class Program:
     wrap_top: int
     side_count: int
     side_opt: bool = False
+    side_dir: bool = False
     labels: dict = field(default_factory=dict)
 
 
@@ -45,6 +46,7 @@ def _num(s, labels=None):
 def assemble(text):
     side_count = 0
     side_opt = False
+    side_dir = False
     lines = []          # (lineno, label-free source)
     labels = {}
     wrap_bottom = wrap_top = None
@@ -62,7 +64,8 @@ def assemble(text):
         if line.startswith(".side_set"):
             parts = line.split()
             side_count = _num(parts[1])
-            side_opt = len(parts) > 2 and parts[2] == "opt"
+            side_opt = "opt" in parts[2:]
+            side_dir = "pindirs" in parts[2:]
             if not 0 <= side_count <= 2:
                 raise AsmError(f"line {lineno}: side_set must be 0-2")
             continue
@@ -79,7 +82,7 @@ def assemble(text):
     return Program(words,
                    0 if wrap_bottom is None else wrap_bottom,
                    len(words) - 1 if wrap_top is None else wrap_top,
-                   side_count, side_opt, labels)
+                   side_count, side_opt, side_dir, labels)
 
 
 def _encode(lineno, line, labels, side_count, side_opt=False):

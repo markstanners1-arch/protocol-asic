@@ -40,7 +40,7 @@ while the host clocks out anything (zeros).
 | 0x21 | CLKDIV | R/W | 16 bits |
 | 0x22 | WRAP | R/W | [4:0] start, [9:5] wrap_bottom, [14:10] wrap_top |
 | 0x23 | OUTCFG | R/W | [4:0] out_base, [9:5] out_count (0-16), [14:10] set_base |
-| 0x24 | MISC | R/W | [2:0] set_count, [7:3] side_base, [9:8] side_count, [10] side_opt, [11] out_right, [12] in_right |
+| 0x24 | MISC | R/W | [2:0] set_count, [7:3] side_base, [9:8] side_count, [10] side_opt, [11] out_right, [12] in_right, [13] side_dir (side-set writes pin directions) |
 | 0x25 | INCFG | R/W | [4:0] in_base, [9:5] jmp_pin, [14:10] fault_addr |
 | 0x26 | TXFIFO | W | push a word to the engine (dropped if the FIFO is full: check STATUS) |
 | 0x27 | RXFIFO | R | pop a word from the engine (reads 0 if empty) |

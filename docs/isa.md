@@ -1,4 +1,4 @@
-# Engine instruction set, v0.1 (2 Nov 2026)
+# Engine instruction set, v0.2 (2 Nov 2026: v0.1 plus `side_dir`)
 
 The exact rules. The Python model (`model/engine.py`) and the Verilog are both built from
 this page, so if they disagree, this page says which one is wrong. Change it here first.
@@ -30,6 +30,7 @@ Reset: everything 0, except `osr_count = 16` (empty) and `pc = start`.
 | `set_base`, `set_count` | 5, 0-5 | pins written by `SET pins` |
 | `side_base`, `side_count` | 5, 0-2 | side-set pins; `side_count` bits are taken from the top of the delay field |
 | `side_opt` | 1 | if 1, the top bit of the middle field is a side-set **enable**, so instructions without `side N` leave the side pins alone |
+| `side_dir` | 1 | if 1, side-set writes the side pins' **directions** instead of their levels (open-drain buses: a side value of 1 pulls the pin low, 0 lets it go). Added 2 Nov 2026 for I2C's SCL |
 | `in_base` | 5 | `IN pins` reads from here upwards; `WAIT` relative pins count from here |
 | `jmp_pin` | 5 | pin tested by `JMP PIN` |
 | `out_right`, `in_right` | 1, 1 | shift direction: 1 = right (LSB first, UART), 0 = left (MSB first, SPI/I2C) |
@@ -53,7 +54,7 @@ side-set value, then the delay in whatever is left. E.g. `side_opt = 1, side_cou
 - If `delay > 0`, the step just counts it down.
 - Otherwise it executes the instruction at `pc`. Side-set pins take their value on this step,
   **even if the instruction then stalls**.
-  If the instruction and the side-set write the same pin, the side-set wins.
+  If the instruction and the side-set write the same pin (level, or direction when `side_dir`), the side-set wins.
 - A stalled instruction (WAIT not met, PULL on an empty FIFO, PUSH on a full one) is tried again next tick.
   Its delay starts only once it completes.
 - On completion: `delay` = the delay field; `pc` moves on (jump target, or `wrap_bottom` if `pc == wrap_top`, else `pc + 1` mod 32).
@@ -138,7 +139,7 @@ gives exactly the number of ticks from the `time start` to the capture.
 ```
 label:
     opname args        [side N] [D]     ; comment
-.side_set N [opt]                       ; side-set width, optional
+.side_set N [opt] [pindirs]             ; side-set width, optional enable, writes directions (side_dir)
 .wrap_target / .wrap                    ; mark wrap_bottom / wrap_top
 ```
 

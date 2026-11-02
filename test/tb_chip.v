@@ -12,7 +12,8 @@ module tb_chip;
     wire [7:0] uo_out, uio_out, uio_oe;
     // pins with pull-ups: a driven pin reads back what is driven, an undriven one reads high
     reg sda_slave_low = 0;             // the bench's I2C slave pulling SDA (uio[1]) low for an ACK
-    wire [7:0] uio_in = ((uio_out & uio_oe) | ~uio_oe) & ~{6'd0, sda_slave_low, 1'b0};
+    reg scl_slave_low = 0;             // ... and stretching the clock (holding SCL, uio[0], low)
+    wire [7:0] uio_in = ((uio_out & uio_oe) | ~uio_oe) & ~{6'd0, sda_slave_low, scl_slave_low};
     protocol_chip dut (.ui_in({ui_hi, mosi, sck, cs_n}), .uo_out(uo_out), .uio_in(uio_in),
                        .uio_out(uio_out), .uio_oe(uio_oe), .ena(1'b1), .clk(clk), .rst_n(rst_n));
     wire miso = uo_out[0];
@@ -23,15 +24,19 @@ module tb_chip;
     integer errors = 0;
     reg [15:0] init [0:265];
 
-    // ---- a minimal I2C slave on uio[0] (SCL) / uio[1] (SDA): after a START it ACKs every byte, until STOP
-    reg scl_q = 1, sda_q = 1, i2c_active = 0; integer i2c_bits = 0;
+    // ---- a minimal I2C slave on uio[0] (SCL) / uio[1] (SDA): after a START it ACKs every byte, until STOP,
+    //      and stretches the clock (holds SCL low 90 clocks) after the 4th bit and after each ACK, as a slow slave might
+    reg scl_q = 1, sda_q = 1, i2c_active = 0; integer i2c_bits = 0, stretch_left = 0;
     always @(posedge clk) begin
+        if (stretch_left > 0) stretch_left <= stretch_left - 1;
+        scl_slave_low <= (stretch_left > 1);
         scl_q <= uio_in[0]; sda_q <= uio_in[1];
         if (uio_in[0] && scl_q && sda_q && !uio_in[1]) begin i2c_active <= 1; i2c_bits <= 0; end         // START
         if (uio_in[0] && scl_q && !sda_q && uio_in[1]) begin i2c_active <= 0; sda_slave_low <= 0; end    // STOP
         if (i2c_active && !scl_q && uio_in[0]) i2c_bits <= i2c_bits + 1;                                 // SCL rose: a bit
         if (i2c_active && scl_q && !uio_in[0]) begin                                                     // SCL fell
             sda_slave_low <= (i2c_bits == 8);              // after the 8th bit: ACK, held through the 9th clock
+            if (i2c_bits == 4 || i2c_bits == 9) stretch_left <= 90;    // mid-byte too: the master must really wait
             if (i2c_bits == 9) i2c_bits <= 0;
         end
     end
@@ -84,12 +89,12 @@ module tb_chip;
     endtask
 
     // ---- watch the UART line on uio[0] like a terminal would (40 clocks per bit)
-    reg [8*16-1:0] text = 0; integer nchars = 0; integer b; reg [7:0] c;
+    reg [8*16-1:0] text = 0; integer nchars = 0; integer b; reg [7:0] c; reg uart_watch = 1;   // off once the pin is reused
     initial begin
         forever begin
             @(negedge uio_in[0]);
             repeat (20) @(posedge clk);
-            if (uio_in[0] === 1'b0) begin
+            if (uart_watch && uio_in[0] === 1'b0) begin
                 for (b = 0; b < 8; b = b + 1) begin repeat (40) @(posedge clk); c[b] = uio_in[0]; end
                 repeat (40) @(posedge clk);
                 if (uio_in[0] !== 1'b1) begin $display("FAIL: bad stop bit"); errors = errors + 1; end
@@ -127,6 +132,7 @@ module tb_chip;
         if (text[8*7-1:0] === {"U","H","e","l","l","o","!"} && nchars == 7) $display("ok:   UART line read \"%0s\"", text[8*7-1:0]);
         else begin $display("FAIL: UART line read \"%0s\" (%0d chars)", text, nchars); errors = errors + 1; end
 
+        uart_watch = 0;
         check("IRQ (B has data)", {15'd0, irq}, 1);
         read_reg(1, 6'h28, st); check("B RX level before", st[6:4], 1);
         // a 2-word burst from B's RX FIFO: first word = the measurement, second = 0 (empty), and only one pop
@@ -211,9 +217,9 @@ module tb_chip;
             spi_begin({1'b0, 1'b0, 6'h00});
             for (j = 0; j < 32; j = j + 1) spi_word(init[202 + j], d);
             spi_end;
-            spi_begin({1'b0, 1'b0, 6'h21});                    // A: clkdiv 1 (20 clocks/bit), wrap 0..29, out/in SDA,
-            spi_word(16'd1, d); spi_word(16'd29 << 10, d); spi_word(16'd1 | (16'd1 << 5), d); spi_word(16'h0502, d); spi_word(16'd1, d);
-            spi_end;                                           //    set_count 2, side_count 1, side_opt, MSB first
+            spi_begin({1'b0, 1'b0, 6'h21});                    // A: clkdiv 1 (20 clocks/bit), wrap 0..29, out/in/set SDA (1),
+            spi_word(16'd1, d); spi_word(16'd29 << 10, d); spi_word(16'd1 | (16'd1 << 5) | (16'd1 << 10), d); spi_word(16'h2501, d); spi_word(16'd1, d);
+            spi_end;                                           //    set_count 1, side_base 0, side_count 1, side_opt, side_dir, MSB first
             spi_begin({1'b0, 1'b1, 6'h00});
             for (j = 0; j < 32; j = j + 1) spi_word(init[234 + j], d);
             spi_end;
@@ -223,8 +229,8 @@ module tb_chip;
         end
         write_reg(0, 6'h29, 16'h0000);                          // filter back to its shortest (I2C edges are 20 clocks apart)
         write_reg(1, 6'h20, 1); write_reg(0, 6'h20, 1); repeat (50) @(posedge clk);
-        check("I2C idle: SCL driven high", {14'd0, uio_oe[0], uio_out[0]}, 3);
-        check("I2C idle: SDA released", {15'd0, uio_oe[1]}, 0);
+        read_reg(0, 6'h24, w); check("A MISC read back with side_dir", w, 16'h2501);
+        check("I2C idle: SCL and SDA both released (open drain)", {14'd0, uio_oe[1:0]}, 0);
         spi_begin({1'b0, 1'b0, 6'h26});                        // 4 command words in one burst: START, 0xA0, 0x37, STOP
         spi_word(16'd23 << 11, w); spi_word((16'd3 << 11) | (16'hA0 << 3), w);
         spi_word((16'd3 << 11) | (16'h37 << 3), w); spi_word(16'd26 << 11, w);
@@ -236,7 +242,7 @@ module tb_chip;
         read_reg(1, 6'h28, st); check("B RX level (two bytes seen)", st[6:4], 2);
         read_reg(1, 6'h27, w); check("B saw address 0xA0 + ACK", w, 16'hA0 << 1);
         read_reg(1, 6'h27, w); check("B saw data 0x37 + ACK", w, 16'h37 << 1);
-        check("I2C idle again: SCL high, SDA released", {13'd0, uio_oe[0], uio_out[0], uio_oe[1]}, 6);
+        check("I2C idle again: both released", {14'd0, uio_oe[1:0]}, 0);
 
         if (errors == 0) $display("PASS: whole chip, end to end through the SPI host port");
         else $display("FAIL: %0d errors", errors);
