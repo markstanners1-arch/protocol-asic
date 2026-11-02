@@ -4,10 +4,10 @@ This is the reference ("the calculated values"): the Verilog engine must match i
 on every system clock. Keep it plain and literal; speed doesn't matter, clarity does.
 
     eng = Engine(program, Config(...))
-    eng.tx_put(word)            # host -> TX FIFO (False if full)
-    eng.clock(pins_in)          # one system clock; pins_in is a 32-bit int
+    popped = eng.clock(pins_in, push=word_or_None, pop=False)   # one system clock
     eng.out_val, eng.out_dir    # pin outputs after this clock
-    eng.rx_get()                # host <- RX FIFO (None if empty)
+  Convenience: eng.tx_put(word) / eng.rx_get() queue a host push / pop for the next clock.
+  Host FIFO timing follows docs/isa.md: decided from the state at the start of the clock.
 """
 from collections import deque
 from dataclasses import dataclass
@@ -70,16 +70,23 @@ class Engine:
         self.sync1 = self.sync2 = 0
         self.ticks = 0
         self.stalled = False
+        self._push = None
+        self._pop = False
 
     # ---- host side ----
     def tx_put(self, word):
-        if len(self.txf) >= FIFO_DEPTH:
+        """Queue a host push for the next clock. False if it would be refused."""
+        if len(self.txf) >= FIFO_DEPTH or self._push is not None:
             return False
-        self.txf.append(word & M16)
+        self._push = word & M16
         return True
 
     def rx_get(self):
-        return self.rxf.popleft() if self.rxf else None
+        """Queue a host pop for the next clock and return the word it will take (None if empty)."""
+        if not self.rxf or self._pop:
+            return None
+        self._pop = True
+        return self.rxf[0]
 
     # ---- pins ----
     def _pin(self, n):
@@ -96,14 +103,28 @@ class Engine:
         return reg & M32
 
     # ---- one system clock ----
-    def clock(self, pins_in=0):
+    def clock(self, pins_in=0, push=None, pop=False):
+        """One system clock. Returns the word the host popped, or None."""
+        if self._push is not None:
+            push, self._push = self._push, None
+        if self._pop:
+            pop, self._pop = True, False
+        # host requests are judged on the state at the start of the clock
+        push_ok = push is not None and len(self.txf) < FIFO_DEPTH
+        pop_ok = pop and len(self.rxf) > 0
+        popped = self.rxf[0] if pop_ok else None
         if self.div == 0:
             self.div = self.cfg.clkdiv
             self._tick()
         else:
             self.div -= 1
+        if push_ok:
+            self.txf.append(push & M16)
+        if pop_ok:
+            self.rxf.popleft()
         # synchroniser: the engine sees pins as they were 2 clocks ago
         self.sync2, self.sync1 = self.sync1, pins_in & M32
+        return popped
 
     def _tick(self):
         self.ticks += 1

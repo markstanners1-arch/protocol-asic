@@ -62,6 +62,23 @@ side-set value, then the delay in whatever is left. E.g. `side_opt = 1, side_cou
   The synchroniser resets to 0, so for the first 2 clocks after reset every pin reads low.
   Programs that look for a falling edge should first `wait 1` for the idle level (found by `model/test_measure.py`).
 
+## Host and FIFO timing
+
+Within one system clock, everything is decided from the state at the **start** of that clock:
+- The host's push into the TX FIFO is accepted only if the FIFO was not full at the start of the clock.
+  The word becomes visible to the engine from the next clock.
+- The host's pop from the RX FIFO is accepted only if it was not empty at the start of the clock;
+  the host gets the word that was at the head.
+- The engine's PULL / PUSH and `MOV status` see the FIFO levels at the start of the clock.
+- So an engine PULL and a host push in the same clock both happen (count -1 +1), and so do an engine PUSH and a host pop.
+
+## Reserved encodings (defined, so random programs are a fair test)
+
+`IN` source 7 reads zeros. `OUT` destinations 3 and 7 discard the data (the OSR still shifts).
+`MOV` destinations 3 and 4 do nothing; `MOV` op 3 is a plain copy. `SET` destinations 3, 5, 6, 7 do nothing.
+`TIME` actions 5-7 do nothing. In `PUSH/PULL`, bits 4:0 are ignored. In `IN/OUT`, bit 4 of the count is ignored
+(only bits 3:0 count; 0 means 16).
+
 ## The eight instructions
 
 **0 JMP** `[7:5] cond, [4:0] addr`.

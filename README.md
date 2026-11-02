@@ -27,6 +27,7 @@ Tools: OSS CAD Suite 2026-11-02, unpacked at `D:\Tools\oss-cad-suite`
     ./run.sh size     # rough cell count per module
     python model/compare_uart.py   # model running programs/uart_tx.asm vs uart_tx.v, every clock
     python model/test_measure.py   # TIME stopwatch measuring a UART bit time
+    python model/cosim.py 1000 400 11   # Verilog engine vs model: 1000 random programs x 400 clocks, every clock
     D:/Tools/oss-cad-suite/bin/gtkwave build/uart_tx.vcd   # look at the waveform
 
 ## Roadmap (11 weeks to 18 Jan 2027)
@@ -35,7 +36,7 @@ Tools: OSS CAD Suite 2026-11-02, unpacked at `D:\Tools\oss-cad-suite`
 |---|---|---|
 | 1 (done 2 Nov) | Paper design: block diagram + instruction set (`docs/core_design.md`) | Mark has checked it and the open questions are settled |
 | 2 (done 2 Nov) | Python model of the core: runs our firmware exactly, clock by clock | UART TX firmware runs on the model and matches `uart_tx.v` bit for bit |
-| 3-4 | Verilog core, tested against the Python model cycle by cycle | thousands of random programs agree between model and Verilog |
+| 3-4 (first pass done 2 Nov) | Verilog core, tested against the Python model cycle by cycle | thousands of random programs agree between model and Verilog |
 | 4-5 | Firmware: UART TX/RX, SPI, I2C, each with a model partner device | all three pass, plus the measuring features |
 | 6-7 | Into the Tiny Tapeout template; synthesis and layout on GitHub; fit 6x4, meet timing | clean build, timing met with margin |
 | 7-8 | FPGA on the bench, talking to real boards (ESP32/Arduino as the other end) | real UART, I2C and SPI traffic with a real device |
@@ -76,3 +77,14 @@ That's a driver change on the PC, so Mark does it himself. Then:
   bugs were both caught. TIME stopwatch measures a 'U' start bit exactly (8 to 1000 clocks, including a sender
   2.8% slow). Found on the way: the input synchroniser reads low for 2 clocks after reset; programs wait for
   idle-high first (noted in isa.md).
+- 2 Nov 2026: **Verilog engine written** (`src/engine.v`, one engine, from isa.md). Spec tightened first:
+  host/FIFO timing (everything decided from the state at the start of a clock) and every reserved encoding defined.
+  **Side-by-side test** (`model/cosim.py` + `test/tb_cosim.v`): random programs (half fully random words),
+  random configs, random pin activity and host traffic, full engine state compared every clock.
+  5 x 1000 programs x 400 clocks = **2,000,000 clocks, all identical**. Five planted Verilog bugs were all caught
+  (stopwatch capture was the weakest, so the generator now uses TIME more often: 3 -> 19 tests catching it).
+  Size: one engine = 7,072 generic gates (about 900 flip-flops, 640 of them program memory and FIFOs).
+  Two engines plus host port and filters: roughly 17K of the ~24K budget; it fits, but trimming is worth doing.
+  On the Go Board (iCE40 HX1K): 2,784 LUTs against 1,280, so **one full engine does not fit the HX1K**.
+  Options: a cut-down bench build (fewer pins/features), or the bigger FPGA Mark is looking for.
+  Next: trim (one shared pin writer instead of several 32-bit rotators, pin space 32 -> 20), then the host port.
