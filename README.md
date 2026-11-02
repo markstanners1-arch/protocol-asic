@@ -188,3 +188,9 @@ That's a driver change on the PC, so Mark does it himself. Then:
 - 2 Nov 2026 (late): **Tiny Tapeout repo** `markstanners1-arch/ttihp-protocol-emulator` (private, from the IHP
   template, CMOS5L, 6x4 tiles, 50 MHz, top `tt_um_gosforth_protocol_emu`, cocotb pin-level test). First layout
   run started (without the filter; the filter goes in after the baseline result).
+- 2 Nov 2026 (late): MachXO3 build with the filter broke the engines' pins on hardware (no UART out, nothing
+  measured) while the previous build still passed on the same bench. Cause: the free MachXO tools had put the
+  program memories into **block RAM (DP8KC)**, another unreliable mapping. Built with `-nolutram -nobram`
+  (84 % of LUTs): UART at 3 speeds and engine B's measurements pass again on hardware, and the synthesised netlist
+  passes the end-to-end test in gate-level simulation (yosys cell models). `build.sh` now uses both flags.
+  Hardware filter test: G15 pulses (ESP32 GPIO 17) never seen by any build yet; lead being checked.
