@@ -122,3 +122,6 @@ That's a driver change on the PC, so Mark does it himself. Then:
   **Whole-chip area (IHP cells):** flip-flop memory 195,069 um2; SRAM build 109,870 + 2 x 15,240 = 140,350 um2.
   That is about 26 % / 19 % of the ~750K um2 allocation.
   Not yet: input glitch filters, Tiny Tapeout template/info.yaml, layout.
+- 2 Nov 2026: **FPGA fit test for an iCE40 UP5K** (e.g. iCESugar v1.5), `fpga/up5k/up5k_top.v` (real two-way uio pins).
+  The whole chip places and routes: 4,554 of 5,280 cells (86%), 2 of 30 RAM blocks, 26 of 39 pins,
+  timing good to 15.4 MHz (passes at the iCESugar's 12 MHz; SPI host then up to 1.5 MHz).
