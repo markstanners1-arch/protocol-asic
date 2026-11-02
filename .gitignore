@@ -2,3 +2,5 @@ build/
 *.vcd
 *.vvp
 fpga/*/build/
+fpga/*/db/
+fpga/*/incremental_db/

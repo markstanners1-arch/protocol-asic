@@ -1,5 +1,5 @@
 // Whole-chip bench test: ESP32 as host for the chip (src/chip.v) running on the MachXO3L Starter Kit.
-// The kit must be running fpga/machxo3/build/chip.bit (12 MHz chip clock -> SPI at most 1.5 MHz).
+// The board must be running the chip build: fpga/machxo3/build/chip.bit (12 MHz) or fpga/cyclone4 (50 MHz); set CHIP_HZ below.
 //
 // Wiring (kit header J4 -> ESP32):
 //   J4-3  CS    -> GPIO 5        J4-5  MOSI -> GPIO 23       J4-7  MISO -> GPIO 19
@@ -20,8 +20,15 @@
 #include "programs.h"
 
 const int PIN_CS = 5, PIN_SCK = 18, PIN_MISO = 19, PIN_MOSI = 23, PIN_IRQ = 4, PIN_RX2 = 16, PIN_PULSE = 17;
-const uint32_t SPI_HZ = 1000000;           // chip clock 12 MHz / 8 = 1.5 MHz limit
+// Which board the chip is running on: the chip clock sets the SPI limit (clk/8), the baud dividers and the filter hold.
+//   MachXO3L kit (fpga/machxo3/build/chip.bit): 12 MHz.   Cyclone IV board (fpga/cyclone4): 50 MHz, the ASIC's own speed.
 const float CHIP_HZ = 12e6;
+const uint32_t SPI_HZ = (CHIP_HZ >= 50e6) ? 4000000 : 1000000;   // under clk/8 either way
+const float CHIP_MHZ = CHIP_HZ / 1e6;
+// Filter hold of about 5 us: N=15 with P chosen for the clock (hold = 16 x 2^P clocks; P=2 at 12 MHz, P=4 at 50 MHz)
+const int FILTER_P = (CHIP_HZ >= 50e6) ? 4 : 2;
+const uint16_t FILTER_ON = (FILTER_P << 4) | 0xF;
+const float FILTER_HOLD_US = 16.0 * (1 << FILTER_P) / CHIP_MHZ;
 const int PULSE_PIN = 15;                  // engine pin wired to GPIO 17: 17 = ball F15 (J4 hole 28); 15 = G15 (hole 26)
 
 // registers (docs/host_port.md)
@@ -121,8 +128,9 @@ void filterTest() {
   writeReg(ENG_B, R_INCFG, PULSE_PIN);                            // in_base = the engine pin the lead is on
   const int R_FILTER = 0x29;
   for (int on = 0; on < 2; on++) {
-    writeReg(ENG_A, R_FILTER, on ? 0x2F : 0x00);                  // on: N=15, P=2 -> 64-clock hold = 5.3 us at 12 MHz
-    check(on ? "FILTER read back (5.3 us hold)" : "FILTER read back (off)", readReg(ENG_B, R_FILTER), on ? 0x2F : 0);
+    writeReg(ENG_A, R_FILTER, on ? FILTER_ON : 0x00);
+    if (on) Serial.printf("  filter on: N=15 P=%d, hold %.1f us\n", FILTER_P, FILTER_HOLD_US);
+    check(on ? "FILTER read back (on)" : "FILTER read back (off)", readReg(ENG_B, R_FILTER), on ? FILTER_ON : 0);
     writeReg(ENG_B, R_CTRL, 0); writeReg(ENG_B, R_CTRL, 1);       // restart B, empty FIFO
     delay(2);
     for (int k = 0; k < 2; k++) {
@@ -132,9 +140,9 @@ void filterTest() {
       int lvl = (readReg(ENG_B, R_STATUS) >> 4) & 7;
       int clocks = lvl ? readReg(ENG_B, R_RX) : 0;
       Serial.printf("  filter %-3s %2d us pulse: engine B saw %s", on ? "on" : "off", us, lvl ? "it, " : "nothing");
-      if (lvl) Serial.printf("%d clocks = %.1f us", clocks, clocks / 12.0);
+      if (lvl) Serial.printf("%d clocks = %.1f us", clocks, clocks / CHIP_MHZ);
       bool expectSeen = !(on && us == 2);
-      bool ok = expectSeen ? (lvl == 1 && fabs(clocks / 12.0 - us) < 1.5 + 0.1 * us) : (lvl == 0);
+      bool ok = expectSeen ? (lvl == 1 && fabs(clocks / CHIP_MHZ - us) < 1.5 + 0.1 * us) : (lvl == 0);
       if (!ok) errors++;
       Serial.println(ok ? "   ok" : "   WRONG");
     }

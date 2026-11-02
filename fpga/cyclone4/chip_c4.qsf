@@ -1,0 +1,39 @@
+# Quartus settings for the whole chip on a Cyclone IV E EP4CE6 board.
+# DEVICE: change to the exact part on the board (EP4CE6E22C8 is the usual one on the small boards).
+set_global_assignment -name FAMILY "Cyclone IV E"
+set_global_assignment -name DEVICE EP4CE6E22C8
+set_global_assignment -name TOP_LEVEL_ENTITY chip_c4
+set_global_assignment -name PROJECT_OUTPUT_DIRECTORY build
+set_global_assignment -name VERILOG_FILE ../../src/chip.v
+set_global_assignment -name VERILOG_FILE ../../src/host_spi.v
+set_global_assignment -name VERILOG_FILE ../../src/engine.v
+set_global_assignment -name VERILOG_FILE ../../src/prog_mem.v
+set_global_assignment -name VERILOG_FILE ../../src/glitch_filter.v
+set_global_assignment -name VERILOG_FILE chip_c4.v
+set_global_assignment -name SDC_FILE chip_c4.sdc
+set_global_assignment -name STRATIX_DEVICE_IO_STANDARD "3.3-V LVTTL"
+set_global_assignment -name RESERVE_ALL_UNUSED_PINS_WEAK_PULLUP "AS INPUT TRI-STATED WITH WEAK PULL-UP"
+set_global_assignment -name CYCLONEII_RESERVE_NCEO_AFTER_CONFIGURATION "USE AS REGULAR IO"
+set_global_assignment -name ENABLE_CONFIGURATION_PINS OFF
+set_global_assignment -name ENABLE_BOOT_SEL_PIN OFF
+set_global_assignment -name RESERVE_DATA0_AFTER_CONFIGURATION "USE AS REGULAR IO"
+set_global_assignment -name RESERVE_DATA1_AFTER_CONFIGURATION "USE AS REGULAR IO"
+set_global_assignment -name RESERVE_FLASH_NCE_AFTER_CONFIGURATION "USE AS REGULAR IO"
+set_global_assignment -name RESERVE_DCLK_AFTER_CONFIGURATION "USE AS REGULAR IO"
+
+# Pin locations: TODO when the board arrives (read them off its schematic / silkscreen).
+# Until then the fitter picks pins itself, which is fine for the fit and timing check.
+# set_location_assignment PIN_23 -to clk        # 50 MHz oscillator on the common EP4CE6E22 boards
+# set_location_assignment PIN_xx -to cs_n
+# set_location_assignment PIN_xx -to sck
+# set_location_assignment PIN_xx -to mosi
+# set_location_assignment PIN_xx -to miso
+# set_location_assignment PIN_xx -to irq
+# set_location_assignment PIN_xx -to uio[0] ... uio[7]
+# set_location_assignment PIN_xx -to uo_hi[0] ... uo_hi[5]
+# set_location_assignment PIN_xx -to ui_hi[0] ... ui_hi[4]
+# set_location_assignment PIN_xx -to led[0], led[1]
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to cs_n
+set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to uio[*]
+
+set_global_assignment -name LAST_QUARTUS_VERSION "25.1std.0 Lite Edition"

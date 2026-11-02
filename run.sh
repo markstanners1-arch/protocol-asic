@@ -12,6 +12,7 @@ case "${1:-test}" in
   test)
     for tb in test/tb_*.v; do
       name=$(basename "$tb" .v)
+      case $name in tb_chip|tb_cosim|tb_filter|tb_uart_dump) continue;; esac   # these have their own drivers (see README)
       iverilog -g2012 -Wall -o "build/$name.vvp" src/*.v "$tb"
       (cd build && vvp -n "$name.vvp")
     done

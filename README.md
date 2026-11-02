@@ -200,3 +200,26 @@ That's a driver change on the PC, so Mark does it himself. Then:
   glitch vanished, the pulse still measured 21.0 us. **Whole hardware test PASS, 0 problems.**
   On the way: the G15 lead was in G16, then F15 (a raw pin-level diagnostic, `programs/read_pins.asm`, showed
   exactly which pin it was on); and the ESP32's Serial2 had claimed GPIO 17 as its default TX pin (sketch fixed).
+- 2 Nov 2026 (late): **Cyclone IV build ready** (`fpga/cyclone4/`, Quartus Prime Lite 25.1 from the command line,
+  `bash fpga/cyclone4/build.sh`, then `load` for the USB Blaster; JTAG into SRAM only). The same `src/chip.v` fits an
+  EP4CE6E22C8 at 4,496 of 6,272 logic elements (72 %), and Quartus puts both program memories into M9K block RAM
+  (2 of 30), which the free MachXO tools could not do reliably. Timing at 50 MHz, the ASIC's own clock: Fmax 53.9 MHz
+  on the slowest grade at 85 C, 1.4 ns slack. The worst path is program memory read -> instruction decode -> shared
+  pin writer -> output register; yosys's longest-path count on the IHP netlist points at the same chain (52 generic
+  gate levels through the TIME result and the pin writer's rotate), so that is the path to read first in the layout
+  timing. Pin locations are still TODO in `chip_c4.qsf` (board arrives 3 Nov). `esp32/chip_test` now takes the chip
+  clock from one setting (`CHIP_HZ`: 12 MHz kit or 50 MHz Cyclone), deriving the SPI speed and the filter hold from it.
+- 2 Nov 2026 (late): **I2C master and SPI master programs, each proven against a model partner device.**
+  Both use the same trick: the host sends one 16-bit command word per action whose top 5 bits are the routine's
+  address (from the assembler's labels), and the program jumps there with `out pc, 5`, so START, send, receive,
+  STOP (I2C) or select, transfer, deselect (SPI) each cost the host one word and the program stays small (30 and 14
+  words). `programs/i2c_master.asm`: SDA open drain through pin directions, SCL on side-set, 10 ticks per bit with
+  every SCL high and low at least 5 ticks (the standard's 4.7/4.0 us at 100 kHz hold); reports every ACK bit.
+  `model/i2c_slave.py` is a register-pointer slave (like most sensors and EEPROMs); `model/test_i2c.py` writes 4 bytes,
+  reads them back with a repeated START, addresses a missing device (NAK reported), and checks every SCL high/low
+  time, at three clock dividers: PASS. Two planted bugs (data bits not inverted; ACK sampled at the wrong edge) both
+  caught. `programs/spi_master.asm` (mode 0, MSB first, 6 ticks per bit) with `model/spi_slave.py` (command byte =
+  read/write + address, then data) and `model/test_spi.py`: PASS at three dividers; planted bugs (MISO sampled on the
+  wrong edge; CS driven before its idle level was set, a real slip the test found) both caught. The labels are exported
+  to `esp32/chip_test/programs.h` for the bench. Not yet: the ESP32 as an I2C/SPI slave on the bench, a real I2C part,
+  and engine B watching the bus (sniffer programs: the measuring headline).
