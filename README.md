@@ -256,3 +256,15 @@ That's a driver change on the PC, so Mark does it himself. Then:
   watching, the **ESP32 as the I2C slave** at 0x50 (Wire slave mode; it stretches SCL in its interrupt handler, so
   this is the stretching test on real wires). Needs two more leads, J4-10 (M16) -> GPIO 22 (SCL) and J4-13 (L15) ->
   GPIO 21 (SDA), plus 4.7 k pull-ups to 3.3 V. Compiles; **not yet run** (leads not fitted).
+- 2 Nov 2026 (late): **FIRST LAYOUT RESULT (Tiny Tapeout flow, IHP SG13 CMOS5L, 6x4 tiles), from the v0.1 engine with the
+  filter, commit 4017063 of the TT repo.** The gds job completed and published the GDS; the run shows as failed only
+  because a follow-on job (precheck / gate-level test / viewer) failed, still to be read. Numbers (`docs/layout/`):
+  - **Fits easily**: 19,765 standard cells, 302,319 um2, **33.5 % of the 902K um2 core** (die 1289 x 711 um). Of that,
+    2,043 flip-flops (100K um2) and 3,155 timing-repair buffers (42K um2, 2,107 of them hold buffers).
+  - **Timing met at 50 MHz at all three corners** (fast -40 C, typical, slow 125 C): setup and hold slack 0 ns worst
+    negative, total negative 0. Clock skew about 0.4 ns.
+  - **Clean**: DRC 0, LVS 0 differences, antenna 0 violating nets, power grid 0, detailed routing converged (0 DRC
+    errors after 8 iterations). Warnings only: 147 nets over the max-fanout limit (the program-write data and reset
+    fan out to every flop; the resizer buffered them and timing passes) and 9 slew violations at the slow corner.
+  - Synthesis in the flow: 16,184 cells, 253K um2 (our local yosys estimate was 202K: different ABC script).
+  So: there is room for the v0.2 engine, the SRAM build, and more. The v0.2 layout run starts when the TT repo is pushed.
