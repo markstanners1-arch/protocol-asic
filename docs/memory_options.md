@@ -36,7 +36,9 @@ roughly a third of the allocation. It fits either way.
 - **Layout**: the block is 236.8 um wide, wider than one tile (~202 um), so it spans two tile columns.
 - **Check needed**: that the 64 x 16 block is accepted on the CMOS5L shuttle (it was generated in July 2026).
 
-## Lean
+## Decision (2 Nov 2026, Mark): flip-flops for now
+
+Revisit at the layout stage (weeks 6-7). The reasoning, as leaned:
 
 Keep flip-flops for now: simpler, already proven on 4M random clocks, and the chip fits with room to spare.
 Switch to SRAM if the layout stage (roadmap weeks 6-7) shows area or routing getting tight, or if a
