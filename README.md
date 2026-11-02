@@ -140,5 +140,5 @@ That's a driver change on the PC, so Mark does it himself. Then:
   simulation, the whole-chip test passes both ways, and the original bug planted back is caught by the late host.
   **Bench after the fix, two runs: 0 errors in 15,372 checks from 0.25 to 4 MHz** (spec 3.1 MHz, so ~30 % margin);
   5-6 MHz fail by exactly one bit late (beyond the board's speed, as expected).
-  Bench notes: the ESP32 (CH340 board) needs manual download mode (hold BOOT, tap EN, release) and
+  Bench notes: the ESP32 (CH340 board) needed manual download mode (fixed later with a capacitor EN-GND: uploads now hands-free) and
   `esp32/upload_noreset.ps1`; moving the Go Board to another USB socket brings back the FTDI driver (re-run Zadig).
