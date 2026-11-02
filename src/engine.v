@@ -88,8 +88,16 @@ module engine (
     endfunction
 
     // ------------------------------------------------------------------ storage
-    reg [15:0] imem [0:31];
-    always @(posedge clk) if (imem_we) imem[imem_addr] <= imem_wdata;
+    // Program memory reads on the clock (SRAM-style, see docs/isa.md): every clock it is given the
+    // address of the instruction needed next (n_pc), so that word is ready for the next step.
+    // While in reset it reads `start`. Programs are written only while the engine is held in reset.
+    wire [15:0] imem_rdata;
+    reg  [4:0]  n_pc;          // next program counter (from the logic below)
+    wire [4:0]  imem_raddr = !rst_n ? cfg_start : n_pc;
+    prog_mem imem (
+        .clk(clk), .we(imem_we), .re(1'b1),
+        .addr(imem_we ? imem_addr : imem_raddr),
+        .wdata(imem_wdata), .rdata(imem_rdata));
 
     reg [31:0] sync1, sync2;        // 2 flip-flop synchroniser
     reg [15:0] div;                 // clock divider
@@ -134,7 +142,7 @@ module engine (
     reg        tx_pop_eng, rx_push_eng;
     reg [15:0] rx_push_data;
     // next state
-    reg [4:0]  n_pc, n_osr_count, n_isr_count, n_delay;
+    reg [4:0]  n_osr_count, n_isr_count, n_delay;
     reg [15:0] n_x, n_y, n_osr, n_isr, n_sw;
     reg        n_sw_run;
     reg [31:0] n_out_val, n_out_dir;
@@ -148,7 +156,7 @@ module engine (
         n_delay = delay; n_sw = sw; n_sw_run = sw_run;
         n_out_val = out_val; n_out_dir = out_dir;
         tx_pop_eng = 0; rx_push_eng = 0; rx_push_data = 0;
-        instr = imem[pc];
+        instr = imem_rdata;     // the word at pc, read on the last clock
         op = instr[15:13]; mid = instr[12:8]; a = instr[7:0];
         dbits = 3'd5 - {1'b0, cfg_side_count} - {2'b0, cfg_side_opt};
         dly = mid & ((5'd1 << dbits) - 5'd1);

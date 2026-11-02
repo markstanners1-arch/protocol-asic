@@ -44,3 +44,19 @@ Keep flip-flops for now: simpler, already proven on 4M random clocks, and the ch
 Switch to SRAM if the layout stage (roadmap weeks 6-7) shows area or routing getting tight, or if a
 bigger program memory (e.g. 64 words per engine) becomes worth having. The 64 x 16 block would give each
 engine 64 words for less area than today's 32.
+
+## Update, same day: the engine is now SRAM-ready (Mark: "start there now rather than find changing one thing creates a host of issues")
+
+The engine fetches through `src/prog_mem.v`, a one-port memory that reads on the clock, exactly like the IHP block.
+Two builds, one switch (`+define+USE_SRAM`):
+
+| Build | Engine logic | Memory | Total per engine |
+|---|---|---|---|
+| Flip-flops behaving like SRAM (default) | | in the logic | **98,351 um2** |
+| IHP `RM_IHPSG13_1P_64x16_c2` | 56,123 um2 | 15,240 um2 | **71,363 um2** |
+
+So SRAM saves about **27,000 um2 per engine, ~54,000 for the chip** (more than the earlier estimate, because the
+flip-flop memory also needs its own read selector). Both builds match the Python model on 1.2M random clocks
+each, using IHP's own behavioural model for the SRAM, and a planted fetch-timing bug (reading the current
+instead of the next address) was caught in both. The host port can now be built once, on SRAM rules.
+Still to check before layout: that this block is accepted on the CMOS5L shuttle.

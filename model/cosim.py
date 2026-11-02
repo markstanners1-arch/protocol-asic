@@ -88,8 +88,15 @@ def run_verilog(tests):
     with open(os.path.join(BUILD, "cosim_in.hex"), "w") as f:
         f.write("\n".join(f"{w:08x}" for w in words) + "\n")
     vvp = os.path.join(BUILD, "tb_cosim.vvp")
-    subprocess.run([os.path.join(SUITE, "bin", "iverilog.exe"), "-g2012", "-o", vvp,
-                    os.environ.get("ENGINE_V", os.path.join(ROOT, "src", "engine.v")), os.path.join(ROOT, "test", "tb_cosim.v")], check=True, env=ENV)
+    srcs = [os.environ.get("ENGINE_V", os.path.join(ROOT, "src", "engine.v")),
+            os.path.join(ROOT, "src", "prog_mem.v"), os.path.join(ROOT, "test", "tb_cosim.v")]
+    flags = []
+    if os.environ.get("USE_SRAM"):          # the real IHP SRAM block, with IHP's own simulation model
+        flags = ["-DUSE_SRAM", "-DFUNCTIONAL"]
+        srcs += [os.path.join(ROOT, "pdk", "RM_IHPSG13_1P_64x16_c2.v"),
+                 os.path.join(ROOT, "pdk", "RM_IHPSG13_1P_core_behavioral.v")]
+    subprocess.run([os.path.join(SUITE, "bin", "iverilog.exe"), "-g2012", *flags, "-o", vvp, *srcs],
+                   check=True, env=ENV)
     subprocess.run([os.path.join(SUITE, "bin", "vvp.exe"), "-n", vvp], check=True, cwd=BUILD, env=ENV,
                    stdout=subprocess.DEVNULL)
     out, cur = [], None
@@ -139,7 +146,8 @@ def main():
     total = ntests * ncycles
     print(f"{ntests} random programs x {ncycles} clocks = {total:,} clocks compared "
           f"(Verilog {t1 - t0:.0f} s, model {time.time() - t1:.0f} s): "
-          + ("PASS, every clock identical" if fails == 0 else f"FAIL in {fails} tests"))
+          + ("PASS, every clock identical" if fails == 0 else f"FAIL in {fails} tests")
+          + ("  [IHP SRAM]" if os.environ.get("USE_SRAM") else "  [flip-flop memory]"))
     return 1 if fails else 0
 
 

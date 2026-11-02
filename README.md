@@ -103,3 +103,8 @@ That's a driver change on the PC, so Mark does it himself. Then:
   of one engine: 99,091 um2, of which the flip-flop program memory is ~34,000. SRAM would save ~38K um2 chip-wide
   (~5 %) but needs a clocked-read redesign. Full chip estimate ~230K um2 of ~750K. Details and lean in
   `docs/memory_options.md`. (Earlier "24K cells" budgets were generic gate counts; um2 is the real measure now.)
+- 2 Nov 2026: **engine made SRAM-ready** (Mark's call: settle the memory's behaviour before building on it).
+  Program memory now reads on the clock (`src/prog_mem.v`), like IHP's SRAM; programs load only while stopped.
+  Two builds, one switch: flip-flops (98,351 um2 per engine) or IHP's 64x16 SRAM block (71,363 um2 incl. the
+  block). Both identical to the model on 1.2M random clocks (`USE_SRAM=1 python model/cosim.py` for the SRAM build);
+  a planted fetch-timing bug caught in both. iCE40 unchanged: 2,246 LUTs.

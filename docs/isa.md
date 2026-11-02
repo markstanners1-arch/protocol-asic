@@ -62,6 +62,17 @@ side-set value, then the delay in whatever is left. E.g. `side_opt = 1, side_cou
   The synchroniser resets to 0, so for the first 2 clocks after reset every pin reads low.
   Programs that look for a falling edge should first `wait 1` for the idle level (found by `model/test_measure.py`).
 
+## Program memory (SRAM-ready, decided 2 Nov 2026)
+
+The program memory behaves like IHP's SRAM block whichever cells build it: one port, reads on the clock.
+- Every clock, the engine presents the address of the instruction it will need next (the next `pc`);
+  the word arrives just after the clock edge, in time for the next step. While held in reset it reads `start`.
+  So instruction timing is exactly as described below: the clocked read is invisible to programs.
+- **Programs are written only while the engine is stopped (held in reset)**, and the engine must stay
+  stopped for at least one clock after the last write, so the first instruction can be read.
+- Built either from flip-flops (`prog_mem.v`, default) or from IHP's `RM_IHPSG13_1P_64x16_c2`
+  (`+define+USE_SRAM`; uses 32 of its 64 words). Both are checked against the model.
+
 ## Host and FIFO timing
 
 Within one system clock, everything is decided from the state at the **start** of that clock:
