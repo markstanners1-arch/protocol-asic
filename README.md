@@ -165,3 +165,9 @@ That's a driver change on the PC, so Mark does it himself. Then:
   (LED changes), but the kit's USB serial link is **not connected from the factory**: the schematic marks the
   FT2232H channel B to FPGA A11/C11 path 'FOR FUTURE RS232 FUNCTION' through DNI 0-ohm resistors.
   Its I/O headers are unpopulated (holes only), so bench wiring needs headers soldered.
+- 2 Nov 2026: **whole chip ready for the MachXO3L kit** (`fpga/machxo3/chip_mxo3.v` + `chip_mxo3.lpf`, header J4).
+  68% of LUTs, 30 MHz (runs at the kit's 12 MHz). End-to-end chip test rerun through this exact board wrapper
+  (`fpga/machxo3/tb_chip_mxo3.v`): PASS with early and late hosts (first attempt failed only because the test
+  talked during the wrapper's 255-clock power-on reset). ESP32 whole-chip sketch `esp32/chip_test` (programs
+  generated from the assembler by `esp32/make_programs_h.py`): loads both engines, A sends text as UART at
+  115200/57600/19200, the ESP32 reads it off the pin, B measures A's bit time. Waiting on J4 headers.
