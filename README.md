@@ -47,7 +47,9 @@ Other work comes first; this fills the gaps.
 - 2 Nov 2026: bench board found: **Nandland Go Board** (iCE40 HX1K VQ100, 25 MHz, 1280 logic cells,
   16 block RAMs, USB serial on the same lead). `fpga/go_board/`: hello test sends
   "Hello from Gosforth Skies" at 115200 once a second (hold switch 1 for nonstop). Simulated: the decoded
-  line is correct. Built: 149/1280 cells (11%), timing good to 124 MHz. Not yet flashed.
+  line is correct. Built: 149/1280 cells (11%), timing good to 124 MHz.
+  **Flashed and working on the real board:** 5 s on COM5 = 5 clean lines, 135 characters, no errors.
+  (Scripts: `flash.ps1`, `listen.ps1`, `check_driver.ps1`; run them from an ordinary PowerShell window.)
   Note: the whole two-engine chip won't fit a 1K part; the board tests one engine at a time.
 
 ## Flashing the Go Board (first time only)
