@@ -125,3 +125,8 @@ That's a driver change on the PC, so Mark does it himself. Then:
 - 2 Nov 2026: **FPGA fit test for an iCE40 UP5K** (e.g. iCESugar v1.5), `fpga/up5k/up5k_top.v` (real two-way uio pins).
   The whole chip places and routes: 4,554 of 5,280 cells (86%), 2 of 30 RAM blocks, 26 of 39 pins,
   timing good to 15.4 MHz (passes at the iCESugar's 12 MHz; SPI host then up to 1.5 MHz).
+- 2 Nov 2026: **segment 1 bench test ready** (host port on real hardware). `fpga/go_board/spi_test_top.v` wraps the
+  unchanged `src/host_spi.v` with test registers, a loop-back FIFO, an ID register and a write counter;
+  `esp32/spi_host_test` (compiles, ESP32 core 3.2.0) hammers it at 0.25-10 MHz. Simulation predicts it works
+  to ~4.2 MHz and fails by 6.25 MHz (design spec: 3.1 MHz on the 25 MHz board). Wiring: PMOD 1 CS-GPIO5,
+  2 MOSI-GPIO23, 3 MISO-GPIO19, 4 SCK-GPIO18, 5 GND-GND. Not yet run on the bench.
