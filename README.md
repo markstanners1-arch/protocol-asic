@@ -180,3 +180,11 @@ That's a driver change on the PC, so Mark does it himself. Then:
   host port fine), which pointed inside the big build: the free MachXO tools' **LUT RAM** mapping (setting registers,
   FIFOs, program memory) is broken on hardware. Rebuilt with `-nolutram`: passes. `fpga/machxo3/build.sh` now always
   uses -nolutram. The Go Board SPI test also passes on the kit (0.25-2 MHz, 0 errors).
+- 2 Nov 2026 (late): **glitch filter wired into the chip.** Every engine input (pins 0-7, 15-19) now passes a 2-FF
+  synchroniser and the filter; chip-wide host register 0x29 FILTER ([3:0] N, [7:4] P). New program
+  `programs/measure_pulse.asm` times low pulses. Whole-chip test (early and late hosts): filter off measures a
+  30-clock glitch and a 200-clock pulse exactly; with a 64-clock hold the glitch vanishes and the pulse still
+  measures 200. Planted bypass caught. MachXO3 build includes it.
+- 2 Nov 2026 (late): **Tiny Tapeout repo** `markstanners1-arch/ttihp-protocol-emulator` (private, from the IHP
+  template, CMOS5L, 6x4 tiles, 50 MHz, top `tt_um_gosforth_protocol_emu`, cocotb pin-level test). First layout
+  run started (without the filter; the filter goes in after the baseline result).

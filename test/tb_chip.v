@@ -19,7 +19,7 @@ module tb_chip;
     localparam HALF = 8;               // SCK half period in chip clocks: SCK = clk/16
     integer LATE = 0;                  // +late=1: sample MISO at the falling edge, like the ESP32
     integer errors = 0;
-    reg [15:0] init [0:169];
+    reg [15:0] init [0:201];
 
     task spi_bit(input b, output r);
         begin
@@ -159,6 +159,34 @@ module tb_chip;
         check("uio[2] after stopping A (B high again)", {15'd0, uio_oe[2] & uio_out[2]}, 1);
         write_reg(1, 6'h20, 0); repeat (50) @(posedge clk);
         check("uio[2] after stopping both (released)", {15'd0, uio_oe[2]}, 0);
+
+        // glitch filter: engine B times low pulses on engine pin 15 (ui_in[3]); a 30-clock glitch and a 200-clock pulse
+        write_reg(0, 6'h20, 0); write_reg(1, 6'h20, 0);
+        begin : filt
+            integer j; reg [15:0] d;
+            spi_begin({1'b0, 1'b1, 6'h00});
+            for (j = 0; j < 32; j = j + 1) spi_word(init[170 + j], d);
+            spi_end;
+            spi_begin({1'b0, 1'b1, 6'h21});                    // clkdiv 0, wrap 0..5, outcfg 0, misc 0, in_base 15
+            spi_word(16'd0, d); spi_word(16'd0 | (16'd0 << 5) | (16'd5 << 10), d); spi_word(16'd0, d); spi_word(16'd0, d); spi_word(16'd15, d);
+            spi_end;
+        end
+        ui_hi[0] = 1;
+        write_reg(0, 6'h29, 16'h0000);                          // filter: shortest
+        read_reg(1, 6'h29, w); check("FILTER read back (off)", w, 0);
+        write_reg(1, 6'h20, 1); repeat (50) @(posedge clk);
+        ui_hi[0] = 0; repeat (30) @(posedge clk); ui_hi[0] = 1; repeat (100) @(posedge clk);
+        read_reg(1, 6'h27, w); check("filter off: 30-clock glitch measured as", w, 30);
+        ui_hi[0] = 0; repeat (200) @(posedge clk); ui_hi[0] = 1; repeat (100) @(posedge clk);
+        read_reg(1, 6'h27, w); check("filter off: 200-clock pulse measured as", w, 200);
+        write_reg(1, 6'h29, 16'h002F);                          // N = 15, P = 2: hold 16 ticks of 4 clocks = 64 clocks
+        read_reg(0, 6'h29, w); check("FILTER read back (64-clock hold)", w, 16'h2F);
+        ui_hi[0] = 0; repeat (30) @(posedge clk); ui_hi[0] = 1; repeat (300) @(posedge clk);
+        read_reg(1, 6'h28, st); check("filter on: 30-clock glitch -> results waiting", st[6:4], 0);
+        ui_hi[0] = 0; repeat (200) @(posedge clk); ui_hi[0] = 1; repeat (300) @(posedge clk);
+        read_reg(1, 6'h27, w);
+        if (w >= 196 && w <= 204) $display("ok:   filter on: 200-clock pulse measured as = %0d (within one prescale step)", w);
+        else begin $display("FAIL: filter on: 200-clock pulse measured as %0d", w); errors = errors + 1; end
 
         if (errors == 0) $display("PASS: whole chip, end to end through the SPI host port");
         else $display("FAIL: %0d errors", errors);

@@ -23,6 +23,7 @@ p3 = assemble(open(os.path.join(ROOT, "programs", "push_789.asm")).read())
 words += (p3.words + [0] * 32)[:32]                                                   # B's second program
 for name in ("drive_low", "drive_high"):                                              # pin-conflict test
     words += (assemble(open(os.path.join(ROOT, "programs", name + ".asm")).read()).words + [0] * 32)[:32]
+words += (assemble(open(os.path.join(ROOT, "programs", "measure_pulse.asm")).read()).words + [0] * 32)[:32]   # filter test
 os.makedirs(os.path.join(ROOT, "test", "build"), exist_ok=True)
 open(os.path.join(ROOT, "test", "build", "chip_init.hex"), "w").write("\n".join(f"{w:04x}" for w in words) + "\n")
 print(f"programs: A {len(ua.words)} words, B {len(mb.words)} words")

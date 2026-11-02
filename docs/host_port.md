@@ -45,6 +45,7 @@ while the host clocks out anything (zeros).
 | 0x26 | TXFIFO | W | push a word to the engine (dropped if the FIFO is full: check STATUS) |
 | 0x27 | RXFIFO | R | pop a word from the engine (reads 0 if empty) |
 | 0x28 | STATUS | R | [2:0] TX level, [6:4] RX level, [8] running, [13:9] pc |
+| 0x29 | FILTER | R/W | **chip-wide** (either engine-select bit reaches it): input glitch filter, [3:0] N, [7:4] P; a new input level must hold for N+1 ticks of 2^P clocks (docs/input_filter.md). 0 = shortest (about 1 clock) |
 
 Unlisted registers read 0 and ignore writes. All settings reset to 0 (engines stopped) when the chip resets.
 Change settings while an engine is stopped; they are applied when RUN goes to 1.
@@ -61,3 +62,5 @@ Each engine sees 32 pin numbers. On this chip:
 | others | none | read as 0 |
 
 If both engines drive the same pin, engine A wins. Both engines can read every input.
+Every input (engine pins 0-7 and 15-19) passes through a 2 flip-flop synchroniser and the glitch filter
+before the engines see it, which adds a few clocks of delay (the same on rising and falling edges).
