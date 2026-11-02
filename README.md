@@ -99,3 +99,7 @@ That's a driver change on the PC, so Mark does it himself. Then:
   Re-proved: 2,000,000 more random clocks identical to the model; three bugs planted in the new shared parts all caught.
   Further options (not done): pin space 32 -> 24 or 20 (a spec change), program memory in latches or SRAM,
   or a parameterised narrow bench build for the Go Board.
+- 2 Nov 2026: **SRAM question** (Jane Street hint). IHP has a 64 x 16 SRAM block (15,240 um2). Real IHP-cell area
+  of one engine: 99,091 um2, of which the flip-flop program memory is ~34,000. SRAM would save ~38K um2 chip-wide
+  (~5 %) but needs a clocked-read redesign. Full chip estimate ~230K um2 of ~750K. Details and lean in
+  `docs/memory_options.md`. (Earlier "24K cells" budgets were generic gate counts; um2 is the real measure now.)
