@@ -5,6 +5,7 @@
 // Baud rate is set at run time: one bit lasts (divisor + 1) clock cycles.
 // e.g. a 10 MHz clock and 115200 baud -> divisor = 10e6/115200 - 1 = 86.
 
+`timescale 1ns/1ps
 `default_nettype none
 
 module uart_tx (

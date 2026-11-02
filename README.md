@@ -17,11 +17,15 @@ Our entry for Jane Street's protocol emulator ASIC competition
 
 ## Run the tests
 
-Needs Icarus Verilog (from the OSS CAD Suite).
+Tools: OSS CAD Suite 2026-11-02, unpacked at `D:\Tools\oss-cad-suite`
+(Icarus Verilog, Verilator, Yosys, nextpnr, GTKWave). From Git Bash:
 
-    iverilog -g2012 -o build/uart_tx.vvp src/uart_tx.v test/tb_uart_tx.v
-    vvp build/uart_tx.vvp
+    ./run.sh test     # simulate every test bench, prints PASS/FAIL
+    ./run.sh size     # rough cell count per module
+    D:/Tools/oss-cad-suite/bin/gtkwave build/uart_tx.vcd   # look at the waveform
 
 ## Progress
 
 - 2 Nov 2026: fixed-function UART transmitter + self-checking test bench (the known-good reference).
+  PASS on 46 bytes at two baud rates. Checked the test can fail: a broken stop bit and a
+  bit time one clock short were both caught. Size: 123 cells (31 flip-flops), about 0.5% of the budget.
