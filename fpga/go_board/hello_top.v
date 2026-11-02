@@ -1,11 +1,11 @@
 // First bench test on the Nandland Go Board.
 // Sends "Hello from Gosforth Skies" over the board's USB serial port once a second
-// (115200 baud, 8N1), using our uart_tx.v unchanged. LED 1 toggles with each message.
+// (115200 baud, 8N1), using our uart_tx.v unchanged. Defaults are for 25 MHz; other boards set the parameters. LED 1 toggles with each message.
 // Hold switch 1 to send continuously (a stress test: back-to-back bytes, no gaps).
 
 `default_nettype none
 
-module hello_top (
+module hello_top #(parameter [15:0] DIVISOR = 16'd216, parameter [24:0] SECOND = 25'd24_999_999) (
     input  wire       i_clk,     // 25 MHz
     input  wire [3:0] i_sw,      // push buttons, high when pressed
     output wire [3:0] o_led,
@@ -36,7 +36,7 @@ module hello_top (
     reg         sending = 1'b0;
     reg         led = 1'b0;
 
-    uart_tx tx (.clk(i_clk), .rst_n(rst_n), .divisor(16'd216), .data(msg[idx]),
+    uart_tx tx (.clk(i_clk), .rst_n(rst_n), .divisor(DIVISOR), .data(msg[idx]),
                 .start(start), .tx(o_uart_tx), .busy(busy));
 
     always @(posedge i_clk) begin
@@ -44,7 +44,7 @@ module hello_top (
         if (!rst_n) begin
             tick <= 0; sending <= 0; idx <= 0;
         end else begin
-            tick <= (tick == 25'd24_999_999) ? 25'd0 : tick + 1'b1;
+            tick <= (tick == SECOND) ? 25'd0 : tick + 1'b1;
             if (!sending && (tick == 0 || i_sw[0])) begin
                 sending <= 1'b1; idx <= 0; led <= ~led;
             end else if (sending && !busy && !start) begin

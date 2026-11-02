@@ -160,3 +160,8 @@ That's a driver change on the PC, so Mark does it himself. Then:
     to see a real bouncer.
 - 2 Nov 2026: fit test for a Lattice MachXO3LF-6900 (if Mark's missing board is the MachXO3 kit): free tools
   (`synth_lattice -family xo3`, `nextpnr-machxo2`), whole chip routes at 68% of LUTs, 9% FFs, 30 MHz.
+- 2 Nov 2026: **MachXO3L Starter Kit found and working with the free tools.** `openFPGALoader -b machXO3SK <bit>`
+  loads the FPGA's volatile SRAM (never the one-time NVCM). IDCODE LCMXO3L-6900C. Hello test (`fpga/machxo3/`) loads and runs
+  (LED changes), but the kit's USB serial link is **not connected from the factory**: the schematic marks the
+  FT2232H channel B to FPGA A11/C11 path 'FOR FUTURE RS232 FUNCTION' through DNI 0-ohm resistors.
+  Its I/O headers are unpopulated (holes only), so bench wiring needs headers soldered.

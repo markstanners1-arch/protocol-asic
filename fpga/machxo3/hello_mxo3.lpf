@@ -1,0 +1,15 @@
+# MachXO3L Starter Kit (LCMXO3L-6900C-5BG256C). Pins agreed by narajung88/machxo3-logic-analyzer and
+# PaulNation/lattice_linux_command_line_automation.
+LOCATE COMP "clk" SITE "C8";
+IOBUF PORT "clk" IO_TYPE=LVCMOS33;
+FREQUENCY PORT "clk" 12 MHZ;
+LOCATE COMP "uart_tx" SITE "C11";
+IOBUF PORT "uart_tx" IO_TYPE=LVCMOS33;
+LOCATE COMP "led[0]" SITE "P16";
+IOBUF PORT "led[0]" IO_TYPE=LVCMOS33;
+LOCATE COMP "led[1]" SITE "N15";
+IOBUF PORT "led[1]" IO_TYPE=LVCMOS33;
+LOCATE COMP "sw[0]" SITE "P2";
+IOBUF PORT "sw[0]" IO_TYPE=LVCMOS33 PULLMODE=DOWN;
+LOCATE COMP "sw[1]" SITE "P1";
+IOBUF PORT "sw[1]" IO_TYPE=LVCMOS33 PULLMODE=DOWN;
