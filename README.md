@@ -88,3 +88,6 @@ That's a driver change on the PC, so Mark does it himself. Then:
   On the Go Board (iCE40 HX1K): 2,784 LUTs against 1,280, so **one full engine does not fit the HX1K**.
   Options: a cut-down bench build (fewer pins/features), or the bigger FPGA Mark is looking for.
   Next: trim (one shared pin writer instead of several 32-bit rotators, pin space 32 -> 20), then the host port.
+- 2 Nov 2026: Ada-style range checks added to the model (Mark's suggestion): after every clock each register
+  is checked against its declared range (e.g. counts 0..16, words 0..65535) and the model stops dead if one strays.
+  All model tests plus 1.2M more random clocks pass with the checks on; no register ever left its range.

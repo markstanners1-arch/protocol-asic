@@ -43,6 +43,21 @@ class Config:
                    side_count=prog.side_count, side_opt=prog.side_opt, **kw)
 
 
+# Ada-style range declarations: every register and its legal range.
+# After every clock, check_ranges() stops the model dead if anything has strayed
+# (the Python equivalent of Ada's "type Word is mod 2**16" and "range 0 .. 16").
+RANGES = {
+    "pc": (0, 31), "x": (0, M16), "y": (0, M16), "osr": (0, M16), "isr": (0, M16),
+    "osr_count": (0, 16), "isr_count": (0, 16), "delay": (0, 31), "sw": (0, M16),
+    "div": (0, M16), "out_val": (0, M32), "out_dir": (0, M32), "sync1": (0, M32), "sync2": (0, M32),
+}
+CHECK_RANGES = True
+
+
+class RangeError(Exception):
+    pass
+
+
 def _bitrev16(v):
     return int(f"{v & M16:016b}"[::-1], 2)
 
@@ -124,7 +139,20 @@ class Engine:
             self.rxf.popleft()
         # synchroniser: the engine sees pins as they were 2 clocks ago
         self.sync2, self.sync1 = self.sync1, pins_in & M32
+        if CHECK_RANGES:
+            self.check_ranges()
         return popped
+
+    def check_ranges(self):
+        for name, (lo, hi) in RANGES.items():
+            v = getattr(self, name)
+            if not (isinstance(v, int) and lo <= v <= hi):
+                raise RangeError(f"{name} = {v!r} is outside {lo} .. {hi} (pc {self.pc}, tick {self.ticks})")
+        if not (len(self.txf) <= FIFO_DEPTH and len(self.rxf) <= FIFO_DEPTH):
+            raise RangeError(f"FIFO over depth: tx {len(self.txf)} rx {len(self.rxf)}")
+        for w in list(self.txf) + list(self.rxf):
+            if not 0 <= w <= M16:
+                raise RangeError(f"FIFO word {w!r} outside 0 .. 65535")
 
     def _tick(self):
         self.ticks += 1
