@@ -171,3 +171,12 @@ That's a driver change on the PC, so Mark does it himself. Then:
   talked during the wrapper's 255-clock power-on reset). ESP32 whole-chip sketch `esp32/chip_test` (programs
   generated from the assembler by `esp32/make_programs_h.py`): loads both engines, A sends text as UART at
   115200/57600/19200, the ESP32 reads it off the pin, B measures A's bit time. Waiting on J4 headers.
+- 2 Nov 2026 (evening): **THE WHOLE CHIP RUNS ON REAL HARDWARE.** MachXO3L kit + ESP32 host over SPI, 7 leads on J4.
+  At 115,200 / 57,600 / 19,200 baud: settings written and read back correctly; engine A sent "UHello from the chip!"
+  as real serial and the ESP32 received it exactly off the chip's pin; engine B measured engine A's bit time exactly
+  (104 / 208 / 624 chip clocks = 115,385 / 57,692 / 19,231 baud); IRQ rose with the result and cleared when read.
+  **PASS, 0 problems.** Getting there: (1) one lead (M14, MOSI) not making contact; (2) the first build read every
+  setting back as 0. Narrowed down by running the proven Go Board SPI test on the kit (0 errors to 2 MHz: pins and
+  host port fine), which pointed inside the big build: the free MachXO tools' **LUT RAM** mapping (setting registers,
+  FIFOs, program memory) is broken on hardware. Rebuilt with `-nolutram`: passes. `fpga/machxo3/build.sh` now always
+  uses -nolutram. The Go Board SPI test also passes on the kit (0.25-2 MHz, 0 errors).
