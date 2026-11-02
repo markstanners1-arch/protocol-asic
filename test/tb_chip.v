@@ -1,6 +1,7 @@
 // End-to-end test of the whole chip, driven only through the SPI host port (as a real host would).
 // Engine A: UART transmitter on engine pin 0 (uio[0]), 40 clocks per bit.
 // Engine B: measures the bit time of the first 'U' on the same pin, pushes it to its RX FIFO.
+// Then: FIFO reads, pin conflicts, the glitch filter, and I2C (A master, B watching, a bench slave that ACKs).
 `timescale 1ns/1ps
 `default_nettype none
 module tb_chip;
@@ -10,7 +11,8 @@ module tb_chip;
     reg [4:0] ui_hi = 0;
     wire [7:0] uo_out, uio_out, uio_oe;
     // pins with pull-ups: a driven pin reads back what is driven, an undriven one reads high
-    wire [7:0] uio_in = (uio_out & uio_oe) | ~uio_oe;
+    reg sda_slave_low = 0;             // the bench's I2C slave pulling SDA (uio[1]) low for an ACK
+    wire [7:0] uio_in = ((uio_out & uio_oe) | ~uio_oe) & ~{6'd0, sda_slave_low, 1'b0};
     protocol_chip dut (.ui_in({ui_hi, mosi, sck, cs_n}), .uo_out(uo_out), .uio_in(uio_in),
                        .uio_out(uio_out), .uio_oe(uio_oe), .ena(1'b1), .clk(clk), .rst_n(rst_n));
     wire miso = uo_out[0];
@@ -19,7 +21,20 @@ module tb_chip;
     localparam HALF = 8;               // SCK half period in chip clocks: SCK = clk/16
     integer LATE = 0;                  // +late=1: sample MISO at the falling edge, like the ESP32
     integer errors = 0;
-    reg [15:0] init [0:201];
+    reg [15:0] init [0:265];
+
+    // ---- a minimal I2C slave on uio[0] (SCL) / uio[1] (SDA): after a START it ACKs every byte, until STOP
+    reg scl_q = 1, sda_q = 1, i2c_active = 0; integer i2c_bits = 0;
+    always @(posedge clk) begin
+        scl_q <= uio_in[0]; sda_q <= uio_in[1];
+        if (uio_in[0] && scl_q && sda_q && !uio_in[1]) begin i2c_active <= 1; i2c_bits <= 0; end         // START
+        if (uio_in[0] && scl_q && !sda_q && uio_in[1]) begin i2c_active <= 0; sda_slave_low <= 0; end    // STOP
+        if (i2c_active && !scl_q && uio_in[0]) i2c_bits <= i2c_bits + 1;                                 // SCL rose: a bit
+        if (i2c_active && scl_q && !uio_in[0]) begin                                                     // SCL fell
+            sda_slave_low <= (i2c_bits == 8);              // after the 8th bit: ACK, held through the 9th clock
+            if (i2c_bits == 9) i2c_bits <= 0;
+        end
+    end
 
     task spi_bit(input b, output r);
         begin
@@ -187,6 +202,41 @@ module tb_chip;
         read_reg(1, 6'h27, w);
         if (w >= 196 && w <= 204) $display("ok:   filter on: 200-clock pulse measured as = %0d (within one prescale step)", w);
         else begin $display("FAIL: filter on: 200-clock pulse measured as %0d", w); errors = errors + 1; end
+
+        // I2C: engine A is the master on uio[0] (SCL) / uio[1] (SDA), engine B watches the same two pins and
+        // reports every byte with its ACK bit; the bench slave above ACKs. Checks the bus levels, A's ACK bits, B's bytes.
+        write_reg(0, 6'h20, 0); write_reg(1, 6'h20, 0);
+        begin : i2c
+            integer j; reg [15:0] d;
+            spi_begin({1'b0, 1'b0, 6'h00});
+            for (j = 0; j < 32; j = j + 1) spi_word(init[202 + j], d);
+            spi_end;
+            spi_begin({1'b0, 1'b0, 6'h21});                    // A: clkdiv 1 (20 clocks/bit), wrap 0..29, out/in SDA,
+            spi_word(16'd1, d); spi_word(16'd29 << 10, d); spi_word(16'd1 | (16'd1 << 5), d); spi_word(16'h0502, d); spi_word(16'd1, d);
+            spi_end;                                           //    set_count 2, side_count 1, side_opt, MSB first
+            spi_begin({1'b0, 1'b1, 6'h00});
+            for (j = 0; j < 32; j = j + 1) spi_word(init[234 + j], d);
+            spi_end;
+            spi_begin({1'b0, 1'b1, 6'h21});                    // B: clkdiv 0, wrap 0..31, out_right, in_base 0, jmp_pin SDA
+            spi_word(16'd0, d); spi_word(16'd31 << 10, d); spi_word(16'd0, d); spi_word(16'h0800, d); spi_word(16'd1 << 5, d);
+            spi_end;
+        end
+        write_reg(0, 6'h29, 16'h0000);                          // filter back to its shortest (I2C edges are 20 clocks apart)
+        write_reg(1, 6'h20, 1); write_reg(0, 6'h20, 1); repeat (50) @(posedge clk);
+        check("I2C idle: SCL driven high", {14'd0, uio_oe[0], uio_out[0]}, 3);
+        check("I2C idle: SDA released", {15'd0, uio_oe[1]}, 0);
+        spi_begin({1'b0, 1'b0, 6'h26});                        // 4 command words in one burst: START, 0xA0, 0x37, STOP
+        spi_word(16'd23 << 11, w); spi_word((16'd3 << 11) | (16'hA0 << 3), w);
+        spi_word((16'd3 << 11) | (16'h37 << 3), w); spi_word(16'd26 << 11, w);
+        spi_end;
+        repeat (3000) @(posedge clk);
+        read_reg(0, 6'h28, st); check("A RX level (two ACK bits)", st[6:4], 2);
+        read_reg(0, 6'h27, w); check("A: address byte acked (0)", w, 0);
+        read_reg(0, 6'h27, w); check("A: data byte acked (0)", w, 0);
+        read_reg(1, 6'h28, st); check("B RX level (two bytes seen)", st[6:4], 2);
+        read_reg(1, 6'h27, w); check("B saw address 0xA0 + ACK", w, 16'hA0 << 1);
+        read_reg(1, 6'h27, w); check("B saw data 0x37 + ACK", w, 16'h37 << 1);
+        check("I2C idle again: SCL high, SDA released", {13'd0, uio_oe[0], uio_out[0], uio_oe[1]}, 6);
 
         if (errors == 0) $display("PASS: whole chip, end to end through the SPI host port");
         else $display("FAIL: %0d errors", errors);

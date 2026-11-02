@@ -4,7 +4,8 @@
   2. reads them back with a repeated START (START, addr+W, pointer, START, addr+R, 4 bytes, NAK, STOP)
   3. addresses a device that isn't there and checks the engine reports the NAK
 and checks every ACK bit the engine reports, the slave's log of the transaction, the bytes read back,
-and the SCL period (one bit = 10 ticks).  Run:  python model/test_i2c.py [clkdiv]
+and the SCL period (one bit = 10 ticks). Engine B runs programs/i2c_sniff.asm on the same bus and must report
+every byte with its ACK.  Run:  python model/test_i2c.py [clkdiv]
 """
 import os, sys
 HERE = os.path.dirname(os.path.abspath(__file__)); ROOT = os.path.dirname(HERE)
@@ -15,6 +16,7 @@ from i2c_slave import I2CSlave
 
 SCL, SDA = 0, 1
 prog = assemble(open(os.path.join(ROOT, "programs", "i2c_master.asm")).read())
+sniff = assemble(open(os.path.join(ROOT, "programs", "i2c_sniff.asm")).read())
 L = prog.labels
 
 
@@ -33,6 +35,8 @@ class Bus:
     """Open-drain SDA with a pull-up; SCL driven by the engine. Runs engine and slave clock by clock."""
     def __init__(self, clkdiv, slave):
         self.eng = Engine(prog, i2c_config(clkdiv))
+        self.watcher = Engine(sniff, Config.for_program(sniff, in_base=0, jmp_pin=SDA, out_right=True, in_right=False))   # engine B
+        self.seen = []                                     # what the watcher pushed: byte << 1 | ack
         self.slave = slave
         self.slave_low = False
         self.scl_rises = []
@@ -67,6 +71,10 @@ class Bus:
             if got is not None:
                 self.replies.append(got)
             self.eng.clock((scl << SCL) | (sda << SDA))
+            got = self.watcher.rx_get()
+            if got is not None:
+                self.seen.append(got)
+            self.watcher.clock((scl << SCL) | (sda << SDA))
             self.t += 1
             busy = todo or self.eng.rxf or self.eng.txf or not self.eng.stalled
             quiet = 0 if busy else quiet + 1
@@ -93,6 +101,8 @@ def main(clkdiv):
     check("slave saw START, addr+W, pointer, data, STOP", slave.events,
           [("start", None), ("addr", 0xA0), ("pointer", 3)] + [("write", b) for b in data] + [("stop", None)])
     check("slave's registers 3..6", slave.regs[3:7], data)
+    check("engine B (watcher) saw the same bytes, all acked", bus.seen, [b << 1 for b in [0xA0, 3] + data])
+    bus.seen.clear()
     # 2. read back with a repeated START
     slave.events.clear(); bus.replies.clear()
     words = [cmd_start(), cmd_send(0x50 << 1), cmd_send(3), cmd_start(), cmd_send(0x50 << 1 | 1)]
@@ -103,12 +113,15 @@ def main(clkdiv):
     check("slave saw the read sequence", slave.events,
           [("start", None), ("addr", 0xA0), ("pointer", 3), ("start", None), ("addr", 0xA1)]
           + [("read", b) for b in data] + [("nak", None), ("stop", None)])
+    check("watcher saw the read, last byte NAKed", bus.seen, [b << 1 for b in [0xA0, 3, 0xA1] + data[:-1]] + [data[-1] << 1 | 1])
+    bus.seen.clear()
     # 3. nobody home
     slave.events.clear(); bus.replies.clear()
     got = bus.run([cmd_start(), cmd_send(0x23 << 1), cmd_stop()])
     print("address 0x23 (no such device)")
     check("engine reports NAK (1)", got, [1])
     check("slave stayed quiet", slave.events, [("start", None), ("addr", 0x46), ("stop", None)])
+    check("watcher saw the NAKed address", bus.seen, [0x46 << 1 | 1])
     # SCL timing: 10 ticks per bit within a byte; every high and low at least 5 ticks (the standard's minimums)
     periods = [b - a for a, b in zip(bus.scl_rises, bus.scl_rises[1:])]
     bit = 10 * (clkdiv + 1)
@@ -121,5 +134,6 @@ def main(clkdiv):
 
 
 if __name__ == "__main__":
-    good = all(main(d) for d in ([int(sys.argv[1])] if len(sys.argv) > 1 else (0, 4, 49)))
+    # master dividers 1, 4, 49: the watcher (at divider 0) needs an SCL period of at least 20 of its ticks
+    good = all(main(d) for d in ([int(sys.argv[1])] if len(sys.argv) > 1 else (1, 4, 49)))
     sys.exit(0 if good else 1)

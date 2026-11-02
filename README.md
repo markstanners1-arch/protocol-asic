@@ -223,3 +223,14 @@ That's a driver change on the PC, so Mark does it himself. Then:
   wrong edge; CS driven before its idle level was set, a real slip the test found) both caught. The labels are exported
   to `esp32/chip_test/programs.h` for the bench. Not yet: the ESP32 as an I2C/SPI slave on the bench, a real I2C part,
   and engine B watching the bus (sniffer programs: the measuring headline).
+- 2 Nov 2026 (late): **I2C on the whole chip, with engine B watching the bus.** `programs/i2c_sniff.asm` (27 words):
+  samples SDA on every SCL rise, then polls both pins until SCL falls; SDA moving while SCL is high is a START or
+  STOP and resyncs the byte (a first version that just counted 9 clocks per byte drifted, because STOP and repeated
+  START each carry a data-less SCL rise). It reports each byte with its ACK bit. Proven on the model alongside the
+  master and slave (every byte, every ACK/NAK, repeated START included); it needs an SCL period of at least 20 of its
+  ticks. Then in the whole-chip test (`test/tb_chip.v`, early and late hosts): engine A runs the I2C master on
+  uio[0]/uio[1], engine B watches the same pins, and a few lines of bench Verilog play a slave that ACKs. The chip's
+  pins idle right (SCL driven high, SDA released), A reports both ACKs, B reports both bytes. Two planted bugs
+  (master data bits not inverted; watcher on the wrong pin) caught. Two things found on the way: the bench slave must
+  count SCL *rises* (the fall inside START is not a data clock), and the filter test before it left a 64-clock hold
+  that swallowed every 20-clock I2C edge, so the I2C section resets FILTER first. A real host must remember the same.
