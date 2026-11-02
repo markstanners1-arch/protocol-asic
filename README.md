@@ -158,3 +158,5 @@ That's a driver change on the PC, so Mark does it himself. Then:
   - Conclusion for these switches: ~0.65 ms cleans every bounce seen, with a delay nobody would notice.
   - Not yet: the filter wired into `chip.v` with a host register; a worse switch (toggle or microswitch on the PMOD)
     to see a real bouncer.
+- 2 Nov 2026: fit test for a Lattice MachXO3LF-6900 (if Mark's missing board is the MachXO3 kit): free tools
+  (`synth_lattice -family xo3`, `nextpnr-machxo2`), whole chip routes at 68% of LUTs, 9% FFs, 30 MHz.
