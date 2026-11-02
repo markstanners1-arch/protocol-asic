@@ -257,8 +257,10 @@ That's a driver change on the PC, so Mark does it himself. Then:
   this is the stretching test on real wires). Needs two more leads, J4-10 (M16) -> GPIO 22 (SCL) and J4-13 (L15) ->
   GPIO 21 (SDA), plus 4.7 k pull-ups to 3.3 V. Compiles; **not yet run** (leads not fitted).
 - 2 Nov 2026 (late): **FIRST LAYOUT RESULT (Tiny Tapeout flow, IHP SG13 CMOS5L, 6x4 tiles), from the v0.1 engine with the
-  filter, commit 4017063 of the TT repo.** The gds job completed and published the GDS; the run shows as failed only
-  because a follow-on job (precheck / gate-level test / viewer) failed, still to be read. Numbers (`docs/layout/`):
+  filter, commit 4017063 of the TT repo.** The gds job completed and published the GDS after about 1 h 40 min; then **precheck PASSED (24 min 47 s, the
+  foundry's KLayout rule deck included) and the gate-level cocotb test PASSED**; only the viewer job failed, because GitHub Pages
+  is not available on a private repo (it will work once the repo is public, as submission requires). They were still running at 23:20 (a watcher's exit code, really GitHub's API rate limit
+  after 90 minutes of polling, was first misread as a failure: lesson, don't poll `gh run watch` for hours). Numbers (`docs/layout/`):
   - **Fits easily**: 19,765 standard cells, 302,319 um2, **33.5 % of the 902K um2 core** (die 1289 x 711 um). Of that,
     2,043 flip-flops (100K um2) and 3,155 timing-repair buffers (42K um2, 2,107 of them hold buffers).
   - **Timing met at 50 MHz at all three corners** (fast -40 C, typical, slow 125 C): setup and hold slack 0 ns worst
