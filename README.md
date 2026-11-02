@@ -270,3 +270,13 @@ That's a driver change on the PC, so Mark does it himself. Then:
     fan out to every flop; the resizer buffered them and timing passes) and 9 slew violations at the slow corner.
   - Synthesis in the flow: 16,184 cells, 253K um2 (our local yosys estimate was 202K: different ABC script).
   So: there is room for the v0.2 engine, the SRAM build, and more. The v0.2 layout run starts when the TT repo is pushed.
+- 2 Nov 2026 (late): **I2C ON REAL WIRES: PASS, 0 problems.** MachXO3L kit (v0.2 engine) + ESP32 as the I2C slave at
+  0x50 on engine pins 2/3 (J4-10, J4-13 -> GPIO 22/21, 5.1 k pull-ups to 3.3 V), 10 kHz. Engine A wrote 4 bytes into
+  the ESP32's registers (every ACK reported 0, the ESP32 holds A5 3C 00 FF), read them back, got the NAK from an
+  empty address, and **engine B watching the same two wires reported every byte and ACK bit on the bus**, 13 bytes,
+  all right. First run failed on the read-back only: the watcher showed the ESP32 itself put 0xCB then 0xFF on the
+  wire, so our master read faithfully what it was given. Cause: the original ESP32's I2C slave hardware cannot stretch
+  the clock, so its callback could not load the reply in time (the S2/S3/C3 parts can). Fix on the ESP32 side: load
+  the reply when the pointer write arrives (`Wire.slaveWrite`), and read as pointer-write, STOP, fresh START. So the
+  stretching test on wires still needs a stretching slave (an S3, or the UNO); the chip side is proven in simulation.
+  Run it with `esp32/rerun.ps1 -Cmd i`.

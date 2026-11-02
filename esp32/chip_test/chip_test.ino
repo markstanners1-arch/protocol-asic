@@ -178,7 +178,9 @@ void pinDiag() {
 
 // ---- I2C on real wires: engine A is the master, engine B watches the bus, the ESP32 is the slave (Wire slave
 //      mode, address 0x50, a register-pointer device like model/i2c_slave.py). The ESP32 stretches SCL while its
-//      interrupt handler runs, which is exactly what the open-drain master must put up with.
+//      interrupt handler runs on the S2/S3/C3 parts; the original ESP32's slave hardware cannot stretch, so its reply
+//      must be loaded before the master asks (slaveWrite in onReceive when the pointer arrives), and the read is done
+//      as pointer-write, STOP, then a fresh START: a repeated START gives the ESP32 no time to load the reply.
 // Wiring: J4-10 (M16, engine pin 2) = SCL -> GPIO 22;  J4-13 (L15, engine pin 3) = SDA -> GPIO 21;
 //         and 4.7 k pull-ups from each line to 3.3 V (the FPGA's and ESP32's internal pull-ups are too weak above ~10 kHz).
 // Send 'i' on the Serial Monitor to run it (it needs those two leads; the normal run does not).
@@ -192,12 +194,13 @@ void onSlaveReceive(int n) {
     if (first) { slavePtr = b & 15; first = false; }
     else { slaveRegs[slavePtr] = b; slavePtr = (slavePtr + 1) & 15; slaveWrites++; }
   }
+  if (n == 1) {                                                   // pointer only: a read is coming, load 4 bytes now
+    uint8_t out[4];
+    for (int i = 0; i < 4; i++) out[i] = slaveRegs[(slavePtr + i) & 15];
+    Wire.slaveWrite(out, 4);
+  }
 }
-void onSlaveRequest() {                                           // the master will read 4 bytes from the pointer on
-  uint8_t out[4];
-  for (int i = 0; i < 4; i++) out[i] = slaveRegs[(slavePtr + i) & 15];
-  Wire.write(out, 4); slavePtr = (slavePtr + 4) & 15; slaveRequests++;
-}
+void onSlaveRequest() { slaveRequests++; }                        // the reply was loaded in onSlaveReceive
 uint16_t i2cWord(int routine, int data = 0) { return (routine << 11) | data; }
 int drainB(int *buf, int max) {                                   // what engine B (the watcher) has reported so far
   int n = 0;
@@ -255,11 +258,12 @@ void i2cTest() {
   check("engine B saw 6 bytes", nseen, 6);
   const int want[6] = {0xA0, 3, 0xA5, 0x3C, 0x00, 0xFF};
   for (int i = 0; i < 6 && i < nseen; i++) check("  B: byte + ACK bit", seen[i], want[i] << 1);
-  // read them back with a repeated START
+  // read them back: pointer write, STOP, a moment for the ESP32 to load its reply, then a fresh START
   nseen = 0;
   i2cCmd(i2cWord(I2C_MASTER_START), false);
   check("address 0xA0 acked", i2cCmd(i2cWord(I2C_MASTER_SEND, 0xA0 << 3), true), 0);
   check("pointer 3 acked", i2cCmd(i2cWord(I2C_MASTER_SEND, 3 << 3), true), 0);
+  i2cCmd(i2cWord(I2C_MASTER_STOP), false); delay(10);
   i2cCmd(i2cWord(I2C_MASTER_START), false);
   check("address 0xA1 (read) acked", i2cCmd(i2cWord(I2C_MASTER_SEND, 0xA1 << 3), true), 0);
   nseen += drainB(seen + nseen, 16 - nseen);
