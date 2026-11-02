@@ -28,6 +28,8 @@ Tools: OSS CAD Suite 2026-11-02, unpacked at `D:\Tools\oss-cad-suite`
     python model/compare_uart.py   # model running programs/uart_tx.asm vs uart_tx.v, every clock
     python model/test_measure.py   # TIME stopwatch measuring a UART bit time
     python model/cosim.py 1000 400 11   # Verilog engine vs model: 1000 random programs x 400 clocks, every clock
+    USE_SRAM=1 python model/cosim.py    # same, with IHP's SRAM block as program memory
+    bash test/run_chip.sh               # whole chip, end to end, driven only through the SPI host port
     D:/Tools/oss-cad-suite/bin/gtkwave build/uart_tx.vcd   # look at the waveform
 
 ## Roadmap (11 weeks to 18 Jan 2027)
@@ -108,3 +110,15 @@ That's a driver change on the PC, so Mark does it himself. Then:
   Two builds, one switch: flip-flops (98,351 um2 per engine) or IHP's 64x16 SRAM block (71,363 um2 incl. the
   block). Both identical to the model on 1.2M random clocks (`USE_SRAM=1 python model/cosim.py` for the SRAM build);
   a planted fetch-timing bug caught in both. iCE40 unchanged: 2,246 LUTs.
+- 2 Nov 2026: **host port and whole chip.** `docs/host_port.md` (SPI mode 0, command byte + 16-bit words,
+  auto-incrementing bursts, per-engine registers, pin map); `src/host_spi.v`; `src/chip.v` (`protocol_chip`,
+  Tiny Tapeout pins: two engines, settings registers, pin wiring, IRQ). On review, fixed a burst-read flaw before
+  testing (a pre-fetch would have popped one FIFO word too many). **End-to-end test** (`test/run_chip.sh`),
+  host side only: loads both engines over SPI; A sends "UHello!" as UART on uio[0]; B watches the same pin and
+  **measures A's bit time from the 'U' (40 clocks, exact)**; settings read back; program writes while running
+  ignored; FIFO reads pop exactly what they return (single and burst); pin conflict: A wins, stopping releases.
+  Four planted bugs (pop-on-load, program write while running, MISO shifting early, pin priority) all caught;
+  the pin-priority one was only caught after adding the conflict test.
+  **Whole-chip area (IHP cells):** flip-flop memory 195,069 um2; SRAM build 109,870 + 2 x 15,240 = 140,350 um2.
+  That is about 26 % / 19 % of the ~750K um2 allocation.
+  Not yet: input glitch filters, Tiny Tapeout template/info.yaml, layout.
