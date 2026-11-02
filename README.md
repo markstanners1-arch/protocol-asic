@@ -249,3 +249,10 @@ That's a driver change on the PC, so Mark does it himself. Then:
   2-clock synchroniser delays the engine's view of its own release by a tick below that). The bench UART monitor is
   now switched off once uio[0] is reused for SCL. `src/` recopied to the Tiny Tapeout repo (push held until the two
   running layout jobs report, so the baseline numbers are from the v0.1 engine).
+- 2 Nov 2026 (late): **v0.2 engine on real hardware: PASS, 0 problems** (MachXO3L kit rebuilt, 26 MHz, loaded into
+  SRAM; `esp32/chip_test` rerun: UART at 115200/57600/19200, B's bit-time measurements, pin diagnostic, glitch
+  filter all as before). Cyclone IV rebuilt too: 72 %, Fmax 51.8 MHz, still above 50. `esp32/chip_test` has a new
+  on-demand I2C test (send `i` on the Serial Monitor): engine A master at 10 kHz on engine pins 2/3, engine B
+  watching, the **ESP32 as the I2C slave** at 0x50 (Wire slave mode; it stretches SCL in its interrupt handler, so
+  this is the stretching test on real wires). Needs two more leads, J4-10 (M16) -> GPIO 22 (SCL) and J4-13 (L15) ->
+  GPIO 21 (SDA), plus 4.7 k pull-ups to 3.3 V. Compiles; **not yet run** (leads not fitted).
