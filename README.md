@@ -194,3 +194,9 @@ That's a driver change on the PC, so Mark does it himself. Then:
   (84 % of LUTs): UART at 3 speeds and engine B's measurements pass again on hardware, and the synthesised netlist
   passes the end-to-end test in gate-level simulation (yosys cell models). `build.sh` now uses both flags.
   Hardware filter test: G15 pulses (ESP32 GPIO 17) never seen by any build yet; lead being checked.
+- 2 Nov 2026 (late): **glitch filter proven on real hardware** (MachXO3L, no-RAM build). The ESP32 drives engine
+  pin 15 (G15) from GPIO 17. Pin levels read correctly; filter off: a "2 us" glitch measured 2.7 us and a "20 us"
+  pulse 21.1 us (the chip measured the ESP32's own pin-switching overhead, ~0.7 us); filter on (5.3 us hold): the
+  glitch vanished, the pulse still measured 21.0 us. **Whole hardware test PASS, 0 problems.**
+  On the way: the G15 lead was in G16, then F15 (a raw pin-level diagnostic, `programs/read_pins.asm`, showed
+  exactly which pin it was on); and the ESP32's Serial2 had claimed GPIO 17 as its default TX pin (sketch fixed).

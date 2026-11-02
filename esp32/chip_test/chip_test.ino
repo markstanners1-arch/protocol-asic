@@ -22,6 +22,7 @@
 const int PIN_CS = 5, PIN_SCK = 18, PIN_MISO = 19, PIN_MOSI = 23, PIN_IRQ = 4, PIN_RX2 = 16, PIN_PULSE = 17;
 const uint32_t SPI_HZ = 1000000;           // chip clock 12 MHz / 8 = 1.5 MHz limit
 const float CHIP_HZ = 12e6;
+const int PULSE_PIN = 15;                  // engine pin wired to GPIO 17: 17 = ball F15 (J4 hole 28); 15 = G15 (hole 26)
 
 // registers (docs/host_port.md)
 const int R_CTRL = 0x20, R_CLKDIV = 0x21, R_WRAP = 0x22, R_OUTCFG = 0x23, R_MISC = 0x24, R_INCFG = 0x25,
@@ -108,13 +109,16 @@ void runAt(uint32_t baud) {
 void pulseLow(int us) { noInterrupts(); digitalWrite(PIN_PULSE, LOW); delayMicroseconds(us); digitalWrite(PIN_PULSE, HIGH); interrupts(); delay(2); }
 void filterTest() {
   Serial.println();
-  Serial.println("-- glitch filter: engine B times low pulses on engine pin 15 (driven by the ESP32)");
+  Serial.printf("-- glitch filter: engine B times low pulses on engine pin %d (driven by the ESP32)\n", PULSE_PIN);
+  // Serial2's default TX pin is GPIO 17: release the port and take the pin back (bench bug, 2 Nov 2026)
+  Serial2.end();
+  pinMode(PIN_PULSE, OUTPUT); digitalWrite(PIN_PULSE, HIGH); delay(5);
   writeReg(ENG_A, R_CTRL, 0); writeReg(ENG_B, R_CTRL, 0);
   loadProgram(ENG_B, PROG_MEASURE_PULSE, PROG_MEASURE_PULSE_LEN);
   writeReg(ENG_B, R_CLKDIV, 0);
   writeReg(ENG_B, R_WRAP, wrapReg(0, PROG_MEASURE_PULSE_WRAP_BOTTOM, PROG_MEASURE_PULSE_WRAP_TOP));
   writeReg(ENG_B, R_OUTCFG, 0); writeReg(ENG_B, R_MISC, 0);
-  writeReg(ENG_B, R_INCFG, 15);                                   // in_base = engine pin 15
+  writeReg(ENG_B, R_INCFG, PULSE_PIN);                            // in_base = the engine pin the lead is on
   const int R_FILTER = 0x29;
   for (int on = 0; on < 2; on++) {
     writeReg(ENG_A, R_FILTER, on ? 0x2F : 0x00);                  // on: N=15, P=2 -> 64-clock hold = 5.3 us at 12 MHz
@@ -138,12 +142,40 @@ void filterTest() {
   writeReg(ENG_A, R_FILTER, 0);
 }
 
+// Diagnostic: what level does the chip see on engine pin 15 when the ESP32 holds GPIO 17 low, then high?
+void pinDiag() {
+  Serial.println();
+  Serial.printf("-- pin diagnostic: engine B reads the raw level of engine pin %d while GPIO 17 is held\n", PULSE_PIN);
+  Serial2.end();
+  pinMode(PIN_PULSE, OUTPUT);
+  writeReg(ENG_A, R_CTRL, 0); writeReg(ENG_B, R_CTRL, 0);
+  writeReg(ENG_A, 0x29, 0);                                        // filter shortest
+  loadProgram(ENG_B, PROG_READ_PINS, PROG_READ_PINS_LEN);
+  writeReg(ENG_B, R_CLKDIV, 0);
+  writeReg(ENG_B, R_WRAP, wrapReg(0, PROG_READ_PINS_WRAP_BOTTOM, PROG_READ_PINS_WRAP_TOP));
+  writeReg(ENG_B, R_MISC, 0); writeReg(ENG_B, R_INCFG, PULSE_PIN);
+  writeReg(ENG_B, R_CTRL, 1);
+  for (int lvl = 0; lvl < 2; lvl++) {
+    digitalWrite(PIN_PULSE, lvl); delay(5);
+    // the engine refills the FIFO as fast as it is read, so read past the 4 stale entries and keep the last
+    uint16_t v = 0;
+    for (int i = 0; i < 8; i++) v = readReg(ENG_B, R_RX);
+    Serial.printf("  GPIO 17 held %s -> chip sees pins %d..: 0x%04X (that pin = %d)  %s", lvl ? "HIGH" : "LOW ", PULSE_PIN, v, v & 1,
+                  ((v & 1) == lvl) ? "ok" : "WRONG");
+    Serial.println();
+    if ((v & 1) != lvl) errors++;
+  }
+  digitalWrite(PIN_PULSE, HIGH);
+  writeReg(ENG_B, R_CTRL, 0);
+}
+
 void runAll() {
   errors = 0;
   Serial.println("\n==== Whole chip on the MachXO3L kit: two engines + SPI host port ====");
   runAt(115200);
   runAt(57600);
   runAt(19200);
+  pinDiag();
   filterTest();
   Serial.printf("\n==== %s (%d problems) ====\nSend 'r' to run again.\n", errors ? "FAIL" : "PASS", errors);
 }
