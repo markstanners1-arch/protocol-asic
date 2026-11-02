@@ -91,3 +91,11 @@ That's a driver change on the PC, so Mark does it himself. Then:
 - 2 Nov 2026: Ada-style range checks added to the model (Mark's suggestion): after every clock each register
   is checked against its declared range (e.g. counts 0..16, words 0..65535) and the model stops dead if one strays.
   All model tests plus 1.2M more random clocks pass with the checks on; no register ever left its range.
+- 2 Nov 2026: **trim, round 1.** Measured first, by removing one part at a time: pin writing (several 32-pin
+  rotators) cost ~2,090 gates, program memory ~1,450, the IN/OUT shifters ~910, pin reading ~370, FIFO storage ~320.
+  Only one instruction runs per step, so the engine now has **one** shared pin reader, **one** 32-bit shifter
+  (serving IN and OUT, left and right) and **one** pin writer (plus the small side-set writer).
+  Result: 7,168 -> **5,930 gates (-17%)**; iCE40 2,784 -> 2,245 LUTs (still too big for the HX1K's 1,280).
+  Re-proved: 2,000,000 more random clocks identical to the model; three bugs planted in the new shared parts all caught.
+  Further options (not done): pin space 32 -> 24 or 20 (a spec change), program memory in latches or SRAM,
+  or a parameterised narrow bench build for the Go Board.

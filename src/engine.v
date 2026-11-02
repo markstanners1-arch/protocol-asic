@@ -122,6 +122,15 @@ module engine (
     reg [15:0] data, v, msk;
     reg [16:0] m17;
     reg [31:0] t32;
+    // shared hardware: one pin reader, one shifter, one pin writer (one instruction per step)
+    reg [15:0] pins_rd;             // 16 pins from in_base
+    reg [15:0] in_data;             // IN source, masked to n bits
+    reg [31:0] sh_in, sh_out;       // the one 32-bit right shifter
+    reg [4:0]  sh_amt;
+    reg        pw_en, pw_dir;       // pin write: enable, 0 = levels / 1 = directions
+    reg [4:0]  pw_base, pw_count;
+    reg [15:0] pw_data;
+    reg [31:0] pw_m, pw_d;
     reg        tx_pop_eng, rx_push_eng;
     reg [15:0] rx_push_data;
     // next state
@@ -150,6 +159,33 @@ module engine (
         m17 = (17'd1 << n) - 17'd1;
         msk = m17[15:0];
         data = 0; v = 0; t32 = 0; sum6 = 0; pidx = 0;
+        pw_en = 0; pw_dir = 0; pw_base = 0; pw_count = 0; pw_data = 0; pw_m = 0; pw_d = 0;
+
+        // shared pin reader (IN pins and MOV pins)
+        t32 = rotr32(sync2, cfg_in_base);
+        pins_rd = t32[15:0];
+
+        // shared shifter, set up for IN or OUT (whichever is executing; ignored otherwise)
+        // IN  right: {data, isr} >> n          IN  left: ({isr,0} >> (16-n)) | data
+        // OUT right: {0, osr} >> n             OUT left: {osr,0} >> (16-n): low = new osr, high = data
+        case (a[7:5])
+            3'd0: in_data = pins_rd;
+            3'd1: in_data = x;
+            3'd2: in_data = y;
+            3'd4: in_data = isr;
+            3'd5: in_data = osr;
+            3'd6: in_data = (tick && sw_run && sw != 16'hFFFF) ? sw + 16'd1 : sw;   // = n_sw
+            default: in_data = 16'd0;
+        endcase
+        in_data = in_data & msk;
+        if (op == 3'd2) begin
+            sh_in  = cfg_in_right ? {in_data, isr} : {isr, 16'd0};
+            sh_amt = cfg_in_right ? n : 5'd16 - n;
+        end else begin
+            sh_in  = cfg_out_right ? {16'd0, osr} : {osr, 16'd0};
+            sh_amt = cfg_out_right ? n : 5'd16 - n;
+        end
+        sh_out = sh_in >> sh_amt;
 
         if (tick) begin
             if (sw_run) n_sw = (sw == 16'hFFFF) ? sw : sw + 16'd1;
@@ -183,40 +219,20 @@ module engine (
                     end
                 end
                 3'd2: begin                                         // IN
-                    case (a[7:5])
-                        3'd0: begin t32 = rotr32(sync2, cfg_in_base); data = t32[15:0]; end
-                        3'd1: data = x;
-                        3'd2: data = y;
-                        3'd4: data = isr;
-                        3'd5: data = osr;
-                        3'd6: data = n_sw;
-                        default: data = 16'd0;
-                    endcase
-                    data = data & msk;
-                    if (cfg_in_right) begin
-                        t32 = {data, isr} >> n;
-                    end else begin
-                        t32 = ({16'd0, isr} << n) | {16'd0, data};
-                    end
-                    n_isr = t32[15:0];
+                    n_isr = cfg_in_right ? sh_out[15:0] : (sh_out[15:0] | in_data);
                     sum6 = {1'b0, isr_count} + {1'b0, n};
                     n_isr_count = (sum6 > 6'd16) ? 5'd16 : sum6[4:0];
                 end
                 3'd3: begin                                         // OUT
-                    if (cfg_out_right) begin
-                        data  = osr & msk;
-                        n_osr = osr >> n;
-                    end else begin
-                        data  = (osr >> (5'd16 - n)) & msk;
-                        n_osr = osr << n;
-                    end
+                    n_osr = sh_out[15:0];
+                    data  = (cfg_out_right ? osr : sh_out[31:16]) & msk;
                     sum6 = {1'b0, osr_count} + {1'b0, n};
                     n_osr_count = (sum6 > 6'd16) ? 5'd16 : sum6[4:0];
                     case (a[7:5])
-                        3'd0: n_out_val = wr_bits(out_val, cfg_out_base, n, data);
+                        3'd0: begin pw_en = 1'b1; pw_base = cfg_out_base; pw_count = n; pw_data = data; end
                         3'd1: n_x = data;
                         3'd2: n_y = data;
-                        3'd4: n_out_dir = wr_bits(out_dir, cfg_out_base, n, data);
+                        3'd4: begin pw_en = 1'b1; pw_dir = 1'b1; pw_base = cfg_out_base; pw_count = n; pw_data = data; end
                         3'd5: begin do_jump = 1'b1; jaddr = data[4:0]; end
                         3'd6: begin n_isr = data; n_isr_count = n; end
                         default: ;
@@ -244,7 +260,7 @@ module engine (
                 end
                 3'd5: begin                                         // MOV
                     case (a[2:0])
-                        3'd0: begin t32 = rotr32(sync2, cfg_in_base); v = t32[15:0]; end
+                        3'd0: v = pins_rd;
                         3'd1: v = x;
                         3'd2: v = y;
                         3'd3: v = 16'd0;
@@ -256,7 +272,7 @@ module engine (
                     if (a[4:3] == 2'd1)      v = ~v;
                     else if (a[4:3] == 2'd2) v = bitrev16(v);
                     case (a[7:5])
-                        3'd0: n_out_val = wr_bits(out_val, cfg_out_base, cfg_out_count, v);
+                        3'd0: begin pw_en = 1'b1; pw_base = cfg_out_base; pw_count = cfg_out_count; pw_data = v; end
                         3'd1: n_x = v;
                         3'd2: n_y = v;
                         3'd5: begin do_jump = 1'b1; jaddr = v[4:0]; end
@@ -267,10 +283,10 @@ module engine (
                 end
                 3'd6: begin                                         // SET
                     case (a[7:5])
-                        3'd0: n_out_val = wr_bits(out_val, cfg_set_base, {2'b0, cfg_set_count}, {11'd0, a[4:0]});
+                        3'd0: begin pw_en = 1'b1; pw_base = cfg_set_base; pw_count = {2'b0, cfg_set_count}; pw_data = {11'd0, a[4:0]}; end
                         3'd1: n_x = {11'd0, a[4:0]};
                         3'd2: n_y = {11'd0, a[4:0]};
-                        3'd4: n_out_dir = wr_bits(out_dir, cfg_set_base, {2'b0, cfg_set_count}, {11'd0, a[4:0]});
+                        3'd4: begin pw_en = 1'b1; pw_dir = 1'b1; pw_base = cfg_set_base; pw_count = {2'b0, cfg_set_count}; pw_data = {11'd0, a[4:0]}; end
                         default: ;
                     endcase
                 end
@@ -285,6 +301,12 @@ module engine (
                     endcase
                 end
                 endcase
+
+                // the one shared pin writer
+                pw_m = rotl32((32'd1 << pw_count) - 32'd1, pw_base);
+                pw_d = rotl32({16'd0, pw_data}, pw_base);
+                if (pw_en && !pw_dir) n_out_val = (out_val & ~pw_m) | (pw_d & pw_m);
+                if (pw_en &&  pw_dir) n_out_dir = (out_dir & ~pw_m) | (pw_d & pw_m);
 
                 // side-set: on every executed step, stalled or not; wins over the instruction
                 if (sen)
