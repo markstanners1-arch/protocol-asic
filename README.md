@@ -13,7 +13,10 @@ Our entry for Jane Street's protocol emulator ASIC competition
 
 - `src/`  Verilog design
 - `test/` test benches
-- `docs/` notes and design decisions
+- `docs/` notes and design decisions (`core_design.md` the blocks, `isa.md` the exact instruction rules)
+- `model/` Python reference: assembler (`asm.py`) and clock-by-clock engine model (`engine.py`)
+- `programs/` engine programs in our assembly language
+- `fpga/go_board/` bench tests on the Nandland Go Board
 
 ## Run the tests
 
@@ -22,14 +25,16 @@ Tools: OSS CAD Suite 2026-11-02, unpacked at `D:\Tools\oss-cad-suite`
 
     ./run.sh test     # simulate every test bench, prints PASS/FAIL
     ./run.sh size     # rough cell count per module
+    python model/compare_uart.py   # model running programs/uart_tx.asm vs uart_tx.v, every clock
+    python model/test_measure.py   # TIME stopwatch measuring a UART bit time
     D:/Tools/oss-cad-suite/bin/gtkwave build/uart_tx.vcd   # look at the waveform
 
 ## Roadmap (11 weeks to 18 Jan 2027)
 
 | Weeks | Stage | Done when |
 |---|---|---|
-| 1 (now) | Paper design: block diagram + instruction set (`docs/core_design.md`) | Mark has checked it and the open questions are settled |
-| 2 | Python model of the core: runs our firmware exactly, clock by clock | UART TX firmware runs on the model and matches `uart_tx.v` bit for bit |
+| 1 (done 2 Nov) | Paper design: block diagram + instruction set (`docs/core_design.md`) | Mark has checked it and the open questions are settled |
+| 2 (done 2 Nov) | Python model of the core: runs our firmware exactly, clock by clock | UART TX firmware runs on the model and matches `uart_tx.v` bit for bit |
 | 3-4 | Verilog core, tested against the Python model cycle by cycle | thousands of random programs agree between model and Verilog |
 | 4-5 | Firmware: UART TX/RX, SPI, I2C, each with a model partner device | all three pass, plus the measuring features |
 | 6-7 | Into the Tiny Tapeout template; synthesis and layout on GitHub; fit 6x4, meet timing | clean build, timing met with margin |
@@ -62,3 +67,12 @@ That's a driver change on the PC, so Mark does it himself. Then:
 
     fpga/go_board/build.sh prog
     # serial terminal (PuTTY etc.) on the board's COM port, 115200 8N1
+- 2 Nov 2026: design questions settled (two engines, 16-bit registers, measuring as the headline, SPI host port).
+  Exact instruction rules written (`docs/isa.md` v0.1; each engine has its own 32-word program memory;
+  side-set made optional with an enable bit, as the UART program needs it).
+- 2 Nov 2026: **Python model working.** `programs/uart_tx.asm` on the model matches `uart_tx.v` on every frame,
+  sample by sample, at 8/16/32/88 clocks per bit (64 bytes each). The model runs back-to-back at the ideal
+  10 bits per byte; the Verilog test bench leaves 2 clocks between bytes (its handshake). Two planted program
+  bugs were both caught. TIME stopwatch measures a 'U' start bit exactly (8 to 1000 clocks, including a sender
+  2.8% slow). Found on the way: the input synchroniser reads low for 2 clocks after reset; programs wait for
+  idle-high first (noted in isa.md).

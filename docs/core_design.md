@@ -134,7 +134,19 @@ The same pattern measures an I2C bus's edge speed. Let go of the line, `time sta
    a noisy line) to test against.
 4. Then the FPGA, against real boards.
 
-## Open questions for Mark
+## Decisions (2 Nov 2026, Mark: go with the leanings)
+
+1. **Two engines.**
+2. **16-bit registers.**
+3. **The measuring side is the headline** (stopwatch, WAIT timeout, input conditioning).
+4. **Host port is an SPI slave.**
+5. Bench gripes: none yet; keep asking as we go.
+
+One change while writing the exact encoding: each engine gets **its own 32-word program memory**
+(64 words in all, as planned) instead of one shared 64-word memory. A jump then needs only a 5-bit address,
+which fits the 16-bit instruction. The exact encoding is in `docs/isa.md`.
+
+## Open questions (as first asked)
 
 1. **Two engines or one?** Two lets, say, an SPI master and a UART run at once, or TX and RX separately. *Lean: two.*
 2. **16-bit registers or 32?** 16 is enough for UART/SPI/I2C and saves area; Ethernet would want 32. *Lean: 16.*
