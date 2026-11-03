@@ -39,17 +39,19 @@ the roadmap and a dated progress log of everything done and found. Specs: `docs/
   re-copy after changes. The cocotb test passes on GitHub; the first two layout (gds) runs were still building at
   ~21:45 on 2 Nov: check `gh run list -R markstanners1-arch/ttihp-protocol-emulator`.
 
-## State at handover (3 Nov 2026, afternoon)
-Chip is **four engines** (`protocol_chip #(NENG)`, 4 on the ASIC; the MachXO3L top passes 2, the Cyclone IV top 3: it fits at 98 % with Quartus set to optimise for area; neither fits four),
-**host port v0.2**: a 16-bit command `[15] read, [14:12] engine, [5:0] register`, ID register 0x2A (`[3:0]` engines,
-`[7:4]` spec 2), lowest engine wins a pin, IRQ from any engine. ISA v0.2 unchanged. I2C master is 19 words (one `xfer`
-routine: nine SDA levels out, nine seen back as byte << 1 | ACK; a sent byte read back differently = arbitration lost).
-Proven: model I2C test, cosim 400K clocks both memories, whole-chip test NENG=4 and NENG=2, LATE=0/1, four planted bugs
-caught; ESP32 sketch **PASSES on the rebuilt bench (MachXO3L kit, two-engine build, ID 0x0022, 0 problems, 3 Nov 15:00), as do I2C with both slaves and SPI to the 74HC595 (16:40)**; the Cyclone IV board arrived 3 Nov (pins still TODO). Bench helper commands in the sketch: p lead probe, q IRQ hold, l scope loop, b I2C wire check, k SCL hold, w LED walk (`docs/bench_wiring.md`). MachXO3 build 30.9 MHz, Cyclone 71 % LEs, both two engines.
-TT repo commit 2d2a76c: cocotb test PASS; **gds run 41642156659 started 13:11, read it after ~15:30 with ONE `gh run view`**
-(never `gh run watch`). The v0.2 two-engine layout before it: 33.9 %, timing met, DRC/LVS clean.
-**Four engines failed layout twice (61 % of the core, detailed placement); a three-engine measurement run (41665293508) was started 15:34, read it with ONE `gh run view`; the engine count is Mark's decision (options in the README, 15:40 entry).** Next: rebuild the bench (one wiring sheet: J4 -> ESP32 as in Tools above,
-then I2C/SPI pins as needed) and rerun `esp32/rerun.ps1` (ID should read 0x0022 on an FPGA); Cyclone IV pins in
-`fpga/cyclone4/chip_c4.qsf` and the same test at 50 MHz; then the **"what is this chip?" demo** (I2C address scan, SPI JEDEC ID, pin levels and periods, on the
-existing programs: a host script; Mark suspects this is what the brief is really after), then trade protocols (DALI,
-DMX512, Modbus RTU, Wiegand). The 74HC595 SPI bench test passes.
+## State at handover (3 Nov 2026, night)
+Chip is **three engines** (`protocol_chip` default `NENG = 3`; decided 3 Nov: four at 61 % of the core failed detailed
+placement twice, three at 49.5 % laid out clean: timing met at all corners, DRC/LVS/antenna 0, gate-level test and
+precheck pass; stats in `docs/layout/metrics_3nov_v02_3eng.csv`). Host port v0.2 (16-bit command `[15] read, [14:12]
+engine, [5:0] register`, ID register 0x2A reads `[7:4]` spec 2 / `[3:0]` engines, lowest engine wins a pin). ISA v0.2.
+I2C master is 19 words. Proven at three: cosim 400K clocks both memories, whole-chip test NENG=3/2, LATE=0/1.
+TT repo commit after f087b2d: wrapper uses the chip default, metadata "three"; a gds run starts on push (~2.5 h + 40 min
+precheck): read with ONE `gh run view`, never watch. **Bench (rebuilt 3 Nov, `docs/bench_wiring.md` / `.pdf`):** MachXO3L
+kit with two engines, ESP32 host on COM12 (scripts find the port): regression PASS (ID 0x0022), I2C PASS with the
+ESP32 and the UNO slaves, SPI PASS to a 74HC595 (red/yellow LEDs only at 3.3 V). Sketch bench helpers: p lead probe,
+q IRQ hold, l scope loop, b I2C wire check, k SCL hold, w LED walk, a I2C address scan. Cyclone IV board (black
+EP4CE6E22C8N core board) pinned (`fpga/cyclone4/chip_c4.qsf`, right-hand header 38-72, clock pin 24), builds three
+engines at 98 % / 51.6 MHz with area optimisation; **needs the USB Blaster, due 5-6 Nov** (eBay, Leicester).
+Next: Blaster -> Cyclone at 50 MHz with three engines (ID 0x0023), same ESP32 tests; the "what is this chip?" demo
+(address scan done; SPI JEDEC ID, pin levels and periods next); trade protocols (DALI, DMX512, Modbus RTU, Wiegand);
+MicroPython host for the RP2040 demo board. Mark's Hantek DSO5102P is on the bench if a scope capture is wanted.

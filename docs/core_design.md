@@ -146,11 +146,11 @@ One change while writing the exact encoding: each engine gets **its own 32-word 
 (64 words in all, as planned) instead of one shared 64-word memory. A jump then needs only a 5-bit address,
 which fits the 16-bit instruction. The exact encoding is in `docs/isa.md`.
 
-**3 Nov 2026: four engines.** The first layout used a third of the 6x4 tile, so the chip now has four engines
-(A-D) instead of two, each with its own 32-word program memory; the FPGA boards, which cannot hold four, build the
-same design with two. The host command grew to 16 bits to carry a 3-bit engine number, and register 0x2A tells the
+**3 Nov 2026: three engines.** The first layout used a third of the 6x4 tile, so the chip grew: four engines (61 % of
+the core) failed detailed placement twice, three (49.5 %) laid out cleanly with timing met, so the chip has three
+(A-C), each with its own 32-word program memory. The MachXO3L kit builds two, the Cyclone IV board three. The host command grew to 16 bits to carry a 3-bit engine number, and register 0x2A tells the
 host how many engines there are (`docs/host_port.md` v0.2). The lowest-numbered engine driving a pin wins.
-The 20 protocol pins are shared, so four engines means about five pins each: a UART, an I2C, an SPI and a DALI at once.
+The 20 protocol pins are shared: a UART, an I2C and an SPI at once, with pins to spare.
 
 ## Open questions (as first asked)
 

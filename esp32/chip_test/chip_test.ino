@@ -36,7 +36,7 @@ const int PULSE_PIN = 15;                  // engine pin wired to GPIO 17: 17 = 
 // registers (docs/host_port.md)
 const int R_CTRL = 0x20, R_CLKDIV = 0x21, R_WRAP = 0x22, R_OUTCFG = 0x23, R_MISC = 0x24, R_INCFG = 0x25,
           R_TX = 0x26, R_RX = 0x27, R_STATUS = 0x28, R_FILTER = 0x29, R_ID = 0x2A;
-const int ENG_A = 0, ENG_B = 1, ENG_C = 2, ENG_D = 3;   // C and D are on the ASIC only; the ID register says how many
+const int ENG_A = 0, ENG_B = 1, ENG_C = 2;   // C is on the ASIC and the Cyclone board, not the kit; the ID register says how many
 
 // the 16-bit command (host_port.md v0.2): [15] read, [14:12] engine, [5:0] register
 uint16_t cmd(bool rd, int eng, int reg) { return (rd ? 0x8000 : 0) | ((eng & 7) << 12) | (reg & 0x3F); }

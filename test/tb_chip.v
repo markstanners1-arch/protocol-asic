@@ -6,7 +6,7 @@
 `timescale 1ns/1ps
 `default_nettype none
 module tb_chip;
-    parameter NENG = 4;                // engines in the chip under test (4 = ASIC; 2 = the FPGA builds): -P tb_chip.NENG=2
+    parameter NENG = 3;                // engines in the chip under test (3 = ASIC and Cyclone; 2 = the kit): -P tb_chip.NENG=2
     reg clk = 0; always #5 clk = ~clk;
     reg rst_n = 0;
     reg cs_n = 1, sck = 0, mosi = 0;

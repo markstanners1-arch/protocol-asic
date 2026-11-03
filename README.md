@@ -419,3 +419,7 @@ That's a driver change on the PC, so Mark does it himself. Then:
   Mark: three as it stands, or SRAM for four. Note the TT repo's project.v is still at `#(.NENG(3))` from the
   measurement run; whichever way, the ProtocolASIC `src/chip.v` default (4) and the TT wrapper must agree before
   submission.
+- 3 Nov 2026 (night): **decision (Mark): three engines.** `src/chip.v` default `NENG = 3`; tests, specs (`host_port.md`,
+  `core_design.md`) and the sketch say three; the TT wrapper uses the chip default and its metadata says three (new gds
+  run on the push, expected the same as the measurement run). Proven at three: cosim 400K clocks both memories, whole-chip
+  test NENG=3 (LATE=0/1) and NENG=2. Hardware proof of three waits for the Blaster and the Cyclone.
