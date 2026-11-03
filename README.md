@@ -373,3 +373,6 @@ That's a driver change on the PC, so Mark does it himself. Then:
   order: both leads reaching no chip pin; SDA right, SCL reaching nothing; swapping the ESP32 ends proved both GPIOs
   good, so the kit end was wrong; it was in H16 (hole 25, an output-only pin) read as M16 (hole 10). Lesson for the
   sheet: the ball letters H/M are easy to confuse on the kit's silkscreen; the hole number is the safer label.
+- 3 Nov 2026 (16:15): **I2C PASS with the UNO R3 as the slave** (clock stretching, STOP-then-START and repeated-START
+  read-backs), first time after the leads moved over from the ESP32, 0 problems. The 19-word master has now done both
+  slaves on real wires.
