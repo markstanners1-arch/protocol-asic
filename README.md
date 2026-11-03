@@ -332,3 +332,11 @@ That's a driver change on the PC, so Mark does it himself. Then:
   20,448 cells, 306,341 um2, 33.9 % utilisation, setup/hold slack 0.0 at all three corners, DRC 0, LVS 0, antenna 0
   (24 slew and 156 max-fanout warnings at the slow corner, as before). Pins are the budget now: 20 shared by four
   engines, about five each.
+- 3 Nov 2026 (14:00): **first four-engine layout failed in placement**, not for want of area but for the flow's default
+  placement density target. Synthesis: 552,741 um2 for four engines (61 % of the 902K core; two engines were 253K,
+  so the pin chain and host mux cost a little over the doubled engines). OpenROAD reported 66.7 % utilisation, the
+  Tiny Tapeout config's `PL_TARGET_DENSITY_PCT` of 60 was "too low", the placer's own target came out at 1.007 and
+  detailed placement failed on 8 instances (GDS run 41642156659, 6m53s; precheck and gl_test skipped). The config's
+  own comment says to raise the target, up to 80 reported working: set to 80 (TT commit ac6fb72), second run started
+  ~13:58. If that fails too: the SRAM program memory (saves ~27K um2 per engine, ~110K in all, taking four engines to
+  about 49 %), or three engines (~46 %).
