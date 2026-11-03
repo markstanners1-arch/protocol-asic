@@ -77,7 +77,7 @@ s.append(wires([
     ["595 pin 8  GND", "common ground", "", "power"],
     ["595 pin 13  OE", "GND", "", "outputs enabled"],
     ["595 pin 10  SRCLR", "3.3 V", "", "not clearing"],
-    ["595 pins 15, 1, 2, 3, 4, 5, 6, 7  (QA..QH)", "LED long leg", "LED short leg -> 330 ohm -> GND", "eight LEDs; the run ends on 0x55 so QA (pin 15) is high"],
+    ["595 pins 15, 1, 2, 3, 4, 5, 6, 7  (QA..QH)", "LED long leg", "LED short leg -> 330 ohm -> GND", "red, yellow or green only (white/blue stay dim at 3.3 V; the flat-topped ones never lit); the run ends on 0x55 so QA (pin 15) is high"],
 ]))
 s.append(Spacer(1, 4))
 s.append(Paragraph("Before the rebuild the LEDs stayed dark with the chip side proven good: meter pins 16, 8, 13, 10 first, then pin 15 after a run, then the QH' lead.", P))

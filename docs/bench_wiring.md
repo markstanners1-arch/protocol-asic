@@ -54,7 +54,7 @@ UNO sketch: `arduino/i2c_slave_nano` on COM11.
 | 595 pin 8 GND | common ground | | power |
 | 595 pin 13 OE | GND | | outputs enabled |
 | 595 pin 10 SRCLR | 3.3 V | | not clearing |
-| 595 pins 15, 1, 2, 3, 4, 5, 6, 7 (QA..QH) | LED long leg | LED short leg -> 330 ohm -> GND | eight LEDs; the run ends on 0x55 so QA (pin 15) is high |
+| 595 pins 15, 1, 2, 3, 4, 5, 6, 7 (QA..QH) | LED long leg | LED short leg -> 330 ohm -> GND | red, yellow or green LEDs only: white and blue need ~3 V and stay dim at 3.3 V, and the flat-topped ones from the drawer never lit (3 Nov); the run ends on 0x55 so QA (pin 15) is high |
 
 Before the rebuild the LEDs stayed dark with the chip side proven good: meter pins 16, 8, 13, 10 first, then pin 15
 after a run, then the QH' lead.

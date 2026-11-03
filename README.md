@@ -382,3 +382,5 @@ That's a driver change on the PC, so Mark does it himself. Then:
   command `w`: a slow LED walk (QA first, 0.7 s a step, twice round, all on, all off) with the QH' read-back printed;
   16 of 16 steps returned the byte before. So on the rebuilt bench, all with the two-byte host port: regression PASS,
   I2C PASS with both slaves, SPI PASS. Still to wire: nothing; next hardware is the Cyclone IV.
+- 3 Nov 2026 (16:55): the 595's LEDs: the flat-topped ones from the drawer never light at 3.3 V (a red one did at once); with
+  red/red/white/yellow fitted the walk (`-Cmd w`) chased as it should, white dim as expected. Noted on the wiring sheet.
