@@ -391,3 +391,7 @@ That's a driver change on the PC, so Mark does it himself. Then:
   (71 %), Fmax 53.4 MHz, no pin complaints. `docs/bench_wiring.md` section 5 has the lead table. Not programmed yet:
   the board needs a USB Blaster on its JTAG header and there is none on the bench (the PC has the driver); ordered.
 - 3 Nov 2026 (17:45): USB Blaster (Rev C clone, eBay seller digexx15, Leicester) ordered, due 5-6 Nov; the Cyclone build waits for it.
+- 3 Nov 2026 (18:00): `test/tb_chip.v`'s multi-engine section now works for any engine count (`NENG=2|3|4 bash
+  test/run_chip.sh`): the last engine runs push_789 with the IRQ, the priority chain is tested with the last engine
+  low, the one below it high, then A low (for three or more engines), and the number past the last is checked. PASS at
+  2, 3 and 4; the reversed-chain bug planted at 3 is caught. So whichever count the layout settles on is already proven.

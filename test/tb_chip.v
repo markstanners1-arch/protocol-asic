@@ -2,7 +2,7 @@
 // Engine A: UART transmitter on engine pin 0 (uio[0]), 40 clocks per bit.
 // Engine B: measures the bit time of the first 'U' on the same pin, pushes it to its RX FIFO.
 // Then: FIFO reads, pin conflicts, the glitch filter, I2C (A master, B watching, a bench slave that ACKs), and the
-// four-engine additions of 3 Nov 2026: the ID register, engines C and D, the priority chain, engine numbers past the last.
+// multi-engine additions of 3 Nov 2026 (any NENG): the ID register, the last engine alone, the priority chain, numbers past the last.
 `timescale 1ns/1ps
 `default_nettype none
 module tb_chip;
@@ -250,48 +250,48 @@ module tb_chip;
         write_reg(0, 6'h20, 0); write_reg(1, 6'h20, 0);
         read_reg(0, 6'h2A, w); check("ID: spec version 2, number of engines", w, 16'h0020 | NENG);
         read_reg(5, 6'h2A, w); check("ID reads the same through any engine number", w, 16'h0020 | NENG);
-        if (NENG >= 4) begin : four
-            integer j, e; reg [15:0] d;
-            spi_begin({1'b0, 3'd2, 6'd0, 6'h00});                  // C: push 7, 8, 9
+        begin : more                                           // any engine count: the last engine (L = NENG-1) on its own
+            integer j, e, L, M; reg [15:0] d;
+            L = NENG - 1; M = NENG - 2;
+            spi_begin({1'b0, L[2:0], 6'd0, 6'h00});                // L: push 7, 8, 9
             for (j = 0; j < 32; j = j + 1) spi_word(init[74 + j], d);
             spi_end;
-            write_reg(2, 6'h22, 16'h7C00);
-            write_reg(2, 6'h20, 1); repeat (200) @(posedge clk);
-            read_reg(2, 6'h28, st); check("C RX level after pushing 3", st[6:4], 3);
-            check("IRQ (C has data)", {15'd0, irq}, 1);
-            read_reg(2, 6'h27, w); check("C word 1", w, 7);
-            read_reg(2, 6'h27, w); check("C word 2", w, 8);
-            read_reg(2, 6'h27, w); check("C word 3", w, 9);
-            check("IRQ after reading C", {15'd0, irq}, 0);
-            write_reg(2, 6'h20, 0);
-            // priority on uio[2]: D drives low, C high, A low (drive_low is init[106..], drive_high init[138..])
-            for (e = 0; e < 4; e = e + 1) if (e != 1) begin
-                spi_begin({1'b0, e[2:0], 6'd0, 6'h00});
-                for (j = 0; j < 32; j = j + 1) spi_word(init[(e == 2 ? 138 : 106) + j], d);
-                spi_end;
-                spi_begin({1'b0, e[2:0], 6'd0, 6'h21});            // clkdiv 0, wrap 0..31, set_base 2, set_count 1
-                spi_word(16'd0, d); spi_word(16'h7C00, d); spi_word(16'd2 << 10, d); spi_word(16'd1, d); spi_word(16'd0, d);
-                spi_end;
+            write_reg(L[2:0], 6'h22, 16'h7C00);
+            write_reg(L[2:0], 6'h20, 1); repeat (200) @(posedge clk);
+            read_reg(L[2:0], 6'h28, st); check("last engine: RX level after pushing 3", st[6:4], 3);
+            check("IRQ (last engine has data)", {15'd0, irq}, 1);
+            read_reg(L[2:0], 6'h27, w); check("last engine word 1", w, 7);
+            read_reg(L[2:0], 6'h27, w); check("last engine word 2", w, 8);
+            read_reg(L[2:0], 6'h27, w); check("last engine word 3", w, 9);
+            check("IRQ after reading it", {15'd0, irq}, 0);
+            write_reg(L[2:0], 6'h20, 0);
+            if (NENG >= 3) begin                                   // priority chain on uio[2]: L low, M = L-1 high, then A low
+                for (e = 0; e < NENG; e = e + 1) if (e == 0 || e == M || e == L) begin
+                    spi_begin({1'b0, e[2:0], 6'd0, 6'h00});        // drive_low is init[106..], drive_high init[138..]
+                    for (j = 0; j < 32; j = j + 1) spi_word(init[(e == M ? 138 : 106) + j], d);
+                    spi_end;
+                    spi_begin({1'b0, e[2:0], 6'd0, 6'h21});        // clkdiv 0, wrap 0..31, set_base 2, set_count 1
+                    spi_word(16'd0, d); spi_word(16'h7C00, d); spi_word(16'd2 << 10, d); spi_word(16'd1, d); spi_word(16'd0, d);
+                    spi_end;
+                end
+                write_reg(L[2:0], 6'h20, 1); repeat (50) @(posedge clk);
+                check("uio[2] with only the last engine driving (low)", {14'd0, uio_oe[2], uio_out[2]}, 2);
+                write_reg(M[2:0], 6'h20, 1); repeat (50) @(posedge clk);
+                check("uio[2] with the last two driving (the lower one, high, wins)", {14'd0, uio_oe[2], uio_out[2]}, 3);
+                write_reg(0, 6'h20, 1); repeat (50) @(posedge clk);
+                check("uio[2] with A driving too (A low wins)", {14'd0, uio_oe[2], uio_out[2]}, 2);
+                write_reg(0, 6'h20, 0); repeat (50) @(posedge clk);
+                check("uio[2] after A stops (high again)", {14'd0, uio_oe[2], uio_out[2]}, 3);
+                write_reg(M[2:0], 6'h20, 0); write_reg(L[2:0], 6'h20, 0); repeat (20) @(posedge clk);
+                check("uio[2] released when all stop", {15'd0, uio_oe[2]}, 0);
             end
-            write_reg(3, 6'h20, 1); repeat (50) @(posedge clk);
-            check("uio[2] with only D driving (low)", {14'd0, uio_oe[2], uio_out[2]}, 2);
-            write_reg(2, 6'h20, 1); repeat (50) @(posedge clk);
-            check("uio[2] with C and D driving (C high wins)", {14'd0, uio_oe[2], uio_out[2]}, 3);
-            write_reg(0, 6'h20, 1); repeat (50) @(posedge clk);
-            check("uio[2] with A, C and D driving (A low wins)", {14'd0, uio_oe[2], uio_out[2]}, 2);
-            write_reg(0, 6'h20, 0); repeat (50) @(posedge clk);
-            check("uio[2] after A stops (C high again)", {14'd0, uio_oe[2], uio_out[2]}, 3);
-            write_reg(2, 6'h20, 0); write_reg(3, 6'h20, 0); repeat (20) @(posedge clk);
-            check("uio[2] released when all stop", {15'd0, uio_oe[2]}, 0);
             // an engine number past the last: writes ignored, reads 0, nothing else disturbed
-            write_reg(5, 6'h20, 1); write_reg(5, 6'h21, 16'h1234); repeat (20) @(posedge clk);
-            read_reg(5, 6'h28, st); check("engine 5: STATUS reads 0", st, 0);
-            read_reg(5, 6'h21, w);  check("engine 5: CLKDIV reads 0", w, 0);
-            read_reg(1, 6'h21, w);  check("engine B's CLKDIV untouched by the write to 5", w, 0);
+            e = NENG;
+            write_reg(e[2:0], 6'h20, 1); write_reg(e[2:0], 6'h21, 16'h1234); repeat (20) @(posedge clk);
+            read_reg(e[2:0], 6'h28, st); check("engine past the last: STATUS reads 0", st, 0);
+            read_reg(e[2:0], 6'h21, w);  check("engine past the last: CLKDIV reads 0", w, 0);
+            read_reg(1, 6'h21, w);       check("engine B's CLKDIV untouched by that write", w, 0);
             check("IRQ low with nothing waiting", {15'd0, irq}, 0);
-        end else begin
-            write_reg(2, 6'h20, 1); repeat (20) @(posedge clk);     // past the last engine: ignored
-            read_reg(2, 6'h28, st); check("engine 2 (not fitted): STATUS reads 0", st, 0);
         end
 
         if (errors == 0) $display("PASS: whole chip, end to end through the SPI host port");
