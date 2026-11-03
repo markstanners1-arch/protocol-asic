@@ -340,3 +340,10 @@ That's a driver change on the PC, so Mark does it himself. Then:
   own comment says to raise the target, up to 80 reported working: set to 80 (TT commit ac6fb72), second run started
   13:26 (run 41644302624). If that fails too: the SRAM program memory (saves ~27K um2 per engine, ~110K in all, taking four engines to
   about 49 %), or three engines (~46 %).
+- 3 Nov 2026 (14:30): bench being rebuilt. After the USB replug the ESP32 moved from COM7 to COM12 (the three ESP32
+  scripts now find the CH340 port themselves) and the kit's FT2232 came back on the FTDI serial driver, so
+  openFPGALoader could not open it until Zadig put WinUSB on "USB Serial Converter A" again (same as the Go Board;
+  expect this after any socket change). Kit loaded with today's two-engine build (`fpga/machxo3/build/chip.bit`),
+  ESP32 uploaded with the two-byte-command sketch; with no J4 leads fitted yet the regression reads 0xFFFF everywhere,
+  as an open MISO should. Cyclone IV board arriving within the hour; it has no pin assignments yet, so the kit stays
+  the bench for today's hardware check of the new host port.
