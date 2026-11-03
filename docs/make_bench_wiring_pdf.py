@@ -33,6 +33,11 @@ s = []
 s.append(Paragraph("Bench wiring sheet - protocol emulator on the MachXO3L kit (3 Nov 2026)", H1))
 s.append(Paragraph("Everything is <b>3.3 V logic</b>: the FPGA and ESP32 pins are not 5 V tolerant. One common ground between every board. "
                    "Check each lead by continuity to the labelled pad before blaming the design (programs/read_pins.asm shows what the chip sees).", P))
+s.append(Spacer(1, 3))
+s.append(Paragraph("<b>Column key.</b> <b>J4 hole</b> = the numbered hole on the kit's header J4 where the lead goes. "
+                   "<b>Ball</b> = the FPGA's own name for that same connection (printed beside the hole, used in the constraints file): same wire, second name, for checking. "
+                   "<b>Engine pin</b> = the number the chip's programs use for that pin (0-19). "
+                   "<b>Signal</b> = what the wire carries (CS, SCK, SCL...); the far end is in the next column (ESP32 GPIO, UNO pin or 74HC595 pin).", P))
 
 s.append(Paragraph("1. Core: kit header J4 to the ESP32 host - fit these first, then run rerun.ps1 (command r). ID register should read 0x0022.", H2))
 s.append(tbl([["J4 hole", "Ball", "Chip signal", "ESP32 GPIO", "Notes"],
