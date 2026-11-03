@@ -539,6 +539,50 @@ void ledWalk() {
   Serial.println("==== LED walk done ====");
 }
 
+// 'a': I2C address scan ("what is on this bus?"). Engine A as the I2C master on the usual pins; for every address
+// 0x08-0x77: START, the address byte with the write bit, STOP; the reply's ACK bit says whether something answered.
+// The ESP32's own I2C stays off: the devices under test hang on the two wires with their pull-ups.
+const char *i2cGuess(int a) {
+  if (a >= 0x50 && a <= 0x57) return "EEPROM (24Cxx) or our UNO/ESP32 slave";
+  if (a == 0x68) return "RTC (DS1307/DS3231) or MPU6050";
+  if (a == 0x76 || a == 0x77) return "BMP280/BME280 pressure sensor";
+  if (a == 0x27 || a == 0x3F) return "PCF8574 (LCD1602 backpack)";
+  if (a >= 0x20 && a <= 0x27) return "PCF8574 / MCP23017 port expander";
+  if (a == 0x3C || a == 0x3D) return "SSD1306 OLED";
+  if (a == 0x48) return "ADS1115 / LM75 / PCF8591";
+  if (a == 0x40) return "INA219 / HTU21D / PCA9685";
+  if (a == 0x1E) return "HMC5883L compass";
+  return "";
+}
+void i2cScan() {
+  Wire.end(); pinMode(ESP_SDA, INPUT); pinMode(ESP_SCL, INPUT);
+  writeReg(ENG_A, R_CTRL, 0); writeReg(ENG_B, R_CTRL, 0);
+  writeReg(ENG_A, R_FILTER, 0);
+  int clkdiv = (int)(CHIP_HZ / (10.0 * 100000) + 0.5) - 1;                 // 100 kHz
+  loadProgram(ENG_A, PROG_I2C_MASTER, PROG_I2C_MASTER_LEN);
+  writeReg(ENG_A, R_CLKDIV, clkdiv);
+  writeReg(ENG_A, R_WRAP, wrapReg(0, PROG_I2C_MASTER_WRAP_BOTTOM, PROG_I2C_MASTER_WRAP_TOP));
+  writeReg(ENG_A, R_OUTCFG, I2C_SDA_ENG | (1 << 5) | (I2C_SDA_ENG << 10));
+  writeReg(ENG_A, R_MISC, 1 | (I2C_SCL_ENG << 3) | (1 << 8) | (1 << 10) | (1 << 13));
+  writeReg(ENG_A, R_INCFG, I2C_SDA_ENG);
+  writeReg(ENG_A, R_CTRL, 1); delay(5);
+  Serial.println();
+  Serial.printf("==== I2C address scan at %.0f kHz on engine pins %d (SCL) / %d (SDA) ====", CHIP_HZ / (10.0 * (clkdiv + 1)) / 1000, I2C_SCL_ENG, I2C_SDA_ENG);
+  Serial.println();
+  int found = 0;
+  for (int a = 0x08; a <= 0x77; a++) {
+    i2cCmd(i2cWord(I2C_MASTER_START), false);
+    int r = i2cSend(a << 1);
+    i2cCmd(i2cWord(I2C_MASTER_STOP), false);
+    if (r < 0) { Serial.println("  no reply from the engine: is the chip loaded and wired?"); break; }
+    if ((r & 1) == 0) { found++; Serial.printf("  0x%02X answered   %s", a, i2cGuess(a)); Serial.println(); }
+    else if ((r >> 1) != (a << 1)) { Serial.printf("  0x%02X: the address did not go out as sent (0x%02X): bus held low?", a, r >> 1); Serial.println(); }
+  }
+  Serial.printf("==== scan done: %d device%s ====", found, found == 1 ? "" : "s");
+  Serial.println();
+  writeReg(ENG_A, R_CTRL, 0);
+}
+
 void loop() {
-  if (Serial.available()) { int c = Serial.read(); if (c == 'r') runAll(); else if (c == 'i') i2cTest(); else if (c == 'n') i2cTest(true); else if (c == 's') spiTest(); else if (c == 'q') irqHold(); else if (c == 'p') leadProbe(); else if (c == 'l') scopeLoop(); else if (c == 'b') i2cWireCheck(); else if (c == 'k') sclHoldLow(); else if (c == 'w') ledWalk(); }
+  if (Serial.available()) { int c = Serial.read(); if (c == 'r') runAll(); else if (c == 'i') i2cTest(); else if (c == 'n') i2cTest(true); else if (c == 's') spiTest(); else if (c == 'q') irqHold(); else if (c == 'p') leadProbe(); else if (c == 'l') scopeLoop(); else if (c == 'b') i2cWireCheck(); else if (c == 'k') sclHoldLow(); else if (c == 'w') ledWalk(); else if (c == 'a') i2cScan(); }
 }

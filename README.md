@@ -406,3 +406,8 @@ That's a driver change on the PC, so Mark does it himself. Then:
   spi_master / measure programs: it is a host-side script (ESP32 now, RP2040 MicroPython for the demo board later).
   Mark's hunch: this is likely what the brief is really after, given Jane Street's previous puzzle; the measuring
   headline made into a demo. Target: try it on the Cyclone with three engines once the Blaster is here (Fri 6 Nov).
+- 3 Nov 2026 (18:45): **first piece of the "what is this chip?" demo: an I2C address scan** (`esp32/rerun.ps1 -Cmd a`):
+  START, address + W, STOP for 0x08-0x77 with the existing i2c_master program at 100 kHz; the ACK bit in the reply says
+  who answered, and a short table guesses the part from the address (0x50-57 EEPROM, 0x68 RTC/MPU6050, 0x76 BMP280,
+  0x27/0x3F LCD backpack, 0x3C OLED, 0x48 ADC...). First run found the UNO slave at 0x50 and nothing else. Also a
+  check that the address went out as sent (a bus held low shows up as a wrong read-back).
