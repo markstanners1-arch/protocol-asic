@@ -45,10 +45,10 @@ Chip is **four engines** (`protocol_chip #(NENG)`, 4 on the ASIC; the FPGA tops 
 `[7:4]` spec 2), lowest engine wins a pin, IRQ from any engine. ISA v0.2 unchanged. I2C master is 19 words (one `xfer`
 routine: nine SDA levels out, nine seen back as byte << 1 | ACK; a sent byte read back differently = arbitration lost).
 Proven: model I2C test, cosim 400K clocks both memories, whole-chip test NENG=4 and NENG=2, LATE=0/1, four planted bugs
-caught; ESP32 sketch **PASSES on the rebuilt bench (MachXO3L kit, two-engine build, ID 0x0022, 0 problems, 3 Nov 15:00)**; the Cyclone IV board arrived 3 Nov. MachXO3 build 30.9 MHz, Cyclone 71 % LEs, both two engines.
+caught; ESP32 sketch **PASSES on the rebuilt bench (MachXO3L kit, two-engine build, ID 0x0022, 0 problems, 3 Nov 15:00), as do I2C with both slaves and SPI to the 74HC595 (16:40)**; the Cyclone IV board arrived 3 Nov (pins still TODO). Bench helper commands in the sketch: p lead probe, q IRQ hold, l scope loop, b I2C wire check, k SCL hold, w LED walk (`docs/bench_wiring.md`). MachXO3 build 30.9 MHz, Cyclone 71 % LEs, both two engines.
 TT repo commit 2d2a76c: cocotb test PASS; **gds run 41642156659 started 13:11, read it after ~15:30 with ONE `gh run view`**
 (never `gh run watch`). The v0.2 two-engine layout before it: 33.9 %, timing met, DRC/LVS clean.
-Next: read the four-engine layout (utilisation, timing); rebuild the bench (one wiring sheet: J4 -> ESP32 as in Tools above,
+**Four engines failed layout twice (61 % of the core, detailed placement); a three-engine measurement run (41665293508) was started 15:34, read it with ONE `gh run view`; the engine count is Mark's decision (options in the README, 15:40 entry).** Next: rebuild the bench (one wiring sheet: J4 -> ESP32 as in Tools above,
 then I2C/SPI pins as needed) and rerun `esp32/rerun.ps1` (ID should read 0x0022 on an FPGA); Cyclone IV pins in
 `fpga/cyclone4/chip_c4.qsf` and the same test at 50 MHz; then trade protocols (DALI, DMX512, Modbus RTU, Wiegand) and
 the 74HC595 SPI bench test.

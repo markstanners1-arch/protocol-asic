@@ -376,3 +376,9 @@ That's a driver change on the PC, so Mark does it himself. Then:
 - 3 Nov 2026 (16:15): **I2C PASS with the UNO R3 as the slave** (clock stretching, STOP-then-START and repeated-START
   read-backs), first time after the leads moved over from the ESP32, 0 problems. The 19-word master has now done both
   slaves on real wires.
+- 3 Nov 2026 (16:40): **SPI master to the 74HC595 PASS, 0 problems** (yesterday's dark LEDs were the bench, not the
+  design: rebuilt per `docs/bench_wiring.md` section 3 with four LEDs on QA-QD it worked first time). Engine B times
+  every SCK low at 60 clocks (100 kHz, clkdiv 19), each transfer returns the previous byte through QH'. New sketch
+  command `w`: a slow LED walk (QA first, 0.7 s a step, twice round, all on, all off) with the QH' read-back printed;
+  16 of 16 steps returned the byte before. So on the rebuilt bench, all with the two-byte host port: regression PASS,
+  I2C PASS with both slaves, SPI PASS. Still to wire: nothing; next hardware is the Cyclone IV.

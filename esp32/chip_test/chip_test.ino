@@ -507,6 +507,38 @@ void sclHoldLow() {
   Serial.println("==== hold done, GPIO 22 released ====");
 }
 
+// 'w': slow LED walk on the 74HC595: one output at a time, QA to QH, 0.7 s each, QA first, round twice, then all on, then all
+// off. Each transfer also reports what came back on QH' (the byte shifted in one transfer earlier).
+void ledWalk() {
+  writeReg(ENG_A, R_CTRL, 0); writeReg(ENG_B, R_CTRL, 0);
+  writeReg(ENG_A, R_FILTER, 0);
+  int clkdiv = (int)(CHIP_HZ / (6.0 * 100000) + 0.5) - 1;
+  loadProgram(ENG_A, PROG_SPI_MASTER, PROG_SPI_MASTER_LEN);
+  writeReg(ENG_A, R_CLKDIV, clkdiv);
+  writeReg(ENG_A, R_WRAP, wrapReg(0, PROG_SPI_MASTER_WRAP_BOTTOM, PROG_SPI_MASTER_WRAP_TOP));
+  writeReg(ENG_A, R_OUTCFG, SPI_MOSI_ENG | (1 << 5) | (SPI_SCK_ENG << 10));
+  writeReg(ENG_A, R_MISC, 4 | (SPI_SCK_ENG << 3) | (1 << 8) | (1 << 10));
+  writeReg(ENG_A, R_INCFG, SPI_MISO_ENG);
+  writeReg(ENG_A, R_CTRL, 1); delay(5);
+  Serial.println();
+  Serial.println("==== 74HC595 LED walk: QA (pin 15) first, then QB..QH (pins 1-7), 0.7 s each, twice; then all on 2 s, then all off ====");
+  int prev = -1;
+  for (int round = 0; round < 2; round++)
+    for (int i = 0; i < 8; i++) {
+      int bit = 1 << i;                                              // MSB first: bit 7 is clocked in first and ends at QH, bit 0 at QA
+      spiSelect(); int back = spiXfer(bit); spiDeselect();
+      Serial.printf("  sent 0x%02X -> Q%c should be lit;  QH' returned 0x%02X%s", bit, 'A' + i, back,
+                    (prev >= 0 && back != prev) ? "   (expected the previous byte)" : "");
+      Serial.println();
+      prev = bit;
+      delay(700);
+    }
+  spiSelect(); spiXfer(0xFF); spiDeselect(); Serial.println("  all eight on"); delay(2000);
+  spiSelect(); spiXfer(0x00); spiDeselect(); Serial.println("  all off");
+  writeReg(ENG_A, R_CTRL, 0);
+  Serial.println("==== LED walk done ====");
+}
+
 void loop() {
-  if (Serial.available()) { int c = Serial.read(); if (c == 'r') runAll(); else if (c == 'i') i2cTest(); else if (c == 'n') i2cTest(true); else if (c == 's') spiTest(); else if (c == 'q') irqHold(); else if (c == 'p') leadProbe(); else if (c == 'l') scopeLoop(); else if (c == 'b') i2cWireCheck(); else if (c == 'k') sclHoldLow(); }
+  if (Serial.available()) { int c = Serial.read(); if (c == 'r') runAll(); else if (c == 'i') i2cTest(); else if (c == 'n') i2cTest(true); else if (c == 's') spiTest(); else if (c == 'q') irqHold(); else if (c == 'p') leadProbe(); else if (c == 'l') scopeLoop(); else if (c == 'b') i2cWireCheck(); else if (c == 'k') sclHoldLow(); else if (c == 'w') ledWalk(); }
 }
