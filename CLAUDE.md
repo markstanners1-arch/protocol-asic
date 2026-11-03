@@ -50,5 +50,6 @@ TT repo commit 2d2a76c: cocotb test PASS; **gds run 41642156659 started 13:11, r
 (never `gh run watch`). The v0.2 two-engine layout before it: 33.9 %, timing met, DRC/LVS clean.
 **Four engines failed layout twice (61 % of the core, detailed placement); a three-engine measurement run (41665293508) was started 15:34, read it with ONE `gh run view`; the engine count is Mark's decision (options in the README, 15:40 entry).** Next: rebuild the bench (one wiring sheet: J4 -> ESP32 as in Tools above,
 then I2C/SPI pins as needed) and rerun `esp32/rerun.ps1` (ID should read 0x0022 on an FPGA); Cyclone IV pins in
-`fpga/cyclone4/chip_c4.qsf` and the same test at 50 MHz; then trade protocols (DALI, DMX512, Modbus RTU, Wiegand) and
-the 74HC595 SPI bench test.
+`fpga/cyclone4/chip_c4.qsf` and the same test at 50 MHz; then the **"what is this chip?" demo** (I2C address scan, SPI JEDEC ID, pin levels and periods, on the
+existing programs: a host script; Mark suspects this is what the brief is really after), then trade protocols (DALI,
+DMX512, Modbus RTU, Wiegand). The 74HC595 SPI bench test passes.

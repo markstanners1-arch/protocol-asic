@@ -399,3 +399,10 @@ That's a driver change on the PC, so Mark does it himself. Then:
   (one over), 6,116 (98 %) with `OPTIMIZATION_TECHNIQUE AREA` and registers packed for area, Fmax 51.6 MHz, timing met
   at 50. `fpga/cyclone4/chip_c4.v` now builds three (`#(.NENG(3))`), the kit stays at two (84 % full already). So the
   three-engine chip can be run on real hardware at the ASIC's clock as soon as the Blaster arrives.
+- 3 Nov 2026 (18:30): **on the list: a "what is this chip?" demo.** An unknown part on the bench: idle levels on all pins
+  (read_pins), any pulse or period measured (stopwatch), an I2C address scan one word per address with the ACK bit as
+  the answer (0x50 EEPROM, 0x68 RTC, 0x76 pressure...), the SPI JEDEC command 0x9F read off an unknown 8-pin device
+  (flash answers with maker and part), then exact-timed talking once there is a guess. All on the existing i2c_master /
+  spi_master / measure programs: it is a host-side script (ESP32 now, RP2040 MicroPython for the demo board later).
+  Mark's hunch: this is likely what the brief is really after, given Jane Street's previous puzzle; the measuring
+  headline made into a demo. Target: try it on the Cyclone with three engines once the Blaster is here (Fri 6 Nov).
