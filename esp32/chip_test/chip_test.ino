@@ -217,11 +217,15 @@ int i2cCmd(uint16_t word, bool expectReply) {
   }
   return -1;
 }
-void i2cTest() {
+// external = true: the slave is another board on the same two wires (e.g. arduino/i2c_slave_nano, which stretches the
+// clock); the ESP32's own I2C stays off, and the read-back is also done with a repeated START.
+void i2cTest(bool external = false) {
   errors = 0;
-  Serial.println("\n==== I2C: engine A master, engine B watching, ESP32 as the slave at 0x50 ====");
-  Wire.begin((uint8_t)I2C_ADDR, ESP_SDA, ESP_SCL, 100000);
-  Wire.onReceive(onSlaveReceive); Wire.onRequest(onSlaveRequest);
+  Serial.printf("\n==== I2C: engine A master, engine B watching, %s as the slave at 0x50 ====\n", external ? "an external board" : "the ESP32");
+  if (!external) {
+    Wire.begin((uint8_t)I2C_ADDR, ESP_SDA, ESP_SCL, 100000);
+    Wire.onReceive(onSlaveReceive); Wire.onRequest(onSlaveRequest);
+  }
   for (int i = 0; i < 16; i++) slaveRegs[i] = 0;
   slaveWrites = slaveRequests = 0;
   writeReg(ENG_A, R_CTRL, 0); writeReg(ENG_B, R_CTRL, 0);
@@ -242,7 +246,7 @@ void i2cTest() {
   writeReg(ENG_B, R_CTRL, 1); writeReg(ENG_A, R_CTRL, 1); delay(5);
   Serial.printf("  SCL %.1f kHz nominal (clkdiv %d)\n", CHIP_HZ / (10.0 * (clkdiv + 1)) / 1000, clkdiv);
 
-  const uint8_t data[4] = {0xA5, 0x3C, 0x00, 0xFF};
+  const uint8_t data[4] = {0xA5, 0x3C, 0x00, 0x7E};              // last byte not 0xFF: an unanswered read must fail
   int seen[16], nseen = 0;
   // write 4 bytes to register 3
   i2cCmd(i2cWord(I2C_MASTER_START), false);
@@ -251,12 +255,14 @@ void i2cTest() {
   nseen += drainB(seen + nseen, 16 - nseen);
   for (int i = 0; i < 4; i++) { check("data byte acked", i2cCmd(i2cWord(I2C_MASTER_SEND, data[i] << 3), true), 0); nseen += drainB(seen + nseen, 16 - nseen); }
   i2cCmd(i2cWord(I2C_MASTER_STOP), false); delay(5);
-  check("ESP32 slave received 4 data bytes", slaveWrites, 4);
-  bool same = true; for (int i = 0; i < 4; i++) same &= (slaveRegs[3 + i] == data[i]);
-  Serial.printf("  %-44s %02X %02X %02X %02X  %s\n", "ESP32 slave registers 3..6", slaveRegs[3], slaveRegs[4], slaveRegs[5], slaveRegs[6], same ? "ok" : "WRONG");
-  if (!same) errors++;
+  if (!external) {
+    check("ESP32 slave received 4 data bytes", slaveWrites, 4);
+    bool same = true; for (int i = 0; i < 4; i++) same &= (slaveRegs[3 + i] == data[i]);
+    Serial.printf("  %-44s %02X %02X %02X %02X  %s\n", "ESP32 slave registers 3..6", slaveRegs[3], slaveRegs[4], slaveRegs[5], slaveRegs[6], same ? "ok" : "WRONG");
+    if (!same) errors++;
+  }
   check("engine B saw 6 bytes", nseen, 6);
-  const int want[6] = {0xA0, 3, 0xA5, 0x3C, 0x00, 0xFF};
+  const int want[6] = {0xA0, 3, 0xA5, 0x3C, 0x00, 0x7E};
   for (int i = 0; i < 6 && i < nseen; i++) check("  B: byte + ACK bit", seen[i], want[i] << 1);
   // read them back: pointer write, STOP, a moment for the ESP32 to load its reply, then a fresh START
   nseen = 0;
@@ -269,16 +275,30 @@ void i2cTest() {
   nseen += drainB(seen + nseen, 16 - nseen);
   for (int i = 0; i < 4; i++) { check("byte read back", i2cCmd(i2cWord(I2C_MASTER_RECV, (i < 3) << 10), true), data[i]); nseen += drainB(seen + nseen, 16 - nseen); }
   i2cCmd(i2cWord(I2C_MASTER_STOP), false); delay(5);
-  check("ESP32 slave answered one read request", slaveRequests, 1);
+  if (!external) check("ESP32 slave answered one read request", slaveRequests, 1);
   check("engine B saw 7 bytes", nseen, 7);
-  const int want2[7] = {0xA0 << 1, 3 << 1, 0xA1 << 1, 0xA5 << 1, 0x3C << 1, 0x00 << 1, (0xFF << 1) | 1};
+  const int want2[7] = {0xA0 << 1, 3 << 1, 0xA1 << 1, 0xA5 << 1, 0x3C << 1, 0x00 << 1, (0x7E << 1) | 1};
   for (int i = 0; i < 7 && i < nseen; i++) check("  B: byte + ACK bit (last NAKed)", seen[i], want2[i]);
+  if (external) {                                                 // once more with a repeated START: the slave must stretch
+    Serial.println("  read back again, this time with a repeated START:");
+    nseen = 0;
+    i2cCmd(i2cWord(I2C_MASTER_START), false);
+    check("address 0xA0 acked", i2cCmd(i2cWord(I2C_MASTER_SEND, 0xA0 << 3), true), 0);
+    check("pointer 3 acked", i2cCmd(i2cWord(I2C_MASTER_SEND, 3 << 3), true), 0);
+    i2cCmd(i2cWord(I2C_MASTER_START), false);
+    check("address 0xA1 (read) acked", i2cCmd(i2cWord(I2C_MASTER_SEND, 0xA1 << 3), true), 0);
+    nseen += drainB(seen + nseen, 16 - nseen);
+    for (int i = 0; i < 4; i++) { check("byte read back", i2cCmd(i2cWord(I2C_MASTER_RECV, (i < 3) << 10), true), data[i]); nseen += drainB(seen + nseen, 16 - nseen); }
+    i2cCmd(i2cWord(I2C_MASTER_STOP), false); delay(5);
+    check("engine B saw 7 bytes", nseen, 7);
+    for (int i = 0; i < 7 && i < nseen; i++) check("  B: byte + ACK bit (last NAKed)", seen[i], want2[i]);
+  }
   // nobody home
   i2cCmd(i2cWord(I2C_MASTER_START), false);
   check("address 0x23 (no such device) NAKed", i2cCmd(i2cWord(I2C_MASTER_SEND, (0x23 << 1) << 3), true), 1);
   i2cCmd(i2cWord(I2C_MASTER_STOP), false);
   writeReg(ENG_A, R_CTRL, 0); writeReg(ENG_B, R_CTRL, 0);
-  Wire.end();
+  if (!external) Wire.end();
   Serial.printf("\n==== I2C %s (%d problems) ====\n", errors ? "FAIL" : "PASS", errors);
 }
 
@@ -304,5 +324,5 @@ void setup() {
 }
 
 void loop() {
-  if (Serial.available()) { int c = Serial.read(); if (c == 'r') runAll(); else if (c == 'i') i2cTest(); }
+  if (Serial.available()) { int c = Serial.read(); if (c == 'r') runAll(); else if (c == 'i') i2cTest(); else if (c == 'n') i2cTest(true); }
 }

@@ -280,3 +280,14 @@ That's a driver change on the PC, so Mark does it himself. Then:
   the reply when the pointer write arrives (`Wire.slaveWrite`), and read as pointer-write, STOP, fresh START. So the
   stretching test on wires still needs a stretching slave (an S3, or the UNO); the chip side is proven in simulation.
   Run it with `esp32/rerun.ps1 -Cmd i`.
+- 3 Nov 2026 (00:30): **I2C with clock stretching on real wires: PASS, 0 problems.** An Arduino UNO R3 (ATmega328P,
+  `arduino/i2c_slave_nano`, same register-pointer device as the model slave, its 5 V pull-ups switched off so it only
+  pulls low on our 3.3 V bus) as the slave on the same two wires; the ESP32's own I2C off (`rerun.ps1 -Cmd n`).
+  The AVR holds SCL low while its handler queues the reply, and the master waited for it: 4 bytes written, read back
+  with STOP-then-START **and with a repeated START**, every ACK right, engine B reporting all 20 bytes on the bus. Two
+  slips on the way, both on the bench side: the FPGA was not plugged in (the watcher showed the master's bytes on the
+  wire with no ACKs, so the chip was fine and nobody was listening), and the AVR Wire library calls the request handler
+  once per read, so it must queue all 4 bytes. The test's last data byte is now 0x7E, not 0xFF, because an unanswered
+  read reads as 0xFF and a byte that cannot fail is no test. Do not run the ESP32-as-slave test (`-Cmd i`) with the UNO
+  connected: both answer at 0x50. Not needed after all: level shifting (the 328's I2C inputs were read as the
+  datasheet's 0.7 Vcc = 3.5 V threshold, but 3.3 V worked on this board).
