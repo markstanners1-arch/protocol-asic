@@ -1,6 +1,6 @@
 // The whole chip (src/chip.v, unchanged) on a Cyclone IV E board (EP4CE6), second-opinion toolchain (Quartus).
 // Board clock 50 MHz (the ASIC's own speed) -> SPI host port up to 6.25 MHz (clk/8).
-// Pin locations live in chip_c4.qsf; fill them in from the board's schematic when it arrives.
+// Pin locations live in chip_c4.qsf (3 Nov 2026: the black EP4CE6E22C8N core board, right-hand header 38-72).
 // Same port list as fpga/machxo3/chip_mxo3.v, so the ESP32 wiring plan carries over.
 
 `default_nettype none

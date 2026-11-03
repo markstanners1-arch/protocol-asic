@@ -21,18 +21,36 @@ set_global_assignment -name RESERVE_DATA1_AFTER_CONFIGURATION "USE AS REGULAR IO
 set_global_assignment -name RESERVE_FLASH_NCE_AFTER_CONFIGURATION "USE AS REGULAR IO"
 set_global_assignment -name RESERVE_DCLK_AFTER_CONFIGURATION "USE AS REGULAR IO"
 
-# Pin locations: TODO when the board arrives (read them off its schematic / silkscreen).
-# Until then the fitter picks pins itself, which is fine for the fit and timing check.
-# set_location_assignment PIN_23 -to clk        # 50 MHz oscillator on the common EP4CE6E22 boards
-# set_location_assignment PIN_xx -to cs_n
-# set_location_assignment PIN_xx -to sck
-# set_location_assignment PIN_xx -to mosi
-# set_location_assignment PIN_xx -to miso
-# set_location_assignment PIN_xx -to irq
-# set_location_assignment PIN_xx -to uio[0] ... uio[7]
-# set_location_assignment PIN_xx -to uo_hi[0] ... uo_hi[5]
-# set_location_assignment PIN_xx -to ui_hi[0] ... ui_hi[4]
-# set_location_assignment PIN_xx -to led[0], led[1]
+# Pin locations (3 Nov 2026, read off the board's silkscreen: black EP4CE6E22C8N core board, USB-C power + CH340 serial,
+# 10-pin JTAG, 50 MHz oscillator "50M 24/25", serial RX 23 / TX 10, five LEDs on 1 2 3 7 11, both bank jumpers at 3.3 V).
+# Everything for the bench sits on the right-hand header, pins 38-72, one 3.3 V bank (VB), in silkscreen order.
+set_location_assignment PIN_24 -to clk            # 50 MHz
+set_location_assignment PIN_38 -to cs_n
+set_location_assignment PIN_39 -to sck
+set_location_assignment PIN_42 -to mosi
+set_location_assignment PIN_43 -to miso
+set_location_assignment PIN_44 -to irq
+set_location_assignment PIN_46 -to uio[0]         # engine pins 0-7
+set_location_assignment PIN_49 -to uio[1]
+set_location_assignment PIN_50 -to uio[2]
+set_location_assignment PIN_51 -to uio[3]
+set_location_assignment PIN_52 -to uio[4]
+set_location_assignment PIN_53 -to uio[5]
+set_location_assignment PIN_54 -to uio[6]
+set_location_assignment PIN_55 -to uio[7]
+set_location_assignment PIN_58 -to uo_hi[0]       # engine pins 8-13 (out only)
+set_location_assignment PIN_59 -to uo_hi[1]
+set_location_assignment PIN_60 -to uo_hi[2]
+set_location_assignment PIN_64 -to uo_hi[3]
+set_location_assignment PIN_65 -to uo_hi[4]
+set_location_assignment PIN_66 -to uo_hi[5]
+set_location_assignment PIN_67 -to ui_hi[0]       # engine pins 15-19 (in only)
+set_location_assignment PIN_68 -to ui_hi[1]
+set_location_assignment PIN_69 -to ui_hi[2]
+set_location_assignment PIN_70 -to ui_hi[3]
+set_location_assignment PIN_71 -to ui_hi[4]
+set_location_assignment PIN_1 -to led[0]          # board LEDs: IRQ, heartbeat (about 0.7 s at 50 MHz)
+set_location_assignment PIN_2 -to led[1]
 set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to cs_n
 set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to uio[*]
 

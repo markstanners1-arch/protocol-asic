@@ -384,3 +384,9 @@ That's a driver change on the PC, so Mark does it himself. Then:
   I2C PASS with both slaves, SPI PASS. Still to wire: nothing; next hardware is the Cyclone IV.
 - 3 Nov 2026 (16:55): the 595's LEDs: the flat-topped ones from the drawer never light at 3.3 V (a red one did at once); with
   red/red/white/yellow fitted the walk (`-Cmd w`) chased as it should, white dim as expected. Noted on the wiring sheet.
+- 3 Nov 2026 (17:20): **Cyclone IV board pinned.** It is the black EP4CE6E22C8N core board (USB-C power + CH340 serial,
+  10-pin JTAG, 50 MHz oscillator on pin 24, serial 23/10, LEDs 1 2 3 7 11, bank jumpers VB/VC both at 3.3 V); the headers
+  carry the FPGA pin numbers. `fpga/cyclone4/chip_c4.qsf` now places everything on the right-hand header 38-72 in
+  silkscreen order (CS 38, SCK 39, MOSI 42, MISO 43, IRQ 44, uio 46-55, uo 58-66, ui 67-71, LEDs 1/2); build 4,466 LEs
+  (71 %), Fmax 53.4 MHz, no pin complaints. `docs/bench_wiring.md` section 5 has the lead table. Not programmed yet:
+  the board needs a USB Blaster on its JTAG header and there is none on the bench (the PC has the driver); ordered.

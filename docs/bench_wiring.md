@@ -73,11 +73,27 @@ after a run, then the QH' lead.
 Holes and balls pair up in order: hole 6 is ball N14 (engine pin 0), hole 8 is N16 (pin 1), and so on along each row.
 Kit LEDs: P16 lights for IRQ, N15 is the heartbeat (they light when driven low).
 
-## 5. Cyclone IV EP4CE6 board (arrived 3 Nov 2026)
+## 5. Cyclone IV board (the black EP4CE6E22C8N core board, arrived 3 Nov 2026)
 
-Pin locations still to be chosen in `fpga/cyclone4/chip_c4.qsf`. The same eight leads of section 1 move across to
-whatever header pins we assign; the chip clock is 50 MHz there, so set `CHIP_HZ = 50e6` in the sketch (SPI goes to
-4 MHz). Its JTAG is the USB Blaster. Add the table here once the pins are picked.
+Pins are the FPGA pin numbers printed on the headers. Everything sits on the **right-hand header, 38 to 72** (one bank,
+jumper VB at 3.3; the left bank's jumper VC also at 3.3). Clock 50 MHz on pin 24, serial RX 23 / TX 10 (CH340 on the
+USB-C, power only for us), LEDs on 1 (IRQ) and 2 (heartbeat). Program over the 10-pin JTAG header with a **USB Blaster**
+(ordered 3 Nov; the driver is in): `bash fpga/cyclone4/build.sh load` (volatile SRAM, never the flash). In the sketch set
+`CHIP_HZ = 50e6` (SPI goes to 4 MHz, filter prescale to 4).
+
+| FROM (Cyclone pin) | TO | What it is |
+|---|---|---|
+| 38 | ESP32 GPIO 5 | CS |
+| 39 | ESP32 GPIO 18 | SCK |
+| 42 | ESP32 GPIO 23 | MOSI |
+| 43 | ESP32 GPIO 19 | MISO |
+| 44 | ESP32 GPIO 4 | IRQ |
+| 46 | ESP32 GPIO 16 | engine pin 0 (UART out) |
+| 67 | ESP32 GPIO 17 | engine pin 15 (pulses in) |
+| GND (header end) | ESP32 GND | common ground |
+| 49, 50, 51, 52, 53, 54, 55 | | engine pins 1-7 (two-way): I2C SCL = 50, SDA = 51; SPI SCK/MOSI/MISO/CS = 52/53/54/55 |
+| 58, 59, 60, 64, 65, 66 | | engine pins 8-13 (out only) |
+| 68, 69, 70, 71 | | engine pins 16-19 (in only) |
 
 ## If it doesn't answer: bench helpers (`esp32
 erun.ps1 -Cmd <letter>`)
