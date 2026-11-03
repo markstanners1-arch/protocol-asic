@@ -365,3 +365,11 @@ That's a driver change on the PC, so Mark does it himself. Then:
   and the block's acceptance on CMOS5L is still unchecked); (3) slimmer engines (a 20- or 24-pin space instead of 32,
   shallower FIFOs). Started a **measurement run with three engines** (TT project.v `#(.NENG(3))`, density back to 60)
   so the decision has a number behind it. Lesson for the roadmap: keep the synthesised area under about half the core.
+- 3 Nov 2026 (16:00): **I2C PASS on the rebuilt bench with the 19-word master** (one `xfer` routine) and the two-byte host
+  port: ESP32 as the slave at 0x50, 4 bytes written and read back, engine B saw all 13 bytes, 0 problems. The bus
+  wiring took three goes, each found from the ESP32 side without a meter (the meter had been tidied away): new sketch
+  command `b` (I2C wire check: engine B reads all 20 engine pins raw while the ESP32 pulls its SDA, then its SCL, low,
+  so the printout names the chip pin each lead reaches) and `k` (GPIO 22 held low for 30 s for a meter). Findings in
+  order: both leads reaching no chip pin; SDA right, SCL reaching nothing; swapping the ESP32 ends proved both GPIOs
+  good, so the kit end was wrong; it was in H16 (hole 25, an output-only pin) read as M16 (hole 10). Lesson for the
+  sheet: the ball letters H/M are easy to confuse on the kit's silkscreen; the hole number is the safer label.

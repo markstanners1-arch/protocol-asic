@@ -2,7 +2,7 @@
 
 One wire per row: **FROM** one end **TO** the other, **AND** a third end where the wire has one (a pull-up, a second
 board). Kit pins are written **J4-n (ball)**: n is the numbered hole on header J4, the ball name (K12...) is the FPGA's
-own label printed beside it, the same connection under a second name, for checking by continuity. **Engine pin**
+own label printed beside it, the same connection under a second name, for checking by continuity. **Go by the hole number**: the ball letters H and M (H16 is hole 25, M16 is hole 10) are easy to misread on the silkscreen. **Engine pin**
 numbers (0-19) are what the chip's programs call that pin. Everything is **3.3 V logic** (FPGA and ESP32 pins are not
 5 V tolerant); one common ground between every board. `programs/read_pins.asm` shows what the chip sees on every pin.
 The same sheet as a landscape PDF for the monitor: `docs/bench_wiring.pdf` (`python docs/make_bench_wiring_pdf.py`).
@@ -79,12 +79,15 @@ Pin locations still to be chosen in `fpga/cyclone4/chip_c4.qsf`. The same eight 
 whatever header pins we assign; the chip clock is 50 MHz there, so set `CHIP_HZ = 50e6` in the sketch (SPI goes to
 4 MHz). Its JTAG is the USB Blaster. Add the table here once the pins are picked.
 
-## If it doesn't answer: bench helpers (`esp32erun.ps1 -Cmd <letter>`)
+## If it doesn't answer: bench helpers (`esp32
+erun.ps1 -Cmd <letter>`)
 
 | Command | Does | Tells you |
 |---|---|---|
 | `p` | lead probe: reads MISO and IRQ with the ESP32's pull-up then pull-down, then one raw ID read | a FLOATING pin = that lead open or in the wrong hole; ID 0x0000 with MISO driven = CS, SCK or MOSI not arriving; 0xFFFF = MISO open |
 | `q` | engine B keeps data waiting for 15 s, GPIO 4 polled | the IRQ lead (and the kit's IRQ LED P16) |
+| `b` | I2C wire check: engine B reads all 20 engine pins while the ESP32 pulls its SDA, then its SCL, low | the chip pin each I2C lead actually reaches (expect SDA = pin 3, SCL = pin 2); nothing moving = that lead is in a hole the chip cannot read (3 Nov: H16, hole 25, read as M16) |
+| `k` | GPIO 22 (the ESP32's SCL) held low for 30 s | time to meter both ends of the SCL lead |
 | `l` | ID reads over and over for 30 s | a repeating burst on CS, SCK, MOSI and MISO for the oscilloscope; MISO should read 0x0022 |
 
 Lessons of 3 Nov: writes working but reads all zero = the MISO lead's J4 end in a hole that is held low (11/12 are GND,

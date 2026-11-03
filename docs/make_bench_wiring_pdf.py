@@ -37,7 +37,7 @@ s = []
 s.append(Paragraph("Bench wiring sheet - protocol emulator on the MachXO3L kit (3 Nov 2026)", H1))
 s.append(Paragraph("One wire per row: <b>FROM</b> one end <b>TO</b> the other, <b>AND</b> a third end where the wire has one (a pull-up, a second board). "
                    "Kit pins are written <b>J4-n (ball)</b>: n is the numbered hole on header J4, the ball name (K12...) is the FPGA's own label printed beside it, "
-                   "the same connection under a second name, for checking by continuity. <b>Engine pin</b> numbers (0-19) are what the chip's programs call that pin. "
+                   "the same connection under a second name, for checking by continuity. <b>Go by the hole number</b>: the ball letters H and M (H16 = hole 25, M16 = hole 10) are easy to misread. <b>Engine pin</b> numbers (0-19) are what the chip's programs call that pin. "
                    "Everything is <b>3.3 V logic</b> (FPGA and ESP32 pins are not 5 V tolerant); one common ground between every board.", P))
 
 s.append(Paragraph("1. Core: kit to ESP32 host. Fit these eight first, then rerun.ps1 (command r): ID reads 0x0022, 0 problems.", H2))
@@ -103,7 +103,7 @@ s.append(Paragraph("Holes and balls pair up in order: hole 6 is ball N14 (engine
                    "Kit LEDs: P16 lights for IRQ, N15 is the heartbeat (they light when driven low).", P))
 s.append(Paragraph("<b>Cyclone IV EP4CE6</b> (arrived 3 Nov): pin locations still to be chosen in fpga/cyclone4/chip_c4.qsf; the same eight leads of section 1 move across; "
                    "set CHIP_HZ = 50e6 in the sketch (SPI goes to 4 MHz).", P))
-s.append(Paragraph("If it doesn't answer: esp32 rerun.ps1 -Cmd p (lead probe: a FLOATING pin = lead open or wrong hole; ID 0x0000 with MISO driven = CS/SCK/MOSI not arriving; 0xFFFF = MISO open), -Cmd q (IRQ held high 15 s), -Cmd l (repeating ID reads for the oscilloscope). Writes working but reads all zero = MISO lead's J4 end in a hole held low (11/12 GND, 18-25 driven low). The kit forgets its build on any power blip: reload with bash fpga/machxo3/build.sh load.", P))
+s.append(Paragraph("If it doesn't answer: esp32 rerun.ps1 -Cmd p (lead probe: a FLOATING pin = lead open or wrong hole; ID 0x0000 with MISO driven = CS/SCK/MOSI not arriving; 0xFFFF = MISO open), -Cmd q (IRQ held high 15 s), -Cmd b (I2C wire check: names the chip pin each I2C lead reaches), -Cmd k (GPIO 22 held low 30 s to meter), -Cmd l (repeating ID reads for the oscilloscope). Writes working but reads all zero = MISO lead's J4 end in a hole held low (11/12 GND, 18-25 driven low). The kit forgets its build on any power blip: reload with bash fpga/machxo3/build.sh load.", P))
 s.append(Paragraph("Order of work after replugging", H2))
 s.append(Paragraph("1. Section 1 only. Load the kit, upload the sketch, rerun.ps1 (command r): ID 0x0022, 0 problems.&nbsp;&nbsp; "
                    "2. Add section 2: rerun.ps1 -Cmd i (ESP32 slave) or -Cmd n (UNO slave).&nbsp;&nbsp; "
