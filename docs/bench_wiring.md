@@ -23,7 +23,7 @@ Fit these eight first, then `esp32\rerun.ps1` (command `r`): the ID register rea
 | J4-26 (G15) | ESP32 GPIO 17 | | engine pin 15: the ESP32 sends test pulses into the chip (glitch filter) |
 
 J4-1 and J4-2 are the kit's 3.3 V: for pull-ups only, never joined to the ESP32's 3.3 V.
-Kit: `bash fpga/machxo3/build.sh load` (volatile SRAM only, never the NVCM). ESP32 on COM7:
+Kit: `bash fpga/machxo3/build.sh load` (volatile SRAM only, never the NVCM). ESP32: the scripts find its CH340 port themselves:
 `esp32\upload_and_watch.ps1 -Sketch chip_test`.
 
 ## 2. I2C bus (engine pins 2 = SCL, 3 = SDA)

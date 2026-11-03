@@ -53,7 +53,7 @@ s.append(wires([
 ]))
 s.append(Spacer(1, 4))
 s.append(Paragraph("J4-1 and J4-2 are the kit's 3.3 V: use for pull-ups only, never join them to the ESP32's 3.3 V. "
-                   "Kit: <b>bash fpga/machxo3/build.sh load</b> (volatile SRAM, never the NVCM). ESP32 on COM7: <b>esp32\\upload_and_watch.ps1 -Sketch chip_test</b>.", P))
+                   "Kit: <b>bash fpga/machxo3/build.sh load</b> (volatile SRAM, never the NVCM). ESP32 (the scripts find its port themselves): <b>esp32\\upload_and_watch.ps1 -Sketch chip_test</b>.", P))
 
 s.append(PageBreak())
 s.append(Paragraph("2. I2C bus (engine pins 2 = SCL, 3 = SDA). ESP32 as the slave: rerun.ps1 -Cmd i. UNO R3 as the slave: -Cmd n.", H2))
