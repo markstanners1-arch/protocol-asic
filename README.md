@@ -298,3 +298,19 @@ That's a driver change on the PC, so Mark does it himself. Then:
   = 3.3 V, then QA (15) after a run (ends on 0x55, so QA = 1); then the QH' lead. Test: `esp32/rerun.ps1 -Cmd s`.
   The v0.2 layout run (TT repo commit 4258d90) was still in its build step at 00:50; read it first thing
   (`gh run view 41543287970 -R markstanners1-arch/ttihp-protocol-emulator`, one call, no watching).
+- 3 Nov 2026 (morning): **Specs reread, the "32-word pinch" measured, and the I2C master cut from 30 words to 19.**
+  Send and receive were the same nine SCL clocks with different levels on SDA, so one routine (`xfer`) now takes the
+  nine SDA levels from the host's word (the byte, then the ACK slot) and pushes back the nine levels seen on the wire
+  as byte << 1 | ACK bit, the sniffer's format. Command words: `start << 11`, `xfer << 11 | byte << 3 | ack << 2`
+  (send: ack = 1, the slot released; read: byte = 0xFF, ack = 0 to ACK, 1 to NAK), `stop << 11`; labels 12, 3, 15.
+  Bonus: a sent byte comes back as it went on the wire, so a mismatch means another master pulled SDA low
+  (arbitration lost); `model/test_i2c.py` checks this by jamming SDA during a send (reads back 0x00). Proven: model
+  test at dividers 2/4/49 with and without stretching, cosim 400K clocks on both memory builds (engine unchanged),
+  whole-chip test LATE=0/1, ESP32 sketch compiles (not yet run: the bench is being rebuilt from scratch today, and the
+  Cyclone IV board arrives). Planted bug (eight clocks instead of nine) caught by both the model and the chip test.
+  Verdict on the pinch: by the PIO yardstick (32 instructions shared by four state machines) 32 per engine is not
+  short; the sniffer's 29 words are the lack of a "wait for pin change", not of words; checksums stay the host's job,
+  as on PIO. 64 words (a 6-bit address: JMP loses a delay bit, WRAP splits) held in reserve. Four engines partly
+  relieve it (split a job over two engines). Decision (Mark): **go to four engines next**; the engines already sit
+  in a generate loop in `src/chip.v`, so the work is the host port's engine addressing (a two-byte command), the
+  pin priority chain, tests, docs and a layout run.

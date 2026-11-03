@@ -3,8 +3,10 @@
   1. writes 4 bytes to the slave's registers at pointer 3 (START, addr+W, pointer, data..., STOP)
   2. reads them back with a repeated START (START, addr+W, pointer, START, addr+R, 4 bytes, NAK, STOP)
   3. addresses a device that isn't there and checks the engine reports the NAK
-  4. does 1 and 2 again with a slave that stretches the clock after every ACK
-and checks every ACK bit the engine reports, the slave's log of the transaction, the bytes read back,
+  4. sends a byte while something else holds SDA low: the engine's wire read-back shows it (arbitration lost)
+  5. does 1 and 2 again with a slave that stretches the clock after every ACK
+and checks every reply the engine pushes (byte as seen on the wire << 1 | ACK bit), the slave's log of the
+transaction, the bytes read back,
 and the SCL period (one bit = 10 ticks). Engine B runs programs/i2c_sniff.asm on the same bus and must report
 every byte with its ACK.  Run:  python model/test_i2c.py [clkdiv]
 """
@@ -23,8 +25,9 @@ L = prog.labels
 
 def cmd_start():      return L["start"] << 11
 def cmd_stop():       return L["stop"] << 11
-def cmd_send(byte):   return L["send"] << 11 | (byte & 0xFF) << 3
-def cmd_recv(ack):    return L["recv"] << 11 | (1 << 10 if ack else 0)
+def cmd_send(byte):   return L["xfer"] << 11 | (byte & 0xFF) << 3 | 1 << 2          # SDA released in the ACK slot
+def cmd_recv(ack):    return L["xfer"] << 11 | 0xFF << 3 | (0 if ack else 1) << 2     # SDA released for the data; our ACK
+def reply(byte, ack): return byte << 1 | ack                                           # what the engine pushes back
 
 
 def i2c_config(clkdiv):
@@ -41,6 +44,7 @@ class Bus:
         self.slave = slave
         self.slave_low = False
         self.slave_scl_low = False
+        self.jam_sda = False                               # another device holding SDA low (arbitration test)
         self.scl_rises = []
         self.scl_highs, self.scl_lows = [], []            # every SCL high and low time, in clocks
         self.last_scl = 1
@@ -51,7 +55,7 @@ class Bus:
     def levels(self):
         e = self.eng
         scl = 0 if ((e.out_dir >> SCL) & 1 and not (e.out_val >> SCL) & 1) or self.slave_scl_low else 1
-        sda = 0 if ((e.out_dir >> SDA) & 1 and not (e.out_val >> SDA) & 1) or self.slave_low else 1
+        sda = 0 if ((e.out_dir >> SDA) & 1 and not (e.out_val >> SDA) & 1) or self.slave_low or self.jam_sda else 1
         return scl, sda
 
     def run(self, words, idle_clocks=2000):
@@ -101,7 +105,7 @@ def main(clkdiv, stretch=0):
     words = [cmd_start(), cmd_send(0x50 << 1), cmd_send(3)] + [cmd_send(b) for b in data] + [cmd_stop()]
     acks = bus.run(words)
     print(f"  write {len(data)} bytes to register 3")
-    check("every byte acked (the engine's ACK bits)", acks, [0] * (2 + len(data)))
+    check("every byte seen back on the wire as sent, and acked", acks, [reply(b, 0) for b in [0xA0, 3] + data])
     check("slave saw START, addr+W, pointer, data, STOP", slave.events,
           [("start", None), ("addr", 0xA0), ("pointer", 3)] + [("write", b) for b in data] + [("stop", None)])
     check("slave's registers 3..6", slave.regs[3:7], data)
@@ -113,7 +117,8 @@ def main(clkdiv, stretch=0):
     words += [cmd_recv(ack=True)] * 3 + [cmd_recv(ack=False), cmd_stop()]
     got = bus.run(words)
     print("read them back (repeated START)")
-    check("3 ACKs then the 4 bytes", got, [0, 0, 0] + data)
+    check("3 acked sends, then the 4 bytes (last NAKed by us)", got,
+          [reply(b, 0) for b in [0xA0, 3, 0xA1] + data[:-1]] + [reply(data[-1], 1)])
     check("slave saw the read sequence", slave.events,
           [("start", None), ("addr", 0xA0), ("pointer", 3), ("start", None), ("addr", 0xA1)]
           + [("read", b) for b in data] + [("nak", None), ("stop", None)])
@@ -126,13 +131,22 @@ def main(clkdiv, stretch=0):
     slave.events.clear(); bus.replies.clear()
     got = bus.run([cmd_start(), cmd_send(0x23 << 1), cmd_stop()])
     print("address 0x23 (no such device)")
-    check("engine reports NAK (1)", got, [1])
+    check("engine reports the byte and NAK (1)", got, [reply(0x46, 1)])
     check("slave stayed quiet", slave.events, [("start", None), ("addr", 0x46), ("stop", None)])
     check("watcher saw the NAKed address", bus.seen, [0x46 << 1 | 1])
+    # 4. arbitration: send 0xA5 while another device holds SDA low; the wire read-back must show 0x00
+    slave.events.clear(); bus.replies.clear(); bus.seen.clear()
+    bus.jam_sda = True
+    got = bus.run([cmd_start(), cmd_send(0xA5)])
+    bus.jam_sda = False
+    bus.run([cmd_stop()])
+    print("send 0xA5 while another device holds SDA low")
+    check("wire read-back shows 0x00 (arbitration lost), 'ACK' low too", got, [reply(0x00, 0)])
+    check("watcher saw 0x00 acked", bus.seen, [reply(0x00, 0)])
     # SCL timing: 10 ticks per bit within a byte; every high and low at least 5 ticks (the standard's minimums)
     periods = [b - a for a, b in zip(bus.scl_rises, bus.scl_rises[1:])]
     bit = 10 * (clkdiv + 1)
-    nbytes = 6 + 7 + 1                                     # bytes sent or received over the three transactions
+    nbytes = 6 + 7 + 1 + 1                                 # bytes sent or received over the four transactions
     check(f"at least {8 * nbytes} bit periods of exactly {bit} clocks", sum(p == bit for p in periods) >= 8 * nbytes, True)
     check(f"shortest SCL high >= {bit // 2} clocks", min(bus.scl_highs[1:]) >= bit // 2, True)
     check(f"shortest SCL low >= {bit // 2} clocks", min(bus.scl_lows) >= bit // 2, True)

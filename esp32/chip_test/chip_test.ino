@@ -204,12 +204,18 @@ void onSlaveReceive(int n) {
 }
 void onSlaveRequest() { slaveRequests++; }                        // the reply was loaded in onSlaveReceive
 uint16_t i2cWord(int routine, int data = 0) { return (routine << 11) | data; }
+// the master's one transfer routine: nine SDA levels out (byte, then the ACK slot), nine levels seen back
+// as byte << 1 | ACK bit. Send: ACK slot released, reply = byte as it went on the wire, ACK bit 0 if the slave acked.
+// Read: SDA released for the byte, our ACK (0) or NAK (1) in the slot; reply = the slave's byte << 1 | our ACK bit.
+int i2cSend(uint8_t b);
+int i2cRecv(bool ack);
+int sent(uint8_t b) { return b << 1; }                           // the reply for a byte sent and acked
 int drainB(int *buf, int max) {                                   // what engine B (the watcher) has reported so far
   int n = 0;
   while (n < max && ((readReg(ENG_B, R_STATUS) >> 4) & 7)) buf[n++] = readReg(ENG_B, R_RX);
   return n;
 }
-// run one command on the master; returns what it pushed back (ACK bit for send, the byte for recv), -1 if nothing
+// run one command on the master; returns what it pushed back (byte on the wire << 1 | ACK bit), -1 if nothing
 int i2cCmd(uint16_t word, bool expectReply) {
   writeReg(ENG_A, R_TX, word);
   for (int t = 0; t < 200; t++) {                                 // a byte takes ~1 ms at 10 kHz, more if stretched
@@ -219,6 +225,8 @@ int i2cCmd(uint16_t word, bool expectReply) {
   }
   return -1;
 }
+int i2cSend(uint8_t b) { return i2cCmd(i2cWord(I2C_MASTER_XFER, (b << 3) | (1 << 2)), true); }
+int i2cRecv(bool ack)  { return i2cCmd(i2cWord(I2C_MASTER_XFER, (0xFF << 3) | ((ack ? 0 : 1) << 2)), true); }
 // external = true: the slave is another board on the same two wires (e.g. arduino/i2c_slave_nano, which stretches the
 // clock); the ESP32's own I2C stays off, and the read-back is also done with a repeated START.
 void i2cTest(bool external = false) {
@@ -252,10 +260,10 @@ void i2cTest(bool external = false) {
   int seen[16], nseen = 0;
   // write 4 bytes to register 3
   i2cCmd(i2cWord(I2C_MASTER_START), false);
-  check("address 0xA0 acked", i2cCmd(i2cWord(I2C_MASTER_SEND, 0xA0 << 3), true), 0);
-  check("pointer 3 acked", i2cCmd(i2cWord(I2C_MASTER_SEND, 3 << 3), true), 0);
+  check("address 0xA0 sent and acked", i2cSend(0xA0), sent(0xA0));
+  check("pointer 3 sent and acked", i2cSend(3), sent(3));
   nseen += drainB(seen + nseen, 16 - nseen);
-  for (int i = 0; i < 4; i++) { check("data byte acked", i2cCmd(i2cWord(I2C_MASTER_SEND, data[i] << 3), true), 0); nseen += drainB(seen + nseen, 16 - nseen); }
+  for (int i = 0; i < 4; i++) { check("data byte sent and acked", i2cSend(data[i]), sent(data[i])); nseen += drainB(seen + nseen, 16 - nseen); }
   i2cCmd(i2cWord(I2C_MASTER_STOP), false); delay(5);
   if (!external) {
     check("ESP32 slave received 4 data bytes", slaveWrites, 4);
@@ -269,13 +277,13 @@ void i2cTest(bool external = false) {
   // read them back: pointer write, STOP, a moment for the ESP32 to load its reply, then a fresh START
   nseen = 0;
   i2cCmd(i2cWord(I2C_MASTER_START), false);
-  check("address 0xA0 acked", i2cCmd(i2cWord(I2C_MASTER_SEND, 0xA0 << 3), true), 0);
-  check("pointer 3 acked", i2cCmd(i2cWord(I2C_MASTER_SEND, 3 << 3), true), 0);
+  check("address 0xA0 sent and acked", i2cSend(0xA0), sent(0xA0));
+  check("pointer 3 sent and acked", i2cSend(3), sent(3));
   i2cCmd(i2cWord(I2C_MASTER_STOP), false); delay(10);
   i2cCmd(i2cWord(I2C_MASTER_START), false);
-  check("address 0xA1 (read) acked", i2cCmd(i2cWord(I2C_MASTER_SEND, 0xA1 << 3), true), 0);
+  check("address 0xA1 (read) sent and acked", i2cSend(0xA1), sent(0xA1));
   nseen += drainB(seen + nseen, 16 - nseen);
-  for (int i = 0; i < 4; i++) { check("byte read back", i2cCmd(i2cWord(I2C_MASTER_RECV, (i < 3) << 10), true), data[i]); nseen += drainB(seen + nseen, 16 - nseen); }
+  for (int i = 0; i < 4; i++) { check("byte read back (+ our ACK bit)", i2cRecv(i < 3), (data[i] << 1) | (i < 3 ? 0 : 1)); nseen += drainB(seen + nseen, 16 - nseen); }
   i2cCmd(i2cWord(I2C_MASTER_STOP), false); delay(5);
   if (!external) check("ESP32 slave answered one read request", slaveRequests, 1);
   check("engine B saw 7 bytes", nseen, 7);
@@ -285,19 +293,19 @@ void i2cTest(bool external = false) {
     Serial.println("  read back again, this time with a repeated START:");
     nseen = 0;
     i2cCmd(i2cWord(I2C_MASTER_START), false);
-    check("address 0xA0 acked", i2cCmd(i2cWord(I2C_MASTER_SEND, 0xA0 << 3), true), 0);
-    check("pointer 3 acked", i2cCmd(i2cWord(I2C_MASTER_SEND, 3 << 3), true), 0);
+    check("address 0xA0 sent and acked", i2cSend(0xA0), sent(0xA0));
+    check("pointer 3 sent and acked", i2cSend(3), sent(3));
     i2cCmd(i2cWord(I2C_MASTER_START), false);
-    check("address 0xA1 (read) acked", i2cCmd(i2cWord(I2C_MASTER_SEND, 0xA1 << 3), true), 0);
+    check("address 0xA1 (read) sent and acked", i2cSend(0xA1), sent(0xA1));
     nseen += drainB(seen + nseen, 16 - nseen);
-    for (int i = 0; i < 4; i++) { check("byte read back", i2cCmd(i2cWord(I2C_MASTER_RECV, (i < 3) << 10), true), data[i]); nseen += drainB(seen + nseen, 16 - nseen); }
+    for (int i = 0; i < 4; i++) { check("byte read back (+ our ACK bit)", i2cRecv(i < 3), (data[i] << 1) | (i < 3 ? 0 : 1)); nseen += drainB(seen + nseen, 16 - nseen); }
     i2cCmd(i2cWord(I2C_MASTER_STOP), false); delay(5);
     check("engine B saw 7 bytes", nseen, 7);
     for (int i = 0; i < 7 && i < nseen; i++) check("  B: byte + ACK bit (last NAKed)", seen[i], want2[i]);
   }
   // nobody home
   i2cCmd(i2cWord(I2C_MASTER_START), false);
-  check("address 0x23 (no such device) NAKed", i2cCmd(i2cWord(I2C_MASTER_SEND, (0x23 << 1) << 3), true), 1);
+  check("address 0x23 (no such device) NAKed", i2cSend(0x23 << 1), ((0x23 << 1) << 1) | 1);
   i2cCmd(i2cWord(I2C_MASTER_STOP), false);
   writeReg(ENG_A, R_CTRL, 0); writeReg(ENG_B, R_CTRL, 0);
   if (!external) Wire.end();

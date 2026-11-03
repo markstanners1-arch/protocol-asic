@@ -217,8 +217,8 @@ module tb_chip;
             spi_begin({1'b0, 1'b0, 6'h00});
             for (j = 0; j < 32; j = j + 1) spi_word(init[202 + j], d);
             spi_end;
-            spi_begin({1'b0, 1'b0, 6'h21});                    // A: clkdiv 1 (20 clocks/bit), wrap 0..29, out/in/set SDA (1),
-            spi_word(16'd1, d); spi_word(16'd29 << 10, d); spi_word(16'd1 | (16'd1 << 5) | (16'd1 << 10), d); spi_word(16'h2501, d); spi_word(16'd1, d);
+            spi_begin({1'b0, 1'b0, 6'h21});                    // A: clkdiv 1 (20 clocks/bit), wrap 0..18, out/in/set SDA (1),
+            spi_word(16'd1, d); spi_word(16'd18 << 10, d); spi_word(16'd1 | (16'd1 << 5) | (16'd1 << 10), d); spi_word(16'h2501, d); spi_word(16'd1, d);
             spi_end;                                           //    set_count 1, side_base 0, side_count 1, side_opt, side_dir, MSB first
             spi_begin({1'b0, 1'b1, 6'h00});
             for (j = 0; j < 32; j = j + 1) spi_word(init[234 + j], d);
@@ -232,13 +232,13 @@ module tb_chip;
         read_reg(0, 6'h24, w); check("A MISC read back with side_dir", w, 16'h2501);
         check("I2C idle: SCL and SDA both released (open drain)", {14'd0, uio_oe[1:0]}, 0);
         spi_begin({1'b0, 1'b0, 6'h26});                        // 4 command words in one burst: START, 0xA0, 0x37, STOP
-        spi_word(16'd23 << 11, w); spi_word((16'd3 << 11) | (16'hA0 << 3), w);
-        spi_word((16'd3 << 11) | (16'h37 << 3), w); spi_word(16'd26 << 11, w);
+        spi_word(16'd12 << 11, w); spi_word((16'd3 << 11) | (16'hA0 << 3) | (16'd1 << 2), w);   // xfer: byte, ACK slot released
+        spi_word((16'd3 << 11) | (16'h37 << 3) | (16'd1 << 2), w); spi_word(16'd15 << 11, w);
         spi_end;
         repeat (3000) @(posedge clk);
-        read_reg(0, 6'h28, st); check("A RX level (two ACK bits)", st[6:4], 2);
-        read_reg(0, 6'h27, w); check("A: address byte acked (0)", w, 0);
-        read_reg(0, 6'h27, w); check("A: data byte acked (0)", w, 0);
+        read_reg(0, 6'h28, st); check("A RX level (two replies)", st[6:4], 2);
+        read_reg(0, 6'h27, w); check("A: address byte as sent on the wire + ACK (0)", w, 16'hA0 << 1);
+        read_reg(0, 6'h27, w); check("A: data byte as sent on the wire + ACK (0)", w, 16'h37 << 1);
         read_reg(1, 6'h28, st); check("B RX level (two bytes seen)", st[6:4], 2);
         read_reg(1, 6'h27, w); check("B saw address 0xA0 + ACK", w, 16'hA0 << 1);
         read_reg(1, 6'h27, w); check("B saw data 0x37 + ACK", w, 16'h37 << 1);
