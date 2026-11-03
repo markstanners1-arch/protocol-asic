@@ -146,6 +146,12 @@ One change while writing the exact encoding: each engine gets **its own 32-word 
 (64 words in all, as planned) instead of one shared 64-word memory. A jump then needs only a 5-bit address,
 which fits the 16-bit instruction. The exact encoding is in `docs/isa.md`.
 
+**3 Nov 2026: four engines.** The first layout used a third of the 6x4 tile, so the chip now has four engines
+(A-D) instead of two, each with its own 32-word program memory; the FPGA boards, which cannot hold four, build the
+same design with two. The host command grew to 16 bits to carry a 3-bit engine number, and register 0x2A tells the
+host how many engines there are (`docs/host_port.md` v0.2). The lowest-numbered engine driving a pin wins.
+The 20 protocol pins are shared, so four engines means about five pins each: a UART, an I2C, an SPI and a DALI at once.
+
 ## Open questions (as first asked)
 
 1. **Two engines or one?** Two lets, say, an SPI master and a UART run at once, or TX and RX separately. *Lean: two.*

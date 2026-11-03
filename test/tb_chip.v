@@ -1,10 +1,12 @@
 // End-to-end test of the whole chip, driven only through the SPI host port (as a real host would).
 // Engine A: UART transmitter on engine pin 0 (uio[0]), 40 clocks per bit.
 // Engine B: measures the bit time of the first 'U' on the same pin, pushes it to its RX FIFO.
-// Then: FIFO reads, pin conflicts, the glitch filter, and I2C (A master, B watching, a bench slave that ACKs).
+// Then: FIFO reads, pin conflicts, the glitch filter, I2C (A master, B watching, a bench slave that ACKs), and the
+// four-engine additions of 3 Nov 2026: the ID register, engines C and D, the priority chain, engine numbers past the last.
 `timescale 1ns/1ps
 `default_nettype none
 module tb_chip;
+    parameter NENG = 4;                // engines in the chip under test (4 = ASIC; 2 = the FPGA builds): -P tb_chip.NENG=2
     reg clk = 0; always #5 clk = ~clk;
     reg rst_n = 0;
     reg cs_n = 1, sck = 0, mosi = 0;
@@ -14,7 +16,7 @@ module tb_chip;
     reg sda_slave_low = 0;             // the bench's I2C slave pulling SDA (uio[1]) low for an ACK
     reg scl_slave_low = 0;             // ... and stretching the clock (holding SCL, uio[0], low)
     wire [7:0] uio_in = ((uio_out & uio_oe) | ~uio_oe) & ~{6'd0, sda_slave_low, scl_slave_low};
-    protocol_chip dut (.ui_in({ui_hi, mosi, sck, cs_n}), .uo_out(uo_out), .uio_in(uio_in),
+    protocol_chip #(.NENG(NENG)) dut (.ui_in({ui_hi, mosi, sck, cs_n}), .uo_out(uo_out), .uio_in(uio_in),
                        .uio_out(uio_out), .uio_oe(uio_oe), .ena(1'b1), .clk(clk), .rst_n(rst_n));
     wire miso = uo_out[0];
     wire irq  = uo_out[1];
@@ -49,11 +51,11 @@ module tb_chip;
             sck = 0;
         end
     endtask
-    task spi_begin(input [7:0] cmd);
+    task spi_begin(input [15:0] cmd);                            // {read, engine[2:0], 6'b0, register[5:0]}
         integer i; reg r;
         begin
             cs_n = 0; repeat (HALF) @(posedge clk);
-            for (i = 7; i >= 0; i = i - 1) spi_bit(cmd[i], r);
+            for (i = 15; i >= 0; i = i - 1) spi_bit(cmd[i], r);
         end
     endtask
     task spi_word(input [15:0] w, output [15:0] got);
@@ -64,19 +66,19 @@ module tb_chip;
     endtask
     task spi_end; begin repeat (HALF) @(posedge clk); cs_n = 1; repeat (2 * HALF) @(posedge clk); end endtask
 
-    task write_reg(input e, input [5:0] a, input [15:0] w);
-        reg [15:0] d; begin spi_begin({1'b0, e, a}); spi_word(w, d); spi_end; end
+    task write_reg(input [2:0] e, input [5:0] a, input [15:0] w);
+        reg [15:0] d; begin spi_begin({1'b0, e, 6'd0, a}); spi_word(w, d); spi_end; end
     endtask
-    task read_reg(input e, input [5:0] a, output [15:0] w);
-        begin spi_begin({1'b1, e, a}); spi_word(16'd0, w); spi_end; end
+    task read_reg(input [2:0] e, input [5:0] a, output [15:0] w);
+        begin spi_begin({1'b1, e, 6'd0, a}); spi_word(16'd0, w); spi_end; end
     endtask
-    task load_engine(input e, input integer base);
+    task load_engine(input [2:0] e, input integer base);
         integer i; reg [15:0] d;
         begin
-            spi_begin({1'b0, e, 6'h00});                                  // program: one burst of 32 words
+            spi_begin({1'b0, e, 6'd0, 6'h00});                            // program: one burst of 32 words
             for (i = 0; i < 32; i = i + 1) spi_word(init[base + i], d);
             spi_end;
-            spi_begin({1'b0, e, 6'h21});                                  // settings: one burst 0x21-0x25
+            spi_begin({1'b0, e, 6'd0, 6'h21});                            // settings: one burst 0x21-0x25
             for (i = 0; i < 5; i = i + 1) spi_word(init[64 + 5 * e + i], d);
             spi_end;
         end
@@ -136,7 +138,7 @@ module tb_chip;
         check("IRQ (B has data)", {15'd0, irq}, 1);
         read_reg(1, 6'h28, st); check("B RX level before", st[6:4], 1);
         // a 2-word burst from B's RX FIFO: first word = the measurement, second = 0 (empty), and only one pop
-        spi_begin({1'b1, 1'b1, 6'h27}); spi_word(0, w); check("B measured bit time (clocks)", w, 40);
+        spi_begin({1'b1, 3'd1, 6'd0, 6'h27}); spi_word(0, w); check("B measured bit time (clocks)", w, 40);
         spi_word(0, w); check("second word of burst (FIFO empty)", w, 0); spi_end;
         read_reg(1, 6'h28, st); check("B RX level after", st[6:4], 0);
         check("IRQ after reading", {15'd0, irq}, 0);
@@ -145,7 +147,7 @@ module tb_chip;
         write_reg(1, 6'h20, 0);
         begin : reload
             integer j; reg [15:0] d;
-            spi_begin({1'b0, 1'b1, 6'h00});
+            spi_begin({1'b0, 3'd1, 6'd0, 6'h00});
             for (j = 0; j < 32; j = j + 1) spi_word(init[74 + j], d);
             spi_end;
         end
@@ -155,7 +157,7 @@ module tb_chip;
         read_reg(1, 6'h28, st); check("B RX level after pushing 3", st[6:4], 3);
         read_reg(1, 6'h27, w);  check("single read", w, 7);
         read_reg(1, 6'h28, st); check("RX level after 1 read", st[6:4], 2);
-        spi_begin({1'b1, 1'b1, 6'h27}); spi_word(0, w); check("burst word 1", w, 8);
+        spi_begin({1'b1, 3'd1, 6'd0, 6'h27}); spi_word(0, w); check("burst word 1", w, 8);
         spi_word(0, w); check("burst word 2", w, 9); spi_end;
         read_reg(1, 6'h28, st); check("RX level after burst", st[6:4], 0);
 
@@ -164,10 +166,10 @@ module tb_chip;
         begin : conflict
             integer j, e; reg [15:0] d;
             for (e = 0; e < 2; e = e + 1) begin
-                spi_begin({1'b0, e[0], 6'h00});
+                spi_begin({1'b0, e[2:0], 6'd0, 6'h00});
                 for (j = 0; j < 32; j = j + 1) spi_word(init[106 + 32 * e + j], d);
                 spi_end;
-                spi_begin({1'b0, e[0], 6'h21});                    // clkdiv 0, wrap 0..31, set_base 2, set_count 1
+                spi_begin({1'b0, e[2:0], 6'd0, 6'h21});                    // clkdiv 0, wrap 0..31, set_base 2, set_count 1
                 spi_word(16'd0, d); spi_word(16'h7C00, d); spi_word(16'd2 << 10, d); spi_word(16'd1, d); spi_word(16'd0, d);
                 spi_end;
             end
@@ -185,10 +187,10 @@ module tb_chip;
         write_reg(0, 6'h20, 0); write_reg(1, 6'h20, 0);
         begin : filt
             integer j; reg [15:0] d;
-            spi_begin({1'b0, 1'b1, 6'h00});
+            spi_begin({1'b0, 3'd1, 6'd0, 6'h00});
             for (j = 0; j < 32; j = j + 1) spi_word(init[170 + j], d);
             spi_end;
-            spi_begin({1'b0, 1'b1, 6'h21});                    // clkdiv 0, wrap 0..5, outcfg 0, misc 0, in_base 15
+            spi_begin({1'b0, 3'd1, 6'd0, 6'h21});                    // clkdiv 0, wrap 0..5, outcfg 0, misc 0, in_base 15
             spi_word(16'd0, d); spi_word(16'd0 | (16'd0 << 5) | (16'd5 << 10), d); spi_word(16'd0, d); spi_word(16'd0, d); spi_word(16'd15, d);
             spi_end;
         end
@@ -214,16 +216,16 @@ module tb_chip;
         write_reg(0, 6'h20, 0); write_reg(1, 6'h20, 0);
         begin : i2c
             integer j; reg [15:0] d;
-            spi_begin({1'b0, 1'b0, 6'h00});
+            spi_begin({1'b0, 3'd0, 6'd0, 6'h00});
             for (j = 0; j < 32; j = j + 1) spi_word(init[202 + j], d);
             spi_end;
-            spi_begin({1'b0, 1'b0, 6'h21});                    // A: clkdiv 1 (20 clocks/bit), wrap 0..18, out/in/set SDA (1),
+            spi_begin({1'b0, 3'd0, 6'd0, 6'h21});                    // A: clkdiv 1 (20 clocks/bit), wrap 0..18, out/in/set SDA (1),
             spi_word(16'd1, d); spi_word(16'd18 << 10, d); spi_word(16'd1 | (16'd1 << 5) | (16'd1 << 10), d); spi_word(16'h2501, d); spi_word(16'd1, d);
             spi_end;                                           //    set_count 1, side_base 0, side_count 1, side_opt, side_dir, MSB first
-            spi_begin({1'b0, 1'b1, 6'h00});
+            spi_begin({1'b0, 3'd1, 6'd0, 6'h00});
             for (j = 0; j < 32; j = j + 1) spi_word(init[234 + j], d);
             spi_end;
-            spi_begin({1'b0, 1'b1, 6'h21});                    // B: clkdiv 0, wrap 0..31, out_right, in_base 0, jmp_pin SDA
+            spi_begin({1'b0, 3'd1, 6'd0, 6'h21});                    // B: clkdiv 0, wrap 0..31, out_right, in_base 0, jmp_pin SDA
             spi_word(16'd0, d); spi_word(16'd31 << 10, d); spi_word(16'd0, d); spi_word(16'h0800, d); spi_word(16'd1 << 5, d);
             spi_end;
         end
@@ -231,7 +233,7 @@ module tb_chip;
         write_reg(1, 6'h20, 1); write_reg(0, 6'h20, 1); repeat (50) @(posedge clk);
         read_reg(0, 6'h24, w); check("A MISC read back with side_dir", w, 16'h2501);
         check("I2C idle: SCL and SDA both released (open drain)", {14'd0, uio_oe[1:0]}, 0);
-        spi_begin({1'b0, 1'b0, 6'h26});                        // 4 command words in one burst: START, 0xA0, 0x37, STOP
+        spi_begin({1'b0, 3'd0, 6'd0, 6'h26});                        // 4 command words in one burst: START, 0xA0, 0x37, STOP
         spi_word(16'd12 << 11, w); spi_word((16'd3 << 11) | (16'hA0 << 3) | (16'd1 << 2), w);   // xfer: byte, ACK slot released
         spi_word((16'd3 << 11) | (16'h37 << 3) | (16'd1 << 2), w); spi_word(16'd15 << 11, w);
         spi_end;
@@ -243,6 +245,54 @@ module tb_chip;
         read_reg(1, 6'h27, w); check("B saw address 0xA0 + ACK", w, 16'hA0 << 1);
         read_reg(1, 6'h27, w); check("B saw data 0x37 + ACK", w, 16'h37 << 1);
         check("I2C idle again: both released", {14'd0, uio_oe[1:0]}, 0);
+
+        // four engines: ID register, engine C on its own (with the IRQ), the priority chain A > C > D, numbers past the last
+        write_reg(0, 6'h20, 0); write_reg(1, 6'h20, 0);
+        read_reg(0, 6'h2A, w); check("ID: spec version 2, number of engines", w, 16'h0020 | NENG);
+        read_reg(5, 6'h2A, w); check("ID reads the same through any engine number", w, 16'h0020 | NENG);
+        if (NENG >= 4) begin : four
+            integer j, e; reg [15:0] d;
+            spi_begin({1'b0, 3'd2, 6'd0, 6'h00});                  // C: push 7, 8, 9
+            for (j = 0; j < 32; j = j + 1) spi_word(init[74 + j], d);
+            spi_end;
+            write_reg(2, 6'h22, 16'h7C00);
+            write_reg(2, 6'h20, 1); repeat (200) @(posedge clk);
+            read_reg(2, 6'h28, st); check("C RX level after pushing 3", st[6:4], 3);
+            check("IRQ (C has data)", {15'd0, irq}, 1);
+            read_reg(2, 6'h27, w); check("C word 1", w, 7);
+            read_reg(2, 6'h27, w); check("C word 2", w, 8);
+            read_reg(2, 6'h27, w); check("C word 3", w, 9);
+            check("IRQ after reading C", {15'd0, irq}, 0);
+            write_reg(2, 6'h20, 0);
+            // priority on uio[2]: D drives low, C high, A low (drive_low is init[106..], drive_high init[138..])
+            for (e = 0; e < 4; e = e + 1) if (e != 1) begin
+                spi_begin({1'b0, e[2:0], 6'd0, 6'h00});
+                for (j = 0; j < 32; j = j + 1) spi_word(init[(e == 2 ? 138 : 106) + j], d);
+                spi_end;
+                spi_begin({1'b0, e[2:0], 6'd0, 6'h21});            // clkdiv 0, wrap 0..31, set_base 2, set_count 1
+                spi_word(16'd0, d); spi_word(16'h7C00, d); spi_word(16'd2 << 10, d); spi_word(16'd1, d); spi_word(16'd0, d);
+                spi_end;
+            end
+            write_reg(3, 6'h20, 1); repeat (50) @(posedge clk);
+            check("uio[2] with only D driving (low)", {14'd0, uio_oe[2], uio_out[2]}, 2);
+            write_reg(2, 6'h20, 1); repeat (50) @(posedge clk);
+            check("uio[2] with C and D driving (C high wins)", {14'd0, uio_oe[2], uio_out[2]}, 3);
+            write_reg(0, 6'h20, 1); repeat (50) @(posedge clk);
+            check("uio[2] with A, C and D driving (A low wins)", {14'd0, uio_oe[2], uio_out[2]}, 2);
+            write_reg(0, 6'h20, 0); repeat (50) @(posedge clk);
+            check("uio[2] after A stops (C high again)", {14'd0, uio_oe[2], uio_out[2]}, 3);
+            write_reg(2, 6'h20, 0); write_reg(3, 6'h20, 0); repeat (20) @(posedge clk);
+            check("uio[2] released when all stop", {15'd0, uio_oe[2]}, 0);
+            // an engine number past the last: writes ignored, reads 0, nothing else disturbed
+            write_reg(5, 6'h20, 1); write_reg(5, 6'h21, 16'h1234); repeat (20) @(posedge clk);
+            read_reg(5, 6'h28, st); check("engine 5: STATUS reads 0", st, 0);
+            read_reg(5, 6'h21, w);  check("engine 5: CLKDIV reads 0", w, 0);
+            read_reg(1, 6'h21, w);  check("engine B's CLKDIV untouched by the write to 5", w, 0);
+            check("IRQ low with nothing waiting", {15'd0, irq}, 0);
+        end else begin
+            write_reg(2, 6'h20, 1); repeat (20) @(posedge clk);     // past the last engine: ignored
+            read_reg(2, 6'h28, st); check("engine 2 (not fitted): STATUS reads 0", st, 0);
+        end
 
         if (errors == 0) $display("PASS: whole chip, end to end through the SPI host port");
         else $display("FAIL: %0d errors", errors);

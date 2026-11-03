@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# End-to-end chip test. Optional: CHIP_SRC_OVERRIDE="file.v=replacement.v" to swap one source (planted bugs).
+# End-to-end chip test. Optional: CHIP_SRC_OVERRIDE="file.v=replacement.v" to swap one source (planted bugs);
+# NENG=2 to test the two-engine build the FPGA boards use (default 4, the ASIC); LATE=1 to sample MISO late.
 cd "$(dirname "$0")/.."
 export PATH="/d/Tools/oss-cad-suite/bin:/d/Tools/oss-cad-suite/lib:$PATH"
 python test/gen_chip_test.py >/dev/null
 SRCS="src/chip.v src/host_spi.v src/engine.v src/prog_mem.v src/glitch_filter.v"
 if [ -n "$CHIP_SRC_OVERRIDE" ]; then SRCS="${SRCS/${CHIP_SRC_OVERRIDE%%=*}/${CHIP_SRC_OVERRIDE#*=}}"; fi
-iverilog -g2012 -o test/build/tb_chip.vvp $SRCS test/tb_chip.v && (cd test/build && vvp -n tb_chip.vvp +late=${LATE:-0} | grep -vE "finish called")
+iverilog -g2012 -P tb_chip.NENG=${NENG:-4} -o test/build/tb_chip.vvp $SRCS test/tb_chip.v && (cd test/build && vvp -n tb_chip.vvp +late=${LATE:-0} | grep -vE "finish called")

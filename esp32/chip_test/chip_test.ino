@@ -33,11 +33,12 @@ const int PULSE_PIN = 15;                  // engine pin wired to GPIO 17: 17 = 
 
 // registers (docs/host_port.md)
 const int R_CTRL = 0x20, R_CLKDIV = 0x21, R_WRAP = 0x22, R_OUTCFG = 0x23, R_MISC = 0x24, R_INCFG = 0x25,
-          R_TX = 0x26, R_RX = 0x27, R_STATUS = 0x28, R_FILTER = 0x29;
-const int ENG_A = 0, ENG_B = 1;
+          R_TX = 0x26, R_RX = 0x27, R_STATUS = 0x28, R_FILTER = 0x29, R_ID = 0x2A;
+const int ENG_A = 0, ENG_B = 1, ENG_C = 2, ENG_D = 3;   // C and D are on the ASIC only; the ID register says how many
 
-uint8_t cmd(bool rd, int eng, int reg) { return (rd ? 0x80 : 0) | (eng ? 0x40 : 0) | (reg & 0x3F); }
-void begin_(uint8_t c) { SPI.beginTransaction(SPISettings(SPI_HZ, MSBFIRST, SPI_MODE0)); digitalWrite(PIN_CS, LOW); delayMicroseconds(2); SPI.transfer(c); }
+// the 16-bit command (host_port.md v0.2): [15] read, [14:12] engine, [5:0] register
+uint16_t cmd(bool rd, int eng, int reg) { return (rd ? 0x8000 : 0) | ((eng & 7) << 12) | (reg & 0x3F); }
+void begin_(uint16_t c) { SPI.beginTransaction(SPISettings(SPI_HZ, MSBFIRST, SPI_MODE0)); digitalWrite(PIN_CS, LOW); delayMicroseconds(2); SPI.transfer16(c); }
 void end_()            { delayMicroseconds(2); digitalWrite(PIN_CS, HIGH); SPI.endTransaction(); delayMicroseconds(5); }
 void writeReg(int eng, int reg, uint16_t v) { begin_(cmd(false, eng, reg)); SPI.transfer16(v); end_(); }
 uint16_t readReg(int eng, int reg)          { begin_(cmd(true, eng, reg)); uint16_t v = SPI.transfer16(0); end_(); return v; }
@@ -366,7 +367,10 @@ void spiTest() {
 
 void runAll() {
   errors = 0;
-  Serial.println("\n==== Whole chip on the MachXO3L kit: two engines + SPI host port ====");
+  uint16_t id = readReg(ENG_A, R_ID);
+  Serial.printf("\n==== Whole chip: %d engines + SPI host port (ID 0x%04X) ====\n", id & 15, id);
+  check("ID: host port spec version 2", (id >> 4) & 15, 2);
+  check("ID: at least two engines", (id & 15) >= 2, 1);
   runAt(115200);
   runAt(57600);
   runAt(19200);

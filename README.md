@@ -314,3 +314,21 @@ That's a driver change on the PC, so Mark does it himself. Then:
   relieve it (split a job over two engines). Decision (Mark): **go to four engines next**; the engines already sit
   in a generate loop in `src/chip.v`, so the work is the host port's engine addressing (a two-byte command), the
   pin priority chain, tests, docs and a layout run.
+- 3 Nov 2026 (afternoon): **Four engines.** `protocol_chip` takes `NENG` (default 4; the MachXO3L and Cyclone tops pass 2,
+  since neither board fits four: 84 % and 72 % full with two). Host port v0.2 (`docs/host_port.md`): the command is now
+  16 bits, `[15] read, [14:12] engine, [5:0] register` (register numbers unchanged; one more byte per transaction);
+  new chip-wide read-only register 0x2A ID = `[7:4]` spec version 2, `[3:0]` number of engines, so a host can ask;
+  an engine number past the last is ignored on write and reads 0; the lowest-numbered engine driving a pin wins
+  (A > B > C > D, a chain in `src/chip.v`); IRQ = any engine's RX FIFO non-empty. The engine itself is untouched (cosim
+  400K clocks both memories, unchanged). `test/tb_chip.v` takes `NENG` (`NENG=2 bash test/run_chip.sh`), converts every
+  command to the two-byte form, and adds: ID register through any engine number, engine C running push_789 with the
+  IRQ, the priority chain with D low / C high / A low, and writes to engine 5 ignored. PASS for NENG=4 and NENG=2,
+  LATE=0/1. Planted bugs caught: the chain the wrong way round (highest wins), and the engine field taken from the
+  wrong command bits. ESP32 sketch converted (`cmd()` two bytes, `ENG_C/D`, ID check at the top of the regression) and
+  compiles; **not yet run on hardware** (bench being rebuilt). FPGA builds with two engines: MachXO3L 30.9 MHz
+  (PASS at 12), Cyclone IV 4,461 LEs (71 %), Fmax 53.56 MHz. TT repo commit 2d2a76c (sources, cocotb test with the
+  16-bit command, info.yaml/info.md "four engines"): **cocotb test PASS on GitHub**; gds run 41642156659 started 13:11,
+  to be read with one `gh run view` after ~15:30. The v0.2 two-engine layout (run 41543287970, read this morning):
+  20,448 cells, 306,341 um2, 33.9 % utilisation, setup/hold slack 0.0 at all three corners, DRC 0, LVS 0, antenna 0
+  (24 slew and 156 max-fanout warnings at the slow corner, as before). Pins are the budget now: 20 shared by four
+  engines, about five each.

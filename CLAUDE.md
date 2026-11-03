@@ -39,14 +39,17 @@ the roadmap and a dated progress log of everything done and found. Specs: `docs/
   re-copy after changes. The cocotb test passes on GitHub; the first two layout (gds) runs were still building at
   ~21:45 on 2 Nov: check `gh run list -R markstanners1-arch/ttihp-protocol-emulator`.
 
-## State at handover (3 Nov 2026, 00:50)
-Chip is **ISA v0.2** (`side_dir`, MISC bit 13: side-set can write pin directions, for open-drain SCL). Proven: model = Verilog
-on 520K random clocks, whole-chip test, MachXO3L kit + ESP32 hardware test 0 problems. **First Tiny Tapeout layout (v0.1):
-33.5 % of 6x4, 50 MHz met at all corners, precheck and gate-level test pass**; the viewer job always fails on a private repo.
-The v0.2 layout run was still building (run 41543287970): read it with ONE `gh run view`, never `gh run watch` (it tripped
-GitHub's rate limit for 40 min). **I2C proven on real wires** against the ESP32 (no stretch) and an UNO R3 slave with clock
-stretching and repeated START (`esp32/rerun.ps1 -Cmd i` / `-Cmd n`; not both boards at once, both are 0x50). Bench wiring
-now: J4-10/13 = I2C SCL/SDA (GPIO 22/21, UNO A5/A4, 5.1 k to 3.3 V); J4-14..17 = SPI to a 74HC595 (SCK, MOSI, MISO from QH',
-latch), LEDs still dark: see the README's last entry. Cyclone IV: Quartus project ready (`fpga/cyclone4`), pins TODO.
-Next: finish the 595 SPI bench test; Cyclone IV pins and the same ESP32 test at 50 MHz; SPI/DHT11/IR as further
-protocols; a MicroPython host for the RP2040 demo board; a real I2C part (24C EEPROM or DS3231) when one turns up.
+## State at handover (3 Nov 2026, afternoon)
+Chip is **four engines** (`protocol_chip #(NENG)`, 4 on the ASIC; the FPGA tops pass 2 because neither board fits four),
+**host port v0.2**: a 16-bit command `[15] read, [14:12] engine, [5:0] register`, ID register 0x2A (`[3:0]` engines,
+`[7:4]` spec 2), lowest engine wins a pin, IRQ from any engine. ISA v0.2 unchanged. I2C master is 19 words (one `xfer`
+routine: nine SDA levels out, nine seen back as byte << 1 | ACK; a sent byte read back differently = arbitration lost).
+Proven: model I2C test, cosim 400K clocks both memories, whole-chip test NENG=4 and NENG=2, LATE=0/1, four planted bugs
+caught; ESP32 sketch compiles (two-byte command, ID check) but is **not yet run on hardware: Mark cleared the bench and is
+rewiring from scratch; the Cyclone IV board arrived 3 Nov**. MachXO3 build 30.9 MHz, Cyclone 71 % LEs, both two engines.
+TT repo commit 2d2a76c: cocotb test PASS; **gds run 41642156659 started 13:11, read it after ~15:30 with ONE `gh run view`**
+(never `gh run watch`). The v0.2 two-engine layout before it: 33.9 %, timing met, DRC/LVS clean.
+Next: read the four-engine layout (utilisation, timing); rebuild the bench (one wiring sheet: J4 -> ESP32 as in Tools above,
+then I2C/SPI pins as needed) and rerun `esp32/rerun.ps1` (ID should read 0x0022 on an FPGA); Cyclone IV pins in
+`fpga/cyclone4/chip_c4.qsf` and the same test at 50 MHz; then trade protocols (DALI, DMX512, Modbus RTU, Wiegand) and
+the 74HC595 SPI bench test.

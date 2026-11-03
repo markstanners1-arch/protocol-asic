@@ -1,6 +1,8 @@
-# Host port, v0.1 (2 Nov 2026)
+# Host port, v0.2 (3 Nov 2026: four engines, a two-byte command, an ID register)
 
 How a microcontroller (the RP2040 on the Tiny Tapeout board, an ESP32, a Raspberry Pi) talks to the chip.
+The chip has **four engines** (A-D, numbered 0-3); the FPGA bench builds of the same design have two (A, B).
+Read register 0x2A to find out how many.
 
 ## Wires
 
@@ -10,7 +12,7 @@ How a microcontroller (the RP2040 on the Tiny Tapeout board, an ESP32, a Raspber
 | `ui_in[1]` | SCK | in |
 | `ui_in[2]` | MOSI | in |
 | `uo_out[0]` | MISO | out |
-| `uo_out[1]` | IRQ: high while either engine's RX FIFO holds data | out |
+| `uo_out[1]` | IRQ: high while any engine's RX FIFO holds data | out |
 
 SPI **mode 0** (clock idles low, data sampled on the rising edge, changed on the falling edge), MSB first.
 MISO only ever changes just after a **falling** edge, so a host may sample it anywhere between the rising
@@ -21,14 +23,17 @@ The chip samples SCK with its own clock, so **SCK must be at most 1/8 of the chi
 ## A transaction
 
 ```
-CS low | command byte | 16-bit word | 16-bit word | ... | CS high
+CS low | 16-bit command | 16-bit word | 16-bit word | ... | CS high
 ```
 
-Command byte: `[7] 1 = read, 0 = write`  `[6] engine (0 = A, 1 = B)`  `[5:0] register`.
+Command: `[15] 1 = read, 0 = write`  `[14:12] engine (0 = A ... 3 = D)`  `[11:6] 0`  `[5:0] register`.
+So the first byte is `read << 7 | engine << 4` and the second is the register. (v0.1 had a one-byte command with a
+one-bit engine field; it grew on 3 Nov 2026 when the chip went from two engines to four.) An engine number past the
+last one is harmless: its writes are ignored and its reads return 0.
 
 Each 16-bit word is written to, or read from, the register; then the register number **moves on by one**,
 except for the two FIFO registers, which stay put (so a burst of words goes through the same FIFO).
-A whole program is loaded with one command byte and 32 words. When reading, the chip sends each word
+A whole program is loaded with one command and 32 words. When reading, the chip sends each word
 while the host clocks out anything (zeros).
 
 ## Registers (per engine)
@@ -45,7 +50,8 @@ while the host clocks out anything (zeros).
 | 0x26 | TXFIFO | W | push a word to the engine (dropped if the FIFO is full: check STATUS) |
 | 0x27 | RXFIFO | R | pop a word from the engine (reads 0 if empty) |
 | 0x28 | STATUS | R | [2:0] TX level, [6:4] RX level, [8] running, [13:9] pc |
-| 0x29 | FILTER | R/W | **chip-wide** (either engine-select bit reaches it): input glitch filter, [3:0] N, [7:4] P; a new input level must hold for N+1 ticks of 2^P clocks (docs/input_filter.md). 0 = shortest (about 1 clock) |
+| 0x29 | FILTER | R/W | **chip-wide** (any engine number reaches it): input glitch filter, [3:0] N, [7:4] P; a new input level must hold for N+1 ticks of 2^P clocks (docs/input_filter.md). 0 = shortest (about 1 clock) |
+| 0x2A | ID | R | **chip-wide**: [3:0] number of engines (4 on the chip, 2 on the FPGA builds), [7:4] this spec's version (2) |
 
 Unlisted registers read 0 and ignore writes. All settings reset to 0 (engines stopped) when the chip resets.
 Change settings while an engine is stopped; they are applied when RUN goes to 1.
@@ -61,6 +67,6 @@ Each engine sees 32 pin numbers. On this chip:
 | 15-19 | `ui_in[3..7]` | in only |
 | others | none | read as 0 |
 
-If both engines drive the same pin, engine A wins. Both engines can read every input.
+If several engines drive the same pin, the lowest-numbered one wins (A over B over C over D). Every engine can read every input.
 Every input (engine pins 0-7 and 15-19) passes through a 2 flip-flop synchroniser and the glitch filter
 before the engines see it, which adds a few clocks of delay (the same on rising and falling edges).
