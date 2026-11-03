@@ -1,73 +1,83 @@
 # Bench wiring sheet (3 Nov 2026, bench rebuilt from scratch)
 
-Everything is **3.3 V logic**. The FPGA and the ESP32 pins are not 5 V tolerant. One common ground between every
-board. Check each lead by continuity to the labelled pad before blaming the design (`programs/read_pins.asm`
-shows what the chip sees on every pin).
+One wire per row: **FROM** one end **TO** the other, **AND** a third end where the wire has one (a pull-up, a second
+board). Kit pins are written **J4-n (ball)**: n is the numbered hole on header J4, the ball name (K12...) is the FPGA's
+own label printed beside it, the same connection under a second name, for checking by continuity. **Engine pin**
+numbers (0-19) are what the chip's programs call that pin. Everything is **3.3 V logic** (FPGA and ESP32 pins are not
+5 V tolerant); one common ground between every board. `programs/read_pins.asm` shows what the chip sees on every pin.
+The same sheet as a landscape PDF for the monitor: `docs/bench_wiring.pdf` (`python docs/make_bench_wiring_pdf.py`).
 
-## 1. Core: MachXO3L kit (header J4) to the ESP32 host
+## 1. Core: kit to ESP32 host
 
-These eight leads run the whole regression (`esp32\rerun.ps1`, command `r`). Fit these first and run `r`
-before adding anything else. The ID register should read **0x0022** (spec 2, two engines on the FPGA).
+Fit these eight first, then `esp32\rerun.ps1` (command `r`): the ID register reads **0x0022**, 0 problems.
 
-| J4 hole | Ball | Chip signal | ESP32 GPIO | Notes |
-|---|---|---|---|---|
-| 3 | K12 | CS | 5 | host SPI |
-| 5 | M14 | MOSI | 23 | host SPI |
-| 7 | L14 | MISO | 19 | host SPI |
-| 9 | M15 | SCK | 18 | host SPI |
-| 11 | GND | GND | GND | common ground |
-| 4 | K13 | IRQ | 4 | high while any engine has data |
-| 6 | N14 | engine pin 0 | 16 | engine A's UART out, ESP32 Serial2 RX |
-| 26 | G15 | engine pin 15 | 17 | glitch filter test: ESP32 sends pulses into the chip |
+| FROM | TO | AND | What it is |
+|---|---|---|---|
+| J4-3 (K12) | ESP32 GPIO 5 | | CS, host SPI |
+| J4-5 (M14) | ESP32 GPIO 23 | | MOSI, host SPI |
+| J4-7 (L14) | ESP32 GPIO 19 | | MISO, host SPI |
+| J4-9 (M15) | ESP32 GPIO 18 | | SCK, host SPI |
+| J4-11 (GND) | ESP32 GND | every other board's GND | common ground |
+| J4-4 (K13) | ESP32 GPIO 4 | | IRQ: high while any engine has data |
+| J4-6 (N14) | ESP32 GPIO 16 | | engine pin 0: engine A's UART out, into ESP32 Serial2 RX |
+| J4-26 (G15) | ESP32 GPIO 17 | | engine pin 15: the ESP32 sends test pulses into the chip (glitch filter) |
 
-J4 holes 1 and 2 are the kit's 3.3 V: usable for pull-ups, never connect them to the ESP32's 3.3 V.
-The kit's own USB programs it (`bash fpga/machxo3/build.sh load`, volatile SRAM only, never the NVCM).
-The ESP32 is on COM7 (`esp32\upload_and_watch.ps1 -Sketch chip_test`).
+J4-1 and J4-2 are the kit's 3.3 V: for pull-ups only, never joined to the ESP32's 3.3 V.
+Kit: `bash fpga/machxo3/build.sh load` (volatile SRAM only, never the NVCM). ESP32 on COM7:
+`esp32\upload_and_watch.ps1 -Sketch chip_test`.
 
-## 2. I2C: engine pins 2 and 3
+## 2. I2C bus (engine pins 2 = SCL, 3 = SDA)
 
-| J4 hole | Ball | Engine pin | Bus | ESP32 as slave (`-Cmd i`) | UNO R3 as slave (`-Cmd n`) |
-|---|---|---|---|---|---|
-| 10 | M16 | 2 | SCL | GPIO 22 | A5 |
-| 13 | L15 | 3 | SDA | GPIO 21 | A4 |
+ESP32 as the slave: `rerun.ps1 -Cmd i`. UNO R3 as the slave: `-Cmd n`.
 
-- One 5.1 k pull-up from SCL to 3.3 V and one from SDA to 3.3 V (3.3 V from J4-1 or the UNO's 3.3 V pin; one source).
-- UNO ground to the common ground; the UNO sketch (`arduino/i2c_slave_nano`, COM11) switches its own 5 V pull-ups off.
-- Never both slaves at once: both answer at 0x50. Unplug the UNO's A4/A5 for `-Cmd i`.
+| FROM | TO | AND | What it is |
+|---|---|---|---|
+| J4-10 (M16) SCL | ESP32 GPIO 22 or UNO A5 | 5.1 k resistor to 3.3 V | SCL, engine pin 2 |
+| J4-13 (L15) SDA | ESP32 GPIO 21 or UNO A4 | 5.1 k resistor to 3.3 V | SDA, engine pin 3 |
+| UNO GND | common ground | | only when the UNO is the slave; its sketch switches its own 5 V pull-ups off |
+| 3.3 V for the two pull-ups | J4-1 or the UNO's 3.3 V pin | | one source, not both |
 
-## 3. SPI master to the 74HC595: engine pins 4 to 7
+**Never both slaves at once** (both answer at 0x50): unplug the UNO's A4 and A5 for `-Cmd i`.
+UNO sketch: `arduino/i2c_slave_nano` on COM11.
 
-| J4 hole | Ball | Engine pin | Signal | 74HC595 pin |
-|---|---|---|---|---|
-| 14 | L16 | 4 | SCK | 11 SRCLK |
-| 15 | K14 | 5 | MOSI | 14 SER |
-| 16 | K16 | 6 | MISO | 9 QH' (serial out) |
-| 17 | K15 | 7 | CS / latch | 12 RCLK |
+## 3. SPI master to the 74HC595 (engine pins 4 to 7)
 
-595 power: pin 16 VCC = 3.3 V, pin 8 GND, pin 13 OE = GND (outputs on), pin 10 SRCLR = 3.3 V (not clearing).
-LEDs: QA..QH = pins 15, 1, 2, 3, 4, 5, 6, 7, each through about 330 ohms to ground (long leg to the 595).
-Test `-Cmd s`: every transfer returns the previous byte through QH'; the run ends on 0x55, so QA (pin 15) = high.
-Last night (before the rebuild) the LEDs stayed dark and MISO read 0 with the chip side confirmed good: meter the
-four power pins first, then QA after a run, then the QH' lead.
+`rerun.ps1 -Cmd s`.
 
-## 4. The whole of J4 (for anything new)
+| FROM | TO | AND | What it is |
+|---|---|---|---|
+| J4-14 (L16) | 595 pin 11 SRCLK | | SCK, engine pin 4 |
+| J4-15 (K14) | 595 pin 14 SER | | MOSI, engine pin 5 |
+| J4-16 (K16) | 595 pin 9 QH' | | MISO, engine pin 6: the 595's serial out comes back |
+| J4-17 (K15) | 595 pin 12 RCLK | | CS / latch, engine pin 7 |
+| 595 pin 16 VCC | 3.3 V | | power |
+| 595 pin 8 GND | common ground | | power |
+| 595 pin 13 OE | GND | | outputs enabled |
+| 595 pin 10 SRCLR | 3.3 V | | not clearing |
+| 595 pins 15, 1, 2, 3, 4, 5, 6, 7 (QA..QH) | LED long leg | LED short leg -> 330 ohm -> GND | eight LEDs; the run ends on 0x55 so QA (pin 15) is high |
 
-| J4 holes | Balls | Chip pins | Engine pins | Direction |
-|---|---|---|---|---|
-| 6, 8, 10, 13, 14, 15, 16, 17 | N14 N16 M16 L15 L16 K14 K16 K15 | uio[0..7] | 0-7 | in and out (open drain able) |
-| 18, 19, 20 | J14 H14 J15 | uo_out[2..4] | 8-10 | out only |
-| 23, 24, 25 | J16 H15 H16 | uo_out[5..7] | 11-13 | out only |
-| 26, 27, 28, 29, 30 | G15 G16 F15 F16 E15 | ui_in[3..7] | 15-19 | in only |
-| 1, 2 | 3.3 V | | | |
-| 11, 12 | GND | | | |
+Before the rebuild the LEDs stayed dark with the chip side proven good: meter pins 16, 8, 13, 10 first, then pin 15
+after a run, then the QH' lead.
 
+## 4. Every J4 hole the chip uses (for anything new)
+
+| J4 holes | Balls | Engine pins | Direction |
+|---|---|---|---|
+| 6, 8, 10, 13, 14, 15, 16, 17 | N14, N16, M16, L15, L16, K14, K16, K15 | 0, 1, 2, 3, 4, 5, 6, 7 | in and out (open drain able) |
+| 18, 19, 20 | J14, H14, J15 | 8, 9, 10 | out only |
+| 23, 24, 25 | J16, H15, H16 | 11, 12, 13 | out only |
+| 26, 27, 28, 29, 30 | G15, G16, F15, F16, E15 | 15, 16, 17, 18, 19 | in only |
+| 1, 2 | 3.3 V | | |
+| 11, 12 | GND | | |
+
+Holes and balls pair up in order: hole 6 is ball N14 (engine pin 0), hole 8 is N16 (pin 1), and so on along each row.
 Kit LEDs: P16 lights for IRQ, N15 is the heartbeat (they light when driven low).
 
 ## 5. Cyclone IV EP4CE6 board (arrived 3 Nov 2026)
 
-Pin locations are still to be chosen in `fpga/cyclone4/chip_c4.qsf`. The same eight ESP32 leads of section 1 move
-across to whatever header pins we assign; the chip clock is 50 MHz there, so set `CHIP_HZ = 50e6` in the sketch
-(SPI goes to 4 MHz). Its JTAG is the USB Blaster. Add the table here once the pins are picked.
+Pin locations still to be chosen in `fpga/cyclone4/chip_c4.qsf`. The same eight leads of section 1 move across to
+whatever header pins we assign; the chip clock is 50 MHz there, so set `CHIP_HZ = 50e6` in the sketch (SPI goes to
+4 MHz). Its JTAG is the USB Blaster. Add the table here once the pins are picked.
 
 ## Order of work after replugging
 

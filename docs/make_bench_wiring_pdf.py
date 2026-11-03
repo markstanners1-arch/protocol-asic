@@ -1,10 +1,11 @@
-"""Landscape A4 PDF of docs/bench_wiring.md, big type for a monitor. Run: python make_wiring_pdf.py <out.pdf>"""
+"""Landscape A4 PDF of the bench wiring: one wire per row, FROM -> TO (-> AND). Big type for a monitor.
+Run: python docs/make_bench_wiring_pdf.py docs/bench_wiring.pdf"""
 import sys
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib import colors
 from reportlab.lib.units import mm
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, KeepTogether
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
 
 out = sys.argv[1]
 doc = SimpleDocTemplate(out, pagesize=landscape(A4), leftMargin=14*mm, rightMargin=14*mm, topMargin=12*mm, bottomMargin=12*mm,
@@ -14,11 +15,14 @@ H1 = ParagraphStyle("h1", parent=ss["Title"], fontSize=24, leading=28, spaceAfte
 H2 = ParagraphStyle("h2", parent=ss["Heading2"], fontSize=17, leading=21, spaceBefore=8, spaceAfter=4, textColor=colors.HexColor("#1a3d6d"))
 P  = ParagraphStyle("p", parent=ss["Normal"], fontSize=12.5, leading=16)
 PB = ParagraphStyle("pb", parent=P, fontName="Helvetica-Bold")
-C  = ParagraphStyle("c", parent=P, fontSize=12, leading=15)
+C  = ParagraphStyle("c", parent=P, fontSize=12.5, leading=15)
 CB = ParagraphStyle("cb", parent=C, fontName="Helvetica-Bold", textColor=colors.white)
+ARROW = "  ->  "
 
-def tbl(rows, widths):
-    data = [[Paragraph(str(c), CB) for c in rows[0]]] + [[Paragraph(str(c), C) for c in r] for r in rows[1:]]
+def wires(rows, widths=(70, 70, 58, 72)):
+    """rows of (from, to, and, what). Columns: FROM | TO | AND (third end, if any) | what the wire is."""
+    head = ["FROM", "TO", "AND (third end)", "What it is"]
+    data = [[Paragraph(h, CB) for h in head]] + [[Paragraph(str(c), C) for c in r] for r in rows]
     t = Table(data, colWidths=[w*mm for w in widths], repeatRows=1)
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1a3d6d")),
@@ -31,68 +35,74 @@ def tbl(rows, widths):
 
 s = []
 s.append(Paragraph("Bench wiring sheet - protocol emulator on the MachXO3L kit (3 Nov 2026)", H1))
-s.append(Paragraph("Everything is <b>3.3 V logic</b>: the FPGA and ESP32 pins are not 5 V tolerant. One common ground between every board. "
-                   "Check each lead by continuity to the labelled pad before blaming the design (programs/read_pins.asm shows what the chip sees).", P))
-s.append(Spacer(1, 3))
-s.append(Paragraph("<b>Column key.</b> <b>J4 hole</b> = the numbered hole on the kit's header J4 where the lead goes. "
-                   "<b>Ball</b> = the FPGA's own name for that same connection (printed beside the hole, used in the constraints file): same wire, second name, for checking. "
-                   "<b>Engine pin</b> = the number the chip's programs use for that pin (0-19). "
-                   "<b>Signal</b> = what the wire carries (CS, SCK, SCL...); the far end is in the next column (ESP32 GPIO, UNO pin or 74HC595 pin).", P))
+s.append(Paragraph("One wire per row: <b>FROM</b> one end <b>TO</b> the other, <b>AND</b> a third end where the wire has one (a pull-up, a second board). "
+                   "Kit pins are written <b>J4-n (ball)</b>: n is the numbered hole on header J4, the ball name (K12...) is the FPGA's own label printed beside it, "
+                   "the same connection under a second name, for checking by continuity. <b>Engine pin</b> numbers (0-19) are what the chip's programs call that pin. "
+                   "Everything is <b>3.3 V logic</b> (FPGA and ESP32 pins are not 5 V tolerant); one common ground between every board.", P))
 
-s.append(Paragraph("1. Core: kit header J4 to the ESP32 host - fit these first, then run rerun.ps1 (command r). ID register should read 0x0022.", H2))
-s.append(tbl([["J4 hole", "Ball", "Chip signal", "ESP32 GPIO", "Notes"],
-              ["3", "K12", "CS", "5", "host SPI"],
-              ["5", "M14", "MOSI", "23", "host SPI"],
-              ["7", "L14", "MISO", "19", "host SPI"],
-              ["9", "M15", "SCK", "18", "host SPI"],
-              ["11", "GND", "GND", "GND", "common ground"],
-              ["4", "K13", "IRQ", "4", "high while any engine has data"],
-              ["6", "N14", "engine pin 0", "16", "engine A's UART out, ESP32 Serial2 RX"],
-              ["26", "G15", "engine pin 15", "17", "glitch filter test: the ESP32 sends pulses into the chip"]],
-             [22, 18, 36, 28, 150]))
+s.append(Paragraph("1. Core: kit to ESP32 host. Fit these eight first, then rerun.ps1 (command r): ID reads 0x0022, 0 problems.", H2))
+s.append(wires([
+    ["J4-3 (K12)", "ESP32 GPIO 5", "", "CS, host SPI"],
+    ["J4-5 (M14)", "ESP32 GPIO 23", "", "MOSI, host SPI"],
+    ["J4-7 (L14)", "ESP32 GPIO 19", "", "MISO, host SPI"],
+    ["J4-9 (M15)", "ESP32 GPIO 18", "", "SCK, host SPI"],
+    ["J4-11 (GND)", "ESP32 GND", "every other board's GND", "common ground"],
+    ["J4-4 (K13)", "ESP32 GPIO 4", "", "IRQ: high while any engine has data"],
+    ["J4-6 (N14)", "ESP32 GPIO 16", "", "engine pin 0: engine A's UART out, into ESP32 Serial2 RX"],
+    ["J4-26 (G15)", "ESP32 GPIO 17", "", "engine pin 15: the ESP32 sends test pulses into the chip (glitch filter)"],
+]))
 s.append(Spacer(1, 4))
-s.append(Paragraph("J4 holes 1 and 2 are the kit's 3.3 V: fine for pull-ups, never joined to the ESP32's 3.3 V. "
-                   "Kit: <b>bash fpga/machxo3/build.sh load</b> (volatile SRAM only, never the NVCM). ESP32 on COM7: <b>esp32\\upload_and_watch.ps1 -Sketch chip_test</b>.", P))
+s.append(Paragraph("J4-1 and J4-2 are the kit's 3.3 V: use for pull-ups only, never join them to the ESP32's 3.3 V. "
+                   "Kit: <b>bash fpga/machxo3/build.sh load</b> (volatile SRAM, never the NVCM). ESP32 on COM7: <b>esp32\\upload_and_watch.ps1 -Sketch chip_test</b>.", P))
 
 s.append(PageBreak())
-s.append(Paragraph("2. I2C: engine pins 2 and 3 (rerun.ps1 -Cmd i with the ESP32 as slave, -Cmd n with the UNO R3)", H2))
-s.append(tbl([["J4 hole", "Ball", "Engine pin", "Bus", "ESP32 as slave (-Cmd i)", "UNO R3 as slave (-Cmd n)"],
-              ["10", "M16", "2", "SCL", "GPIO 22", "A5"],
-              ["13", "L15", "3", "SDA", "GPIO 21", "A4"]],
-             [22, 18, 28, 20, 80, 80]))
+s.append(Paragraph("2. I2C bus (engine pins 2 = SCL, 3 = SDA). ESP32 as the slave: rerun.ps1 -Cmd i. UNO R3 as the slave: -Cmd n.", H2))
+s.append(wires([
+    ["J4-10 (M16)  SCL", "ESP32 GPIO 22  or  UNO A5", "5.1 k resistor to 3.3 V", "SCL, engine pin 2"],
+    ["J4-13 (L15)  SDA", "ESP32 GPIO 21  or  UNO A4", "5.1 k resistor to 3.3 V", "SDA, engine pin 3"],
+    ["UNO GND", "common ground", "", "only when the UNO is the slave; its own 5 V pull-ups are switched off by its sketch"],
+    ["3.3 V for the two pull-ups", "J4-1  or  the UNO's 3.3 V pin", "", "one source, not both"],
+]))
 s.append(Spacer(1, 4))
-s.append(Paragraph("One 5.1 k pull-up from SCL to 3.3 V and one from SDA to 3.3 V (J4-1 or the UNO's 3.3 V pin, one source only). UNO ground to the common ground; "
-                   "the UNO sketch (arduino/i2c_slave_nano, COM11) switches its own 5 V pull-ups off. <b>Never both slaves at once</b> (both answer at 0x50): unplug A4/A5 for -Cmd i.", P))
-s.append(Spacer(1, 6))
-
-s.append(Paragraph("3. SPI master to the 74HC595: engine pins 4 to 7 (rerun.ps1 -Cmd s)", H2))
-s.append(tbl([["J4 hole", "Ball", "Engine pin", "Signal", "74HC595 pin"],
-              ["14", "L16", "4", "SCK", "11 SRCLK"],
-              ["15", "K14", "5", "MOSI", "14 SER"],
-              ["16", "K16", "6", "MISO", "9 QH' (serial out)"],
-              ["17", "K15", "7", "CS / latch", "12 RCLK"]],
-             [22, 18, 28, 32, 60]))
-s.append(Spacer(1, 4))
-s.append(Paragraph("595 power: pin 16 VCC = 3.3 V, pin 8 GND, pin 13 OE = GND (outputs on), pin 10 SRCLR = 3.3 V (not clearing). "
-                   "LEDs on QA..QH = pins 15, 1, 2, 3, 4, 5, 6, 7, each through about 330 ohms to ground (long leg to the 595). "
-                   "Every transfer returns the previous byte through QH'; the run ends on 0x55, so QA (pin 15) = high. "
-                   "Before the rebuild the LEDs stayed dark with the chip side proven good: meter the four power pins first, then QA after a run, then the QH' lead.", P))
+s.append(Paragraph("<b>Never both slaves at once</b> (both answer at address 0x50): unplug the UNO's A4 and A5 for -Cmd i. UNO sketch: arduino/i2c_slave_nano on COM11.", P))
 
 s.append(PageBreak())
-s.append(Paragraph("4. The whole of J4 (for anything new)", H2))
-s.append(tbl([["J4 holes", "Balls", "Chip pins", "Engine pins", "Direction"],
-              ["6, 8, 10, 13, 14, 15, 16, 17", "N14 N16 M16 L15 L16 K14 K16 K15", "uio[0..7]", "0-7", "in and out (open drain able)"],
-              ["18, 19, 20", "J14 H14 J15", "uo_out[2..4]", "8-10", "out only"],
-              ["23, 24, 25", "J16 H15 H16", "uo_out[5..7]", "11-13", "out only"],
-              ["26, 27, 28, 29, 30", "G15 G16 F15 F16 E15", "ui_in[3..7]", "15-19", "in only"],
-              ["1, 2", "3.3 V", "", "", ""],
-              ["11, 12", "GND", "", "", ""]],
-             [62, 78, 36, 30, 60]))
+s.append(Paragraph("3. SPI master to the 74HC595 (engine pins 4 to 7). rerun.ps1 -Cmd s.", H2))
+s.append(wires([
+    ["J4-14 (L16)", "595 pin 11  SRCLK", "", "SCK, engine pin 4"],
+    ["J4-15 (K14)", "595 pin 14  SER", "", "MOSI, engine pin 5"],
+    ["J4-16 (K16)", "595 pin 9  QH'", "", "MISO, engine pin 6: the 595's serial out comes back"],
+    ["J4-17 (K15)", "595 pin 12  RCLK", "", "CS / latch, engine pin 7"],
+    ["595 pin 16  VCC", "3.3 V", "", "power"],
+    ["595 pin 8  GND", "common ground", "", "power"],
+    ["595 pin 13  OE", "GND", "", "outputs enabled"],
+    ["595 pin 10  SRCLR", "3.3 V", "", "not clearing"],
+    ["595 pins 15, 1, 2, 3, 4, 5, 6, 7  (QA..QH)", "LED long leg", "LED short leg -> 330 ohm -> GND", "eight LEDs; the run ends on 0x55 so QA (pin 15) is high"],
+]))
 s.append(Spacer(1, 4))
-s.append(Paragraph("Kit LEDs: P16 lights for IRQ, N15 is the heartbeat (they light when driven low). "
-                   "<b>Cyclone IV EP4CE6</b> (arrived 3 Nov): pin locations still to be chosen in fpga/cyclone4/chip_c4.qsf; the same eight leads of section 1 move across; "
+s.append(Paragraph("Before the rebuild the LEDs stayed dark with the chip side proven good: meter pins 16, 8, 13, 10 first, then pin 15 after a run, then the QH' lead.", P))
+
+s.append(PageBreak())
+s.append(Paragraph("4. Every J4 hole the chip uses (for anything new)", H2))
+head = ["J4 holes", "Balls", "Engine pins", "Direction"]
+rows = [["6, 8, 10, 13, 14, 15, 16, 17", "N14, N16, M16, L15, L16, K14, K16, K15", "0, 1, 2, 3, 4, 5, 6, 7", "in and out (open drain able)"],
+        ["18, 19, 20", "J14, H14, J15", "8, 9, 10", "out only"],
+        ["23, 24, 25", "J16, H15, H16", "11, 12, 13", "out only"],
+        ["26, 27, 28, 29, 30", "G15, G16, F15, F16, E15", "15, 16, 17, 18, 19", "in only"],
+        ["1, 2", "3.3 V", "", ""],
+        ["11, 12", "GND", "", ""]]
+data = [[Paragraph(h, CB) for h in head]] + [[Paragraph(c, C) for c in r] for r in rows]
+t = Table(data, colWidths=[62*mm, 90*mm, 58*mm, 60*mm], repeatRows=1)
+t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1a3d6d")),
+                       ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#eef2f7")]),
+                       ("GRID", (0, 0), (-1, -1), 0.6, colors.HexColor("#9aa7b8")), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                       ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
+s.append(t)
+s.append(Spacer(1, 4))
+s.append(Paragraph("Holes and balls pair up in order: hole 6 is ball N14 (engine pin 0), hole 8 is N16 (pin 1), and so on along each row. "
+                   "Kit LEDs: P16 lights for IRQ, N15 is the heartbeat (they light when driven low).", P))
+s.append(Paragraph("<b>Cyclone IV EP4CE6</b> (arrived 3 Nov): pin locations still to be chosen in fpga/cyclone4/chip_c4.qsf; the same eight leads of section 1 move across; "
                    "set CHIP_HZ = 50e6 in the sketch (SPI goes to 4 MHz).", P))
-
 s.append(Paragraph("Order of work after replugging", H2))
 s.append(Paragraph("1. Section 1 only. Load the kit, upload the sketch, rerun.ps1 (command r): ID 0x0022, 0 problems.&nbsp;&nbsp; "
                    "2. Add section 2: rerun.ps1 -Cmd i (ESP32 slave) or -Cmd n (UNO slave).&nbsp;&nbsp; "
