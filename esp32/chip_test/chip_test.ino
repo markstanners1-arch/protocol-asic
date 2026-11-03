@@ -583,6 +583,57 @@ void i2cScan() {
   writeReg(ENG_A, R_CTRL, 0);
 }
 
+// 'x': engine isolation. A hangs on a WAIT that is never met (measure_pulse on the pulse pin, which GPIO 17 holds
+// low), B keeps pushing 7, 8, 9 meanwhile, then A is stopped, reloaded and restarted through the host alone and B's
+// last word must still be waiting. On a three-engine chip, C runs the UART transmitter throughout.
+void isolationTest() {
+  errors = 0;
+  int n = readReg(ENG_A, R_ID) & 15;
+  Serial.println(); Serial.printf("==== isolation: A hung, the other %d working, A recovered alone ====", n - 1); Serial.println();
+  Serial2.end(); pinMode(PIN_PULSE, OUTPUT); digitalWrite(PIN_PULSE, LOW);
+  for (int e = 0; e < n; e++) writeReg(e, R_CTRL, 0);
+  writeReg(ENG_A, R_FILTER, 0);
+  loadProgram(ENG_A, PROG_MEASURE_PULSE, PROG_MEASURE_PULSE_LEN);
+  writeReg(ENG_A, R_CLKDIV, 0); writeReg(ENG_A, R_WRAP, wrapReg(0, PROG_MEASURE_PULSE_WRAP_BOTTOM, PROG_MEASURE_PULSE_WRAP_TOP));
+  writeReg(ENG_A, R_OUTCFG, 0); writeReg(ENG_A, R_MISC, 0); writeReg(ENG_A, R_INCFG, PULSE_PIN);
+  loadProgram(ENG_B, PROG_PUSH_789, PROG_PUSH_789_LEN);
+  writeReg(ENG_B, R_CLKDIV, 0); writeReg(ENG_B, R_WRAP, wrapReg(0, PROG_PUSH_789_WRAP_BOTTOM, PROG_PUSH_789_WRAP_TOP));
+  writeReg(ENG_B, R_OUTCFG, 0); writeReg(ENG_B, R_MISC, 0); writeReg(ENG_B, R_INCFG, 0);
+  if (n >= 3) {
+    loadProgram(ENG_C, PROG_UART_TX, PROG_UART_TX_LEN);
+    writeReg(ENG_C, R_CLKDIV, (int)(CHIP_HZ / (8.0 * 115200) + 0.5) - 1);
+    writeReg(ENG_C, R_WRAP, wrapReg(0, PROG_UART_TX_WRAP_BOTTOM, PROG_UART_TX_WRAP_TOP));
+    writeReg(ENG_C, R_OUTCFG, 0 | (1 << 5) | 0); writeReg(ENG_C, R_MISC, 1 | (0 << 3) | (1 << 8) | (1 << 10) | (1 << 11)); writeReg(ENG_C, R_INCFG, 0);
+    Serial2.begin(115200, SERIAL_8N1, PIN_RX2, -1);
+  }
+  writeReg(ENG_A, R_CTRL, 1); delay(2);
+  check("A hung on its first WAIT (STATUS pc 0, running)", (readReg(ENG_A, R_STATUS) >> 8) & 63, 1);
+  writeReg(ENG_B, R_CTRL, 1); delay(2);
+  check("B works while A hangs (word 1)", readReg(ENG_B, R_RX), 7);
+  check("B works while A hangs (word 2)", readReg(ENG_B, R_RX), 8);
+  if (n >= 3) {
+    writeReg(ENG_C, R_CTRL, 1); delay(2);
+    while (Serial2.available()) Serial2.read();
+    writeReg(ENG_C, R_TX, 'C'); writeReg(ENG_C, R_TX, '!'); delay(20);
+    String got; while (Serial2.available()) got += (char)Serial2.read();
+    Serial.printf("  %-44s [%s]  %s", "C sent over UART while A hangs", got.c_str(), got == "C!" ? "ok" : "WRONG"); Serial.println();
+    if (got != "C!") errors++;
+  }
+  check("A still hung (pc 0, running)", (readReg(ENG_A, R_STATUS) >> 8) & 63, 1);
+  // recover A alone
+  writeReg(ENG_A, R_CTRL, 0);
+  loadProgram(ENG_A, PROG_PUSH_789, PROG_PUSH_789_LEN);
+  writeReg(ENG_A, R_WRAP, wrapReg(0, PROG_PUSH_789_WRAP_BOTTOM, PROG_PUSH_789_WRAP_TOP)); writeReg(ENG_A, R_INCFG, 0);
+  writeReg(ENG_A, R_CTRL, 1); delay(2);
+  check("A recovered: pushes 7", readReg(ENG_A, R_RX), 7);
+  check("B still running", (readReg(ENG_B, R_STATUS) >> 8) & 1, 1);
+  check("B's word 3 intact", readReg(ENG_B, R_RX), 9);
+  if (n >= 3) check("C still running", (readReg(ENG_C, R_STATUS) >> 8) & 1, 1);
+  for (int e = 0; e < n; e++) writeReg(e, R_CTRL, 0);
+  digitalWrite(PIN_PULSE, HIGH);
+  Serial.println(); Serial.printf("==== isolation %s (%d problems) ====", errors ? "FAIL" : "PASS", errors); Serial.println();
+}
+
 void loop() {
-  if (Serial.available()) { int c = Serial.read(); if (c == 'r') runAll(); else if (c == 'i') i2cTest(); else if (c == 'n') i2cTest(true); else if (c == 's') spiTest(); else if (c == 'q') irqHold(); else if (c == 'p') leadProbe(); else if (c == 'l') scopeLoop(); else if (c == 'b') i2cWireCheck(); else if (c == 'k') sclHoldLow(); else if (c == 'w') ledWalk(); else if (c == 'a') i2cScan(); }
+  if (Serial.available()) { int c = Serial.read(); if (c == 'r') runAll(); else if (c == 'i') i2cTest(); else if (c == 'n') i2cTest(true); else if (c == 's') spiTest(); else if (c == 'q') irqHold(); else if (c == 'p') leadProbe(); else if (c == 'l') scopeLoop(); else if (c == 'b') i2cWireCheck(); else if (c == 'k') sclHoldLow(); else if (c == 'w') ledWalk(); else if (c == 'a') i2cScan(); else if (c == 'x') isolationTest(); }
 }

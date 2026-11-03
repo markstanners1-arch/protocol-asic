@@ -294,6 +294,63 @@ module tb_chip;
             check("IRQ low with nothing waiting", {15'd0, irq}, 0);
         end
 
+        // isolation: engine A hangs on a WAIT that is never met (measure_pulse on engine pin 16, which nothing drives:
+        // it reads 0, so "wait 1" at address 0 never completes); B and the last engine keep working; A is recovered
+        // through the host alone, without touching the others.
+        begin : isolation
+            integer j, L; reg [15:0] d;
+            L = NENG - 1;
+            for (j = 0; j < NENG; j = j + 1) write_reg(j[2:0], 6'h20, 0);
+            ui_hi = 0;
+            spi_begin({1'b0, 3'd0, 6'd0, 6'h00});                  // A: measure_pulse, in_base 16 (ui_in[4], held low)
+            for (j = 0; j < 32; j = j + 1) spi_word(init[170 + j], d);
+            spi_end;
+            spi_begin({1'b0, 3'd0, 6'd0, 6'h21});
+            spi_word(16'd0, d); spi_word(16'd5 << 10, d); spi_word(16'd0, d); spi_word(16'd0, d); spi_word(16'd16, d);
+            spi_end;
+            spi_begin({1'b0, 3'd1, 6'd0, 6'h00});                  // B: push 7, 8, 9
+            for (j = 0; j < 32; j = j + 1) spi_word(init[74 + j], d);
+            spi_end;
+            write_reg(1, 6'h22, 16'h7C00);
+            if (NENG >= 3) begin                                   // last engine: UART transmitter on engine pin 0, 40 clocks/bit
+                spi_begin({1'b0, L[2:0], 6'd0, 6'h00});
+                for (j = 0; j < 32; j = j + 1) spi_word(init[j], d);
+                spi_end;
+                spi_begin({1'b0, L[2:0], 6'd0, 6'h21});
+                for (j = 0; j < 5; j = j + 1) spi_word(init[64 + j], d);
+                spi_end;
+            end
+            write_reg(0, 6'h20, 1); repeat (100) @(posedge clk);
+            read_reg(0, 6'h28, st); check("A hung on its first WAIT (pc 0, running)", st[13:8], 6'b000001);
+            write_reg(1, 6'h20, 1); repeat (200) @(posedge clk);
+            read_reg(1, 6'h27, w); check("B works while A hangs (word 1)", w, 7);
+            read_reg(1, 6'h27, w); check("B works while A hangs (word 2)", w, 8);
+            if (NENG >= 3) begin
+                uart_watch = 1; nchars = 0; text = 0;
+                write_reg(L[2:0], 6'h20, 1);
+                write_reg(L[2:0], 6'h26, 16'h55); write_reg(L[2:0], 6'h26, 16'h3C);
+                repeat (1200) @(posedge clk);
+                check("last engine sent 2 UART bytes while A hangs", nchars, 2);
+                check("  the second byte", {8'd0, text[7:0]}, 16'h3C);
+                uart_watch = 0;
+            end
+            read_reg(0, 6'h28, st); check("A still hung (pc 0)", st[13:8], 6'b000001);
+            // recover A alone: stop, reload with push_789, start; B and the last engine untouched
+            write_reg(0, 6'h20, 0);
+            spi_begin({1'b0, 3'd0, 6'd0, 6'h00});
+            for (j = 0; j < 32; j = j + 1) spi_word(init[74 + j], d);
+            spi_end;
+            write_reg(0, 6'h22, 16'h7C00);
+            write_reg(0, 6'h20, 1); repeat (200) @(posedge clk);
+            read_reg(0, 6'h27, w); check("A recovered: pushes 7", w, 7);
+            read_reg(1, 6'h28, st); check("B still running, its last word still waiting", st[8], 1'b1);
+            read_reg(1, 6'h27, w); check("B's word 3 intact", w, 9);
+            if (NENG >= 3) begin
+                read_reg(L[2:0], 6'h28, st); check("last engine still running", st[8], 1'b1);
+            end
+            for (j = 0; j < NENG; j = j + 1) write_reg(j[2:0], 6'h20, 0);
+        end
+
         if (errors == 0) $display("PASS: whole chip, end to end through the SPI host port");
         else $display("FAIL: %0d errors", errors);
         $finish;

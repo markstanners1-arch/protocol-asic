@@ -423,3 +423,12 @@ That's a driver change on the PC, so Mark does it himself. Then:
   `core_design.md`) and the sketch say three; the TT wrapper uses the chip default and its metadata says three (new gds
   run on the push, expected the same as the measurement run). Proven at three: cosim 400K clocks both memories, whole-chip
   test NENG=3 (LATE=0/1) and NENG=2. Hardware proof of three waits for the Blaster and the Cyclone.
+- 3 Nov 2026 (late): **engine isolation proven** (Mark's question: does one engine failing hurt the others?). New section
+  in `test/tb_chip.v`: A hangs on a WAIT that is never met (measure_pulse on an input held low; STATUS shows pc 0,
+  running), B pushes 7/8/9 meanwhile, the last engine (three-engine builds) sends two UART bytes meanwhile, then A is
+  stopped, reloaded and restarted through the host alone: A runs, B is still running with its third word still
+  waiting, the last engine still running. PASS at NENG=3, 2, LATE=1. Two planted cross-couplings caught: every engine
+  reset when A stops (caught in several places), and stopping any engine popping every RX FIFO (caught only by the new
+  section). Same test in the sketch (`rerun.ps1 -Cmd x`, push_789 now exported to programs.h): **PASS on the kit**.
+  Nothing joins the engines but the host's selector, the pin priority chain and the IRQ OR; the chip-wide glitch
+  filter setting is the one shared knob.
