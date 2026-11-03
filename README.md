@@ -411,3 +411,11 @@ That's a driver change on the PC, so Mark does it himself. Then:
   who answered, and a short table guesses the part from the address (0x50-57 EEPROM, 0x68 RTC/MPU6050, 0x76 BMP280,
   0x27/0x3F LCD backpack, 0x3C OLED, 0x48 ADC...). First run found the UNO slave at 0x50 and nothing else. Also a
   check that the address went out as sent (a bus held low shows up as a wrong read-back).
+- 3 Nov 2026 (evening): **three engines lay out cleanly** (TT run 41665293508, commit f087b2d, density target 60):
+  30,221 cells, 446,885 um2, **49.5 % utilisation**, setup and hold slack 0.0 at all three corners at 50 MHz, DRC 0,
+  LVS 0, antenna 0 (49 slew and 224 fanout warnings at the slow corner, the usual kind), gate-level test PASS, 2h30m
+  build. Stats in `docs/layout/metrics_3nov_v02_3eng.csv`. So the ladder is: two engines 34 % (clean), three 49.5 %
+  (clean), four 61 % (fails detailed placement). Four would need the SRAM program memory (~49 %). Decision pending
+  Mark: three as it stands, or SRAM for four. Note the TT repo's project.v is still at `#(.NENG(3))` from the
+  measurement run; whichever way, the ProtocolASIC `src/chip.v` default (4) and the TT wrapper must agree before
+  submission.
