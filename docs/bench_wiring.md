@@ -79,7 +79,7 @@ Pins are the FPGA pin numbers printed on the headers. Everything sits on the **r
 jumper VB at 3.3; the left bank's jumper VC also at 3.3). Clock 50 MHz on pin 24, serial RX 23 / TX 10 (CH340 on the
 USB-C, power only for us), LEDs on 1 (IRQ) and 2 (heartbeat). Program over the 10-pin JTAG header with a **USB Blaster**
 (ordered 3 Nov; the driver is in): `bash fpga/cyclone4/build.sh load` (volatile SRAM, never the flash). In the sketch set
-`CHIP_HZ = 50e6` (SPI goes to 4 MHz, filter prescale to 4).
+`CHIP_HZ = 50e6` (SPI goes to 4 MHz, filter prescale to 4). This board runs **three engines** (ID reads 0x0023); the kit runs two.
 
 | FROM (Cyclone pin) | TO | What it is |
 |---|---|---|

@@ -55,3 +55,8 @@ set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to cs_n
 set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to uio[*]
 
 set_global_assignment -name LAST_QUARTUS_VERSION "25.1std.0 Lite Edition"
+# Area first (3 Nov 2026): three engines need 6,273 cells of 6,272 with the default settings, 6,116 with these
+set_global_assignment -name OPTIMIZATION_TECHNIQUE AREA
+
+set_global_assignment -name CYCLONEII_OPTIMIZATION_TECHNIQUE AREA
+set_global_assignment -name AUTO_PACKED_REGISTERS_STRATIX "MINIMIZE AREA"

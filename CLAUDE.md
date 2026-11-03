@@ -40,7 +40,7 @@ the roadmap and a dated progress log of everything done and found. Specs: `docs/
   ~21:45 on 2 Nov: check `gh run list -R markstanners1-arch/ttihp-protocol-emulator`.
 
 ## State at handover (3 Nov 2026, afternoon)
-Chip is **four engines** (`protocol_chip #(NENG)`, 4 on the ASIC; the FPGA tops pass 2 because neither board fits four),
+Chip is **four engines** (`protocol_chip #(NENG)`, 4 on the ASIC; the MachXO3L top passes 2, the Cyclone IV top 3: it fits at 98 % with Quartus set to optimise for area; neither fits four),
 **host port v0.2**: a 16-bit command `[15] read, [14:12] engine, [5:0] register`, ID register 0x2A (`[3:0]` engines,
 `[7:4]` spec 2), lowest engine wins a pin, IRQ from any engine. ISA v0.2 unchanged. I2C master is 19 words (one `xfer`
 routine: nine SDA levels out, nine seen back as byte << 1 | ACK; a sent byte read back differently = arbitration lost).

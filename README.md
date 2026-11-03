@@ -395,3 +395,7 @@ That's a driver change on the PC, so Mark does it himself. Then:
   test/run_chip.sh`): the last engine runs push_789 with the IRQ, the priority chain is tested with the last engine
   low, the one below it high, then A low (for three or more engines), and the number past the last is checked. PASS at
   2, 3 and 4; the reversed-chain bug planted at 3 is caught. So whichever count the layout settles on is already proven.
+- 3 Nov 2026 (18:15): **three engines fit the Cyclone IV board**: 6,273 cells wanted of 6,272 with Quartus's defaults
+  (one over), 6,116 (98 %) with `OPTIMIZATION_TECHNIQUE AREA` and registers packed for area, Fmax 51.6 MHz, timing met
+  at 50. `fpga/cyclone4/chip_c4.v` now builds three (`#(.NENG(3))`), the kit stays at two (84 % full already). So the
+  three-engine chip can be run on real hardware at the ASIC's clock as soon as the Blaster arrives.

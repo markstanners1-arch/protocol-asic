@@ -19,7 +19,7 @@ module chip_c4 (
     always @(posedge clk) if (!rst_n) por <= por + 1'b1;
 
     wire [7:0] uo_out, uio_out, uio_oe;
-    protocol_chip #(.NENG(2)) chip (             // two engines: four do not fit this board
+    protocol_chip #(.NENG(3)) chip (             // three engines: fits at 98 % with Quartus set to optimise for area (four do not)
         .ui_in({ui_hi, mosi, sck, cs_n}), .uo_out(uo_out),
         .uio_in(uio), .uio_out(uio_out), .uio_oe(uio_oe),
         .ena(1'b1), .clk(clk), .rst_n(rst_n));
