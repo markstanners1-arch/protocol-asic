@@ -291,3 +291,10 @@ That's a driver change on the PC, so Mark does it himself. Then:
   read reads as 0xFF and a byte that cannot fail is no test. Do not run the ESP32-as-slave test (`-Cmd i`) with the UNO
   connected: both answer at 0x50. Not needed after all: level shifting (the 328's I2C inputs were read as the
   datasheet's 0.7 Vcc = 3.5 V threshold, but 3.3 V worked on this board).
+- 3 Nov 2026 (00:50, stopping for the night): **SPI to a 74HC595 on the bench, not yet working**: engine A drives SCK /
+  MOSI / latch on engine pins 4/5/7 (J4-14/15/17) and reads the 595's QH' on pin 6 (J4-16); engine B confirms SCK
+  (60-clock lows at 100 kHz). The LEDs on the 595 stayed dark and MISO read 0, with one lead found in the wrong hole
+  (J4-14 was in 13) and still dark after. Next: meter the 595's VCC (16) = 3.3 V, GND (8) = 0, OE (13) = 0, SRCLR (10)
+  = 3.3 V, then QA (15) after a run (ends on 0x55, so QA = 1); then the QH' lead. Test: `esp32/rerun.ps1 -Cmd s`.
+  The v0.2 layout run (TT repo commit 4258d90) was still in its build step at 00:50; read it first thing
+  (`gh run view 41543287970 -R markstanners1-arch/ttihp-protocol-emulator`, one call, no watching).

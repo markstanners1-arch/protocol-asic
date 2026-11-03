@@ -39,6 +39,14 @@ the roadmap and a dated progress log of everything done and found. Specs: `docs/
   re-copy after changes. The cocotb test passes on GitHub; the first two layout (gds) runs were still building at
   ~21:45 on 2 Nov: check `gh run list -R markstanners1-arch/ttihp-protocol-emulator`.
 
-## State at handover (2 Nov 2026, ~21:45)
-Whole chip (two engines, SPI host port, glitch filter) passes every hardware test on the MachXO3L + ESP32.
-Next: layout results; Cyclone IV second opinion; I2C/SPI-master programs with model partners; SRAM decision at layout.
+## State at handover (3 Nov 2026, 00:50)
+Chip is **ISA v0.2** (`side_dir`, MISC bit 13: side-set can write pin directions, for open-drain SCL). Proven: model = Verilog
+on 520K random clocks, whole-chip test, MachXO3L kit + ESP32 hardware test 0 problems. **First Tiny Tapeout layout (v0.1):
+33.5 % of 6x4, 50 MHz met at all corners, precheck and gate-level test pass**; the viewer job always fails on a private repo.
+The v0.2 layout run was still building (run 41543287970): read it with ONE `gh run view`, never `gh run watch` (it tripped
+GitHub's rate limit for 40 min). **I2C proven on real wires** against the ESP32 (no stretch) and an UNO R3 slave with clock
+stretching and repeated START (`esp32/rerun.ps1 -Cmd i` / `-Cmd n`; not both boards at once, both are 0x50). Bench wiring
+now: J4-10/13 = I2C SCL/SDA (GPIO 22/21, UNO A5/A4, 5.1 k to 3.3 V); J4-14..17 = SPI to a 74HC595 (SCK, MOSI, MISO from QH',
+latch), LEDs still dark: see the README's last entry. Cyclone IV: Quartus project ready (`fpga/cyclone4`), pins TODO.
+Next: finish the 595 SPI bench test; Cyclone IV pins and the same ESP32 test at 50 MHz; SPI/DHT11/IR as further
+protocols; a MicroPython host for the RP2040 demo board; a real I2C part (24C EEPROM or DS3231) when one turns up.

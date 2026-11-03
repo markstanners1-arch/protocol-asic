@@ -183,7 +183,9 @@ void pinDiag() {
 //      as pointer-write, STOP, then a fresh START: a repeated START gives the ESP32 no time to load the reply.
 // Wiring: J4-10 (M16, engine pin 2) = SCL -> GPIO 22;  J4-13 (L15, engine pin 3) = SDA -> GPIO 21;
 //         and 4.7 k pull-ups from each line to 3.3 V (the FPGA's and ESP32's internal pull-ups are too weak above ~10 kHz).
-// Send 'i' on the Serial Monitor to run it (it needs those two leads; the normal run does not).
+// Send 'i' on the Serial Monitor to run it (it needs those two leads; the normal run does not), or 'n' with another
+// board as the slave on the same wires (arduino/i2c_slave_nano, which stretches the clock): then the read-back is also
+// done with a repeated START. Not both at once: the ESP32 and the UNO both answer at 0x50, so unplug the UNO before 'i'.
 #include <Wire.h>
 const int I2C_SCL_ENG = 2, I2C_SDA_ENG = 3, ESP_SDA = 21, ESP_SCL = 22, I2C_ADDR = 0x50;
 volatile uint8_t slaveRegs[16]; volatile int slavePtr = 0, slaveWrites = 0, slaveRequests = 0;
@@ -302,6 +304,58 @@ void i2cTest(bool external = false) {
   Serial.printf("\n==== I2C %s (%d problems) ====\n", errors ? "FAIL" : "PASS", errors);
 }
 
+// ---- SPI on real wires: engine A is the master (programs/spi_master.asm) driving a 74HC595 shift register; its
+//      serial output QH' comes back on MISO, so each transfer returns the byte sent the transfer before. Engine B
+//      measures the SCK low time. Send 's' on the Serial Monitor.
+// Engine pins 4-7:  J4-14 (L16) pin 4 = SCK  -> 595 SRCLK (11)      J4-15 (K14) pin 5 = MOSI -> 595 SER (14)
+//                   J4-16 (K16) pin 6 = MISO <- 595 QH' (9)         J4-17 (K15) pin 7 = CS   -> 595 RCLK (12), latches on deselect
+// 595: VCC (16) and SRCLR (10) to 3.3 V, OE (13) and GND (8) to ground, QA..QH (15, 1..7) to LEDs via 220 R to ground.
+const int SPI_SCK_ENG = 4, SPI_MOSI_ENG = 5, SPI_MISO_ENG = 6, SPI_CS_ENG = 7;
+int spiXfer(uint8_t b) { return i2cCmd((SPI_MASTER_XFER << 11) | (b << 3), true); }
+void spiSelect()       { i2cCmd(SPI_MASTER_SELECT << 11, false); }
+void spiDeselect()     { i2cCmd(SPI_MASTER_DESELECT << 11, false); }
+void spiTest() {
+  errors = 0;
+  Serial.println("\n==== SPI: engine A master -> 74HC595 (QH' back on MISO), engine B timing SCK ====");
+  writeReg(ENG_A, R_CTRL, 0); writeReg(ENG_B, R_CTRL, 0);
+  writeReg(ENG_A, R_FILTER, 0);
+  int clkdiv = (int)(CHIP_HZ / (6.0 * 100000) + 0.5) - 1;          // 100 kHz SCK: 6 ticks per bit
+  loadProgram(ENG_A, PROG_SPI_MASTER, PROG_SPI_MASTER_LEN);
+  writeReg(ENG_A, R_CLKDIV, clkdiv);
+  writeReg(ENG_A, R_WRAP, wrapReg(0, PROG_SPI_MASTER_WRAP_BOTTOM, PROG_SPI_MASTER_WRAP_TOP));
+  writeReg(ENG_A, R_OUTCFG, SPI_MOSI_ENG | (1 << 5) | (SPI_SCK_ENG << 10));          // out = MOSI, set_base = SCK (4 pins)
+  writeReg(ENG_A, R_MISC, 4 | (SPI_SCK_ENG << 3) | (1 << 8) | (1 << 10));           // set_count 4, side = SCK, 1 bit, opt
+  writeReg(ENG_A, R_INCFG, SPI_MISO_ENG);
+  loadProgram(ENG_B, PROG_MEASURE_PULSE, PROG_MEASURE_PULSE_LEN);                   // B times low pulses on SCK
+  writeReg(ENG_B, R_CLKDIV, 0);
+  writeReg(ENG_B, R_WRAP, wrapReg(0, PROG_MEASURE_PULSE_WRAP_BOTTOM, PROG_MEASURE_PULSE_WRAP_TOP));
+  writeReg(ENG_B, R_OUTCFG, 0); writeReg(ENG_B, R_MISC, 0); writeReg(ENG_B, R_INCFG, SPI_SCK_ENG);
+  check("A MISC read back", readReg(ENG_A, R_MISC), 4 | (SPI_SCK_ENG << 3) | (1 << 8) | (1 << 10));
+  writeReg(ENG_B, R_CTRL, 1); writeReg(ENG_A, R_CTRL, 1); delay(5);
+  while ((readReg(ENG_B, R_STATUS) >> 4) & 7) readReg(ENG_B, R_RX);              // B saw SCK go from floating to driven low
+  Serial.printf("  SCK %.0f kHz nominal (clkdiv %d)\n", CHIP_HZ / (6.0 * (clkdiv + 1)) / 1000, clkdiv);
+  const uint8_t seq[4] = {0xA5, 0x3C, 0x81, 0x55};
+  int got[4];
+  for (int i = 0; i < 4; i++) {
+    spiSelect(); got[i] = spiXfer(seq[i]); spiDeselect();                           // deselect = RCLK rises: LEDs update
+    bool firstReading = (i == 0);                                                   // B's first value is the idle gap
+    while ((readReg(ENG_B, R_STATUS) >> 4) & 7) {                                   // before transfer 1: not a bit
+      int clocks = readReg(ENG_B, R_RX);
+      if (i == 0 && !firstReading) check("B: SCK low time (chip clocks)", clocks, 3 * (clkdiv + 1));
+      firstReading = false;
+    }
+    delay(300);                                                                     // so the LEDs can be watched
+  }
+  Serial.printf("  %-44s %02X (whatever the 595 held before)\n", "first transfer returned", got[0]);
+  for (int i = 1; i < 4; i++) check("transfer returned the previous byte", got[i], seq[i - 1]);
+  Serial.printf("  %-44s %s\n", "LEDs should now show 0x55", "0 1 0 1 0 1 0 1 (QH..QA)");
+  // a little show: walk a single lit LED along, then leave the pattern
+  for (int k = 0; k < 16; k++) { spiSelect(); spiXfer(1 << (k & 7)); spiDeselect(); delay(120); }
+  spiSelect(); spiXfer(0x55); spiDeselect();
+  writeReg(ENG_A, R_CTRL, 0); writeReg(ENG_B, R_CTRL, 0);
+  Serial.printf("\n==== SPI %s (%d problems) ====\n", errors ? "FAIL" : "PASS", errors);
+}
+
 void runAll() {
   errors = 0;
   Serial.println("\n==== Whole chip on the MachXO3L kit: two engines + SPI host port ====");
@@ -324,5 +378,5 @@ void setup() {
 }
 
 void loop() {
-  if (Serial.available()) { int c = Serial.read(); if (c == 'r') runAll(); else if (c == 'i') i2cTest(); else if (c == 'n') i2cTest(true); }
+  if (Serial.available()) { int c = Serial.read(); if (c == 'r') runAll(); else if (c == 'i') i2cTest(); else if (c == 'n') i2cTest(true); else if (c == 's') spiTest(); }
 }

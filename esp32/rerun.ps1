@@ -10,7 +10,7 @@ $sp.Write($Cmd)
 $end = (Get-Date).AddSeconds($Seconds)
 while ((Get-Date) -lt $end) {
     $t = $sp.ReadExisting()
-    if ($t) { Write-Host -NoNewline $t; if ($t -match "Send 'r'|==== I2C (PASS|FAIL)") { break } }
+    if ($t) { Write-Host -NoNewline $t; if ($t -match "Send 'r'|==== (I2C|SPI) (PASS|FAIL)") { break } }
     Start-Sleep -Milliseconds 100
 }
 $sp.Close()
