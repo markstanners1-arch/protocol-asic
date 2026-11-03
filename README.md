@@ -347,3 +347,12 @@ That's a driver change on the PC, so Mark does it himself. Then:
   ESP32 uploaded with the two-byte-command sketch; with no J4 leads fitted yet the regression reads 0xFFFF everywhere,
   as an open MISO should. Cyclone IV board arriving within the hour; it has no pin assignments yet, so the kit stays
   the bench for today's hardware check of the new host port.
+- 3 Nov 2026 (15:00): **host port v0.2 proven on real hardware.** Rebuilt bench, MachXO3L kit with the two-engine build,
+  ESP32 regression PASS, 0 problems: ID 0x0022, two-byte commands, both engines, UART at three rates, glitch filter,
+  IRQ. Three lead slips on the way, each diagnosed from the ESP32 side with new sketch commands: IRQ lead in GPIO 2
+  instead of 4 (the regression's IRQ checks fail, all else passes); then CS/SCK/MOSI disturbed while moving it (all
+  reads 0x0000, nothing received: `p` lead probe showed MISO and IRQ driven low by the chip, so the command was not
+  arriving); then the MISO lead's J4 end in a hole held low (writes worked, engine A's UART heard, reads still 0).
+  `p` = lead probe (pull-up/pull-down test of MISO and IRQ + raw ID read), `q` = IRQ held high 15 s, `l` = 30 s of
+  repeating ID reads for the oscilloscope (Mark's Hantek DSO5102P came out; 6,000 of 6,000 reads 0x0022 once the
+  MISO lead was home). Written into `docs/bench_wiring.md` / `.pdf` as "If it doesn't answer".

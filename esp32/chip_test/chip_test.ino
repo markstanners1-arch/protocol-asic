@@ -14,7 +14,9 @@
 //   3. sends a line of text through engine A, a word at a time over SPI, never overfilling its FIFO
 //   4. reads what actually came out of the chip's pin on Serial2, and compares
 //   5. reads engine B's measurement of engine A's bit time back over SPI
-// Results on the Serial Monitor at 115200. Send 'r' to run again, 'i' for the I2C test (see i2cTest below).
+// Results on the Serial Monitor at 115200. Send 'r' to run again, 'i' / 'n' for the I2C test (ESP32 / external slave),
+// 's' for SPI to the 74HC595, and the bench helpers: 'p' lead probe, 'q' hold the IRQ high for 15 s, 'l' repeating ID
+// reads for 30 s (a signal for the oscilloscope). From the PC: esp32erun.ps1 -Cmd <letter>.
 
 #include <SPI.h>
 #include "programs.h"
@@ -389,6 +391,58 @@ void setup() {
   runAll();
 }
 
+// 'q': hold the IRQ high for 15 s so the lead (J4-4 / K13 -> GPIO 4) and the kit's IRQ LED (P16) can be checked:
+// engine B runs read_pins, which pushes for ever, so its RX FIFO fills and stays non-empty.
+void irqHold() {
+  writeReg(ENG_A, R_CTRL, 0); writeReg(ENG_B, R_CTRL, 0);
+  loadProgram(ENG_B, PROG_READ_PINS, PROG_READ_PINS_LEN);
+  writeReg(ENG_B, R_WRAP, wrapReg(0, PROG_READ_PINS_WRAP_BOTTOM, PROG_READ_PINS_WRAP_TOP));
+  writeReg(ENG_B, R_CTRL, 1); delay(5);
+  Serial.println();
+  Serial.println("==== IRQ hold: engine B keeps data waiting for 15 s; the kit's IRQ LED should be lit; GPIO 4 polled ====");
+  for (int i = 0; i < 15; i++) {
+    Serial.printf("  t=%2d s   GPIO 4 = %d   B RX level %d", i, digitalRead(PIN_IRQ), (readReg(ENG_B, R_STATUS) >> 4) & 7);
+    Serial.println();
+    delay(1000);
+  }
+  writeReg(ENG_B, R_CTRL, 0);
+  Serial.println("==== IRQ hold done ====");
+}
+
+// 'p': lead probe. The chip's two outputs to us (MISO, IRQ) are read with the ESP32's pull-up and then its pull-down:
+// a driven pin reads the same both ways, an open lead follows the pull. Then one raw ID read.
+void leadProbe() {
+  const int pins[2] = {PIN_MISO, PIN_IRQ}; const char *names[2] = {"MISO (J4-7, L14 -> GPIO 19)", "IRQ  (J4-4, K13 -> GPIO 4)"};
+  Serial.println();
+  Serial.println("==== lead probe ====");
+  for (int i = 0; i < 2; i++) {
+    pinMode(pins[i], INPUT_PULLUP); delay(2); int up = digitalRead(pins[i]);
+    pinMode(pins[i], INPUT_PULLDOWN); delay(2); int dn = digitalRead(pins[i]);
+    pinMode(pins[i], INPUT);
+    Serial.printf("  %s: with pull-up %d, with pull-down %d -> %s", names[i], up, dn,
+                  up == dn ? (up ? "driven HIGH by something" : "driven LOW by something") : "FLOATING: lead open or in the wrong hole");
+    Serial.println();
+  }
+  SPI.begin(PIN_SCK, PIN_MISO, PIN_MOSI, -1);
+  uint16_t id = readReg(ENG_A, R_ID);
+  Serial.printf("  raw ID read: 0x%04X (0x0022 = two engines answering; 0x0000 = chip not seeing the command, check MOSI J4-5/M14 -> GPIO 23, CS J4-3/K12 -> GPIO 5, SCK J4-9/M15 -> GPIO 18; 0xFFFF = MISO open)", id);
+  Serial.println();
+  Serial.println("==== lead probe done ====");
+}
+
+// 'l': scope loop. Reads the ID register over and over for 30 s (one 16-bit command + one 16-bit word, SPI_HZ), so SCK,
+// MOSI, CS and MISO carry a repeating burst to put a probe on; MISO should show 0x0022 = 0000 0000 0010 0010 after the command.
+void scopeLoop() {
+  Serial.println();
+  Serial.println("==== scope loop: ID reads for 30 s (probe J4-7 / L14 for MISO, J4-9 / M15 for SCK, J4-3 / K12 for CS) ====");
+  for (int t = 0; t < 30; t++) {
+    uint16_t id = 0; int same = 0;
+    for (int i = 0; i < 1000; i++) { uint16_t v = readReg(ENG_A, R_ID); if (i == 0) id = v; same += (v == id); }
+    if (t % 5 == 0) { Serial.printf("  t=%2d s  ID read 0x%04X, %d of 1000 reads identical", t, id, same); Serial.println(); }
+  }
+  Serial.println("==== scope loop done ====");
+}
+
 void loop() {
-  if (Serial.available()) { int c = Serial.read(); if (c == 'r') runAll(); else if (c == 'i') i2cTest(); else if (c == 'n') i2cTest(true); else if (c == 's') spiTest(); }
+  if (Serial.available()) { int c = Serial.read(); if (c == 'r') runAll(); else if (c == 'i') i2cTest(); else if (c == 'n') i2cTest(true); else if (c == 's') spiTest(); else if (c == 'q') irqHold(); else if (c == 'p') leadProbe(); else if (c == 'l') scopeLoop(); }
 }

@@ -79,6 +79,18 @@ Pin locations still to be chosen in `fpga/cyclone4/chip_c4.qsf`. The same eight 
 whatever header pins we assign; the chip clock is 50 MHz there, so set `CHIP_HZ = 50e6` in the sketch (SPI goes to
 4 MHz). Its JTAG is the USB Blaster. Add the table here once the pins are picked.
 
+## If it doesn't answer: bench helpers (`esp32erun.ps1 -Cmd <letter>`)
+
+| Command | Does | Tells you |
+|---|---|---|
+| `p` | lead probe: reads MISO and IRQ with the ESP32's pull-up then pull-down, then one raw ID read | a FLOATING pin = that lead open or in the wrong hole; ID 0x0000 with MISO driven = CS, SCK or MOSI not arriving; 0xFFFF = MISO open |
+| `q` | engine B keeps data waiting for 15 s, GPIO 4 polled | the IRQ lead (and the kit's IRQ LED P16) |
+| `l` | ID reads over and over for 30 s | a repeating burst on CS, SCK, MOSI and MISO for the oscilloscope; MISO should read 0x0022 |
+
+Lessons of 3 Nov: writes working but reads all zero = the MISO lead's J4 end in a hole that is held low (11/12 are GND,
+18-25 are driven low when no engine owns them); everything zero and nothing received = CS/SCK/MOSI; everything 0xFFFF
+= no leads at all. The kit's SRAM build is lost on any power blip: reload it (`bash fpga/machxo3/build.sh load`).
+
 ## Order of work after replugging
 
 1. Section 1 only. Load the kit, upload the sketch, `rerun.ps1` (command `r`): ID 0x0022, 0 problems.

@@ -103,6 +103,7 @@ s.append(Paragraph("Holes and balls pair up in order: hole 6 is ball N14 (engine
                    "Kit LEDs: P16 lights for IRQ, N15 is the heartbeat (they light when driven low).", P))
 s.append(Paragraph("<b>Cyclone IV EP4CE6</b> (arrived 3 Nov): pin locations still to be chosen in fpga/cyclone4/chip_c4.qsf; the same eight leads of section 1 move across; "
                    "set CHIP_HZ = 50e6 in the sketch (SPI goes to 4 MHz).", P))
+s.append(Paragraph("If it doesn't answer: esp32 rerun.ps1 -Cmd p (lead probe: a FLOATING pin = lead open or wrong hole; ID 0x0000 with MISO driven = CS/SCK/MOSI not arriving; 0xFFFF = MISO open), -Cmd q (IRQ held high 15 s), -Cmd l (repeating ID reads for the oscilloscope). Writes working but reads all zero = MISO lead's J4 end in a hole held low (11/12 GND, 18-25 driven low). The kit forgets its build on any power blip: reload with bash fpga/machxo3/build.sh load.", P))
 s.append(Paragraph("Order of work after replugging", H2))
 s.append(Paragraph("1. Section 1 only. Load the kit, upload the sketch, rerun.ps1 (command r): ID 0x0022, 0 problems.&nbsp;&nbsp; "
                    "2. Add section 2: rerun.ps1 -Cmd i (ESP32 slave) or -Cmd n (UNO slave).&nbsp;&nbsp; "

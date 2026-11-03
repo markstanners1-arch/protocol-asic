@@ -45,8 +45,7 @@ Chip is **four engines** (`protocol_chip #(NENG)`, 4 on the ASIC; the FPGA tops 
 `[7:4]` spec 2), lowest engine wins a pin, IRQ from any engine. ISA v0.2 unchanged. I2C master is 19 words (one `xfer`
 routine: nine SDA levels out, nine seen back as byte << 1 | ACK; a sent byte read back differently = arbitration lost).
 Proven: model I2C test, cosim 400K clocks both memories, whole-chip test NENG=4 and NENG=2, LATE=0/1, four planted bugs
-caught; ESP32 sketch compiles (two-byte command, ID check) but is **not yet run on hardware: Mark cleared the bench and is
-rewiring from scratch; the Cyclone IV board arrived 3 Nov**. MachXO3 build 30.9 MHz, Cyclone 71 % LEs, both two engines.
+caught; ESP32 sketch **PASSES on the rebuilt bench (MachXO3L kit, two-engine build, ID 0x0022, 0 problems, 3 Nov 15:00)**; the Cyclone IV board arrived 3 Nov. MachXO3 build 30.9 MHz, Cyclone 71 % LEs, both two engines.
 TT repo commit 2d2a76c: cocotb test PASS; **gds run 41642156659 started 13:11, read it after ~15:30 with ONE `gh run view`**
 (never `gh run watch`). The v0.2 two-engine layout before it: 33.9 %, timing met, DRC/LVS clean.
 Next: read the four-engine layout (utilisation, timing); rebuild the bench (one wiring sheet: J4 -> ESP32 as in Tools above,
