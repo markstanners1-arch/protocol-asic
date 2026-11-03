@@ -356,3 +356,12 @@ That's a driver change on the PC, so Mark does it himself. Then:
   `p` = lead probe (pull-up/pull-down test of MISO and IRQ + raw ID read), `q` = IRQ held high 15 s, `l` = 30 s of
   repeating ID reads for the oscilloscope (Mark's Hantek DSO5102P came out; 6,000 of 6,000 reads 0x0022 once the
   MISO lead was home). Written into `docs/bench_wiring.md` / `.pdf` as "If it doesn't answer".
+- 3 Nov 2026 (15:40): **second four-engine layout run failed the same way** (run 41644302624, density target 80): utilisation
+  66.7 % after global placement, the placer's own target density 1.03 (limit 0.99), detailed placement failed on 7
+  instances in the post-placement repair step. So the density knob was not the problem: four flip-flop-memory engines
+  at 553K um2 (61 % of the 902K core) are too dense for this flow on IHP's cells, where two engines at 34 % placed with
+  ease. Options, Mark's call: (1) three engines, about 45 %, a parameter change; (2) four engines with the IHP SRAM
+  block for each program memory (~445K, 49 %, plus four 15K macros to place: the memory_options plan, a day or more,
+  and the block's acceptance on CMOS5L is still unchecked); (3) slimmer engines (a 20- or 24-pin space instead of 32,
+  shallower FIFOs). Started a **measurement run with three engines** (TT project.v `#(.NENG(3))`, density back to 60)
+  so the decision has a number behind it. Lesson for the roadmap: keep the synthesised area under about half the core.

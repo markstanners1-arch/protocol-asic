@@ -16,7 +16,7 @@
 //   5. reads engine B's measurement of engine A's bit time back over SPI
 // Results on the Serial Monitor at 115200. Send 'r' to run again, 'i' / 'n' for the I2C test (ESP32 / external slave),
 // 's' for SPI to the 74HC595, and the bench helpers: 'p' lead probe, 'q' hold the IRQ high for 15 s, 'l' repeating ID
-// reads for 30 s (a signal for the oscilloscope). From the PC: esp32erun.ps1 -Cmd <letter>.
+// reads for 30 s (a signal for the oscilloscope). From the PC: esp32\rerun.ps1 -Cmd <letter>.
 
 #include <SPI.h>
 #include "programs.h"
@@ -443,6 +443,70 @@ void scopeLoop() {
   Serial.println("==== scope loop done ====");
 }
 
+// 'b': I2C wire check. Engine B reads engine pins 0-15 raw while the ESP32 (I2C off, pins as plain GPIO) leaves both
+// lines alone, then pulls its SDA pin (GPIO 21) low, then its SCL pin (GPIO 22) low. Shows which chip pin each one reaches.
+void i2cWireCheck() {
+  Wire.end();
+  pinMode(ESP_SDA, INPUT); pinMode(ESP_SCL, INPUT);
+  writeReg(ENG_A, R_CTRL, 0); writeReg(ENG_B, R_CTRL, 0);
+  writeReg(ENG_A, R_FILTER, 0);
+  loadProgram(ENG_B, PROG_READ_PINS, PROG_READ_PINS_LEN);
+  writeReg(ENG_B, R_CLKDIV, 0);
+  writeReg(ENG_B, R_WRAP, wrapReg(0, PROG_READ_PINS_WRAP_BOTTOM, PROG_READ_PINS_WRAP_TOP));
+  writeReg(ENG_B, R_MISC, 0); writeReg(ENG_B, R_INCFG, 0);
+  writeReg(ENG_B, R_CTRL, 1);
+  Serial.println();
+  Serial.println("==== I2C wire check: engine pins 0-7 as the chip sees them (bit 2 = SCL J4-10/M16, bit 3 = SDA J4-13/L15) ====");
+  const char *what[3] = {"both lines released (expect pins 2 and 3 high: pull-ups present)",
+                         "ESP32 GPIO 21 (its SDA) pulled low (expect pin 3 low)",
+                         "ESP32 GPIO 22 (its SCL) pulled low (expect pin 2 low)"};
+  for (int step = 0; step < 3; step++) {
+    if (step == 1) { pinMode(ESP_SDA, OUTPUT); digitalWrite(ESP_SDA, LOW); }
+    if (step == 2) { pinMode(ESP_SDA, INPUT); pinMode(ESP_SCL, OUTPUT); digitalWrite(ESP_SCL, LOW); }
+    delay(5);
+    uint32_t v20 = 0;                                                // all 20 engine pins: in_base 0 gives 0-15, in_base 4 gives 4-19
+    for (int base = 0; base <= 4; base += 4) {
+      writeReg(ENG_B, R_CTRL, 0); writeReg(ENG_B, R_INCFG, base); writeReg(ENG_B, R_CTRL, 1); delay(2);
+      uint16_t v = 0;
+      for (int i = 0; i < 8; i++) v = readReg(ENG_B, R_RX);
+      v20 = base ? (v20 & 0xF) | ((uint32_t)v << 4) : v;
+    }
+    Serial.printf("  %-66s pins 19..0 = ", what[step]);
+    for (int b = 19; b >= 0; b--) { Serial.print((v20 >> b) & 1); if (b == 16 || b == 8) Serial.print(' '); }
+    Serial.printf("   (SCL pin 2 = %d, SDA pin 3 = %d)", (v20 >> 2) & 1, (v20 >> 3) & 1);
+    Serial.println();
+  }
+  pinMode(ESP_SCL, INPUT); pinMode(ESP_SDA, INPUT);
+  writeReg(ENG_B, R_CTRL, 0);
+  Serial.println("==== wire check done ====");
+}
+
+// 'k': hold the ESP32's SCL pin (GPIO 22) low for 30 s, engine B reporting chip pin 2 each second: meter both ends
+// of the lead meanwhile (GPIO 22 and J4-10 / M16 should both read 0 V).
+void sclHoldLow() {
+  Wire.end();
+  pinMode(ESP_SDA, INPUT); pinMode(ESP_SCL, OUTPUT); digitalWrite(ESP_SCL, LOW);
+  writeReg(ENG_A, R_CTRL, 0); writeReg(ENG_B, R_CTRL, 0);
+  writeReg(ENG_A, R_FILTER, 0);
+  loadProgram(ENG_B, PROG_READ_PINS, PROG_READ_PINS_LEN);
+  writeReg(ENG_B, R_CLKDIV, 0);
+  writeReg(ENG_B, R_WRAP, wrapReg(0, PROG_READ_PINS_WRAP_BOTTOM, PROG_READ_PINS_WRAP_TOP));
+  writeReg(ENG_B, R_MISC, 0); writeReg(ENG_B, R_INCFG, 0);
+  writeReg(ENG_B, R_CTRL, 1);
+  Serial.println();
+  Serial.println("==== GPIO 22 held LOW for 30 s: meter GPIO 22 and J4-10 (M16); chip pin 2 should read 0 ====");
+  for (int t = 0; t < 30; t++) {
+    uint16_t v = 0;
+    for (int i = 0; i < 8; i++) v = readReg(ENG_B, R_RX);
+    Serial.printf("  t=%2d s   chip pin 2 (SCL) = %d   pin 3 (SDA) = %d", t, (v >> 2) & 1, (v >> 3) & 1);
+    Serial.println();
+    delay(1000);
+  }
+  pinMode(ESP_SCL, INPUT);
+  writeReg(ENG_B, R_CTRL, 0);
+  Serial.println("==== hold done, GPIO 22 released ====");
+}
+
 void loop() {
-  if (Serial.available()) { int c = Serial.read(); if (c == 'r') runAll(); else if (c == 'i') i2cTest(); else if (c == 'n') i2cTest(true); else if (c == 's') spiTest(); else if (c == 'q') irqHold(); else if (c == 'p') leadProbe(); else if (c == 'l') scopeLoop(); }
+  if (Serial.available()) { int c = Serial.read(); if (c == 'r') runAll(); else if (c == 'i') i2cTest(); else if (c == 'n') i2cTest(true); else if (c == 's') spiTest(); else if (c == 'q') irqHold(); else if (c == 'p') leadProbe(); else if (c == 'l') scopeLoop(); else if (c == 'b') i2cWireCheck(); else if (c == 'k') sclHoldLow(); }
 }
