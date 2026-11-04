@@ -146,8 +146,8 @@ address word is 2916 on every key. A tap gives 2 to 5 repeat frames, a hold keep
 | 5 | 1CC1 | C1 | POWER | 9CB3 | B3 |
 | 6 | 2CC0 | C0 | VOL+ | 2AE0 | E0 |
 
-A TV remote read the same way (its power key): address 04, command 08, both inverses correct, so standard NEC
-passes the `m` checks. The Elegoo kit's own remote has not been read yet (expect address 00 and codes such as 45 for POWER).
+Mark's LG "smart" remote (the one with the thumb wheel) read the same way, its POWER key: address 04, command 08, both
+inverses correct, so standard NEC passes the `m` checks. The Elegoo kit's own remote has not been read yet (expect address 00 and codes such as 45 for POWER).
 
 **Ultrasonic HC-SR04** (5 V part: its echo output must be divided down; program to follow). One at a time with the IR
 receiver, they share J4-8.
