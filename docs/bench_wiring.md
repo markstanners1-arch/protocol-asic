@@ -144,7 +144,7 @@ Every J4 hole, taken or free. A new program may only use a FREE hole; moving a l
 | 2 | IO1, 3.3 V | free (second 3.3 V hole) | |
 | 3, 4, 5, 6, 7, 9 | K12, K13, M14, N14, L14, M15 = CS, IRQ, MOSI, engine pin 0 UART, MISO, SCK | TAKEN: the ESP32 host, never moves | |
 | 8 | N16, engine pin 1 | **FREE**: next in line for the IR receiver, then the HC-SR04 echo (one at a time) | |
-| 10, 13 | M16, L15 = engine pins 2, 3 | TAKEN: I2C SCL and SDA with their 5.1 k pull-ups, slave leads as left on 3 Nov (UNO A5/A4) | |
+| 10, 13 | M16, L15 = engine pins 2, 3 | TAKEN: I2C SCL and SDA with their 5.1 k pull-ups, to the UNO's A5 and A4 plus GND (confirmed 4 Nov midday: `-Cmd n` PASS) | |
 | 11, 12, 21, 22 | GND | ground | |
 | 14, 15, 16, 17 | L16, K14, K16, K15 = engine pins 4-7 | TAKEN: keypad columns (tail 5-8); the 74HC595 is out of circuit since 4 Nov | |
 | 18, 19, 20 | J14, H14, J15 = engine pins 8, 9, 10 (out only) | **FREE**: 18 is pencilled for the HC-SR04 trigger | |

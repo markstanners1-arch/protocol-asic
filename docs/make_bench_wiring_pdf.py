@@ -105,7 +105,7 @@ s.append(Paragraph("<b>Cyclone IV board</b> (black EP4CE6E22C8N core board): eve
 s.append(Paragraph("What is plugged in right now (4 Nov 2026, midday): no double booking", H2))
 s.append(Paragraph("A new program may only use a FREE hole; moving a lead means updating this list. "
                    "TAKEN: hole 1 (IO1 3.3 V: the keypad's four 10 k pull-ups); holes 3, 4, 5, 6, 7, 9 (ESP32 host: CS, IRQ, MOSI, engine pin 0 UART, MISO, SCK, never moves); "
-                   "holes 10 and 13 (I2C SCL/SDA with 5.1 k pull-ups, slave leads as left on 3 Nov); holes 14-17 (keypad columns, tail 5-8; the 74HC595 is out of circuit since 4 Nov); "
+                   "holes 10 and 13 (I2C SCL/SDA with 5.1 k pull-ups, to the UNO's A5 and A4 plus GND, confirmed 4 Nov by -Cmd n PASS); holes 14-17 (keypad columns, tail 5-8; the 74HC595 is out of circuit since 4 Nov); "
                    "hole 26 (ESP32 GPIO 17 test pulses, the regression needs it); holes 27-30 (keypad rows, tail 1-4, 10 k to hole 1). "
                    "<b>FREE</b>: hole 2 (second 3.3 V); <b>hole 8 (engine pin 1, two-way): next for the IR receiver, then the HC-SR04 echo, one at a time</b>; "
                    "holes 18, 19, 20 (engine pins 8-10, out only; 18 pencilled for the HC-SR04 trigger); holes 23, 24, 25 (engine pins 11-13, out only). "
