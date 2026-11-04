@@ -511,3 +511,17 @@ That's a driver change on the PC, so Mark does it himself. Then:
   taken). There is no Elegoo remote (the kit has only the IR emitter board), so the remotes read were an LG smart remote and a Manhattan. Lessons: send a command letter twice
   and the second stops the first, so check the sketch is idle before a timed window; a pulled-up input reads high
   with nothing connected.
+- 4 Nov 2026 (evening): **logic analyser set up and the IR decoder checked against it.** Binghe 8-channel 24 MHz USB analyser
+  (a Saleae Logic clone, USB ID 0925:3881). Windows needed the WinUSB driver (Zadig, the copy that comes with PulseView); it
+  then loads the sigrok fx2lafw firmware and shows as "Saleae Logic with 8 channels". **PulseView 0.4.2 crashes on Windows 11**
+  (access violation in its auto-scan, hang or crash on capture, and its Python 3.4 cannot load one newer decoder): use the
+  nightly installers instead, now in D:\Tools\PulseView and D:\Tools\sigrok-cli (sigrok-cli 0.8.0). The old 0.4.2 stays
+  in C:\Program Files (x86)\sigrok and can be uninstalled. Capture from the command line, no window needed:
+  `sigrok-cli --driver fx2lafw --config samplerate=24m --samples 2m --triggers D0=f -o file.sr` (CH1 = D0, CH8 = D7, the CLK
+  lead unused), decode with `sigrok-cli -i file.sr -P ir_nec:ir=D0`. First capture, the Manhattan remote's button 1, CH1 on
+  J4-8: sigrok's NEC decoder reads address 0x16 / 0x29 and command 0xB7 / 0x5C (flagging both inverse pairs, as the sketch
+  did: 2916 and 5CB7), and the raw samples give leader burst 9.01 ms, leader space 4.53 ms, bit bursts 531-556 us, 0 spaces
+  600 us, 1 spaces 1706-1733 us, so the decoder's 4.5 ms, 3.3 ms and 1.1 ms thresholds sit 0.5 ms or more from every real
+  edge (the receiver module shortens bursts and lengthens spaces by about 20 and 40 us). The capture is saved as
+  `docs/bench/ir_nec_manhattan_button1.sr` (open it in PulseView or sigrok-cli). Not done: a chip-side trace beside it
+  (CH1 on J4-8 plus the ESP32's CS on CH2) and I2C/SPI captures.
