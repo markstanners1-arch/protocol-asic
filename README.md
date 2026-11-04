@@ -588,3 +588,10 @@ That's a driver change on the PC, so Mark does it himself. Then:
   module's LED was lit but dim. Cause: the module's ground was on the board's negative rail, which had no wire to the kit's GND; the logic
   analyser's ground lead had been tying the rail in. A wire from the kit's GND to the rail fixed it. Lesson: a lit LED proves only that a
   little current flows; give every board a ground wire to the device under test, not via an instrument.
+- 4 Nov 2026 (night, last): **the "what is this chip?" demo** `pico/whatis.py`, from the Pico, all measuring done by the engines: the
+  ID register (spec 2, 2 engines, 12 MHz), an I2C scan of 0x08-0x77 by engine A with a short table of guesses, and a pin survey by engine B (level,
+  then every low pulse timed to 1 us over 0.4 s, for pins 0-7 and 15-19, each labelled with what is wired to it on this bench). On the bench it
+  found the AT24C256 at 0x50 **and also something at 0x58**, repeatably (three rounds): not an AT24C256 address, but 24Cxxx parts with an
+  identification page answer at device code 1011 as well, so the demo says so (the chip's marking does not say whose part it is: not confirmed).
+  Not done: an SPI JEDEC ID read (needs an SPI flash chip, none on the bench) and period/frequency of a running signal (the survey times low
+  pulses only; press a remote button during it to see the receiver's). Also `pico/pins.py` (live levels). That is the end of 4 Nov.
