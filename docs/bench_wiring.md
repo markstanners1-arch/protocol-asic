@@ -243,6 +243,10 @@ erun.ps1 -Cmd <letter>`)
 | `y` | keypad: names every key pressed until any character is sent | section 6 wiring; a key that never shows = its row or column lead; every key mirrored = the tail numbered the other way; every key "pressed" (map FFFF, or 5555 / AAAA) = those rows' pull-ups not reaching J4-27..30 (an open input-only hole reads low: the kit build gives pins 15-19 internal pull-downs) |
 | `e` | live level of engine pins 15-19 (J4-26..30) for 30 s, a line on every change | wiggle a lead or touch a jumper from 3.3 V to a hole while it runs; a row with its 10 k in place must read 1, and its resistor shows about 0.5 V drop (the internal pull-down's 50 uA); no drop = that row is open |
 
+Lesson of 4 Nov night: **an instrument on the bus is powered or unclipped, never off and attached.** The logic analyser switched off with
+its probes still on SCL and SDA clamped both lines through its input diodes: the EEPROM NAKed its address, writes failed, reads came
+back FD FD FD FD, while the chip's own sniffer showed the bus faithfully. Powered on, everything passed again.
+
 Lessons of 3 Nov: writes working but reads all zero = the MISO lead's J4 end in a hole that is held low (11/12 are GND,
 18-25 are driven low when no engine owns them); everything zero and nothing received = CS/SCK/MOSI; everything 0xFFFF
 = no leads at all. The kit's SRAM build is lost on any power blip: reload it (`bash fpga/machxo3/build.sh load`).

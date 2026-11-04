@@ -641,10 +641,14 @@ That's a driver change on the PC, so Mark does it himself. Then:
   must-do protocols in both directions on real wires. Wiring sheet: hole 6 row.
 - 4 Nov 2026 (night, later): **baud measurer PASS from the Pico** (`pico/baud.py`): engine B on pin 0 at clkdiv 0 times the
   start bit of a 'U' from the Pico's GP0 at 1200, 2400, 9600, 19200, 38400, 57600, 115200, 230400 and 460800 baud; every rate
-  identified within 0.16 % (the 12 MHz clock's rounding: 104 clocks for 115200, 26 for 460800). **I2C sniffer on the kit**
+  identified within 0.16 % (the 12 MHz clock's rounding: 104 clocks for 115200, 26 for 460800). **I2C sniffer PASS on the kit**
   (`pico/i2c_sniff.py`): engine B watches the pads engine A drives to the AT24C256; in every transaction at 100 and 400 kHz
   (probes, a 2-address-byte read with a repeated START, a page write, ACK polling, the put-back) the watcher's words equalled the
-  master's own replies byte for byte, ACK for ACK. But the EEPROM itself went flaky during these runs (page writes NAKed from the
-  address byte, ACK polling never ending, data reads FD FD FD FD) and `pico/at24c.py`, which passed earlier tonight, fails the same
-  way, so the bench changed, not the chip: suspects are the leads disturbed when the Pico's GP0 went into J4-6 (the module's
-  ground-to-rail wire or VCC, the earlier dim-LED fault), or the WP jumper. To settle before the sniffer counts as passed.
+  master's own replies byte for byte, ACK for ACK. **On the way, a bench lesson:** during the first sniffer runs the EEPROM went
+  flaky (page writes NAKed from the address byte, ACK polling never ending, reads FD FD FD FD with one bit dragged low) and
+  `pico/at24c.py`, which had passed, failed the same way while the watcher still agreed with the master in every word, so the chip
+  was reporting a sick bus faithfully. The only change on the bench: the logic analyser had been switched off with its probes
+  still clipped to SCL and SDA. An unpowered instrument's input-protection diodes clamp each line to half a volt above its dead
+  supply rail, so the highs sag and the slave sees marginal levels; its ground lead had also been part of the rail's ground path.
+  Analyser powered on: EEPROM PASS (6 ms write cycle), sniffer PASS. Rule: an instrument on the bus is powered or unclipped,
+  never off and attached. The flaky runs left FD FD FD FD at 0x0020 on the blank module; `pico/eeprom_blank.py` put it back to FF.
