@@ -479,8 +479,10 @@ That's a driver change on the PC, so Mark does it himself. Then:
   all sixteen in turn, one column ever driven) PASS at the kit's and the ASIC's dividers; a planted short pause was
   caught (extra pushes on bounce). Sketch command `y` (engine B, names the keys, compiles); wiring sheet section 6
   (keypad on J4-14..17 columns and 27..30 rows with 10 k pull-ups, plus IR receiver and HC-SR04 rows for the next two
-  programs). **Keypad PASS on the kit** (midday): idle map 0000, every key by its right name, two at once including two
-  on one row (4 and B), one report per change, no bounce. On the way: every key "pressed" = the row pull-ups not
+  programs). **Keypad PASS on the kit** (midday): idle map 0000, a scripted sequence (1, 5, 9, D, * with #, 4 with 6) read
+  back exactly, twice, two at once including two on one row, one report per change, no bounce. The first "pass" had
+  columns 3 and 4 crossed (tail pins 7 and 8 swapped at J4-16/17): the names looked plausible until checked against
+  what was actually pressed. Lesson: test a keypad with a scripted sequence, never "press some keys". On the way: every key "pressed" = the row pull-ups not
   reaching J4-27..30 (the columns had been wired through the 10 ks); then rows 1 and 3 only, both ends of their
   resistors at the rail voltage (no current, so open), while the good rows showed a 0.5 V drop from the FPGA's internal
   pull-down. New sketch command `e` (live level of engine pins 15-19 for 30 s, a line on every change) found the lead
