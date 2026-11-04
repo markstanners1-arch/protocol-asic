@@ -176,7 +176,8 @@ Every J4 hole, taken or free. A new program may only use a FREE hole; moving a l
 |---|---|---|---|
 | 1 | IO1, 3.3 V | TAKEN: the keypad's four 10 k pull-ups (and the I2C pull-ups if they are on the kit's rail) | |
 | 2 | IO1, 3.3 V | TAKEN: the IR receiver's + lead (or it is on hole 1); the AT24C module's VCC (4 Nov night) | |
-| 3, 4, 5, 6, 7, 9 | K12, K13, M14, N14, L14, M15 = CS, IRQ, MOSI, engine pin 0 UART, MISO, SCK | TAKEN: the host (the ESP32, or the Pico 2 while its leads are on: one at a time, section 8) | |
+| 3, 4, 5, 7, 9 | K12, K13, M14, L14, M15 = CS, IRQ, MOSI, MISO, SCK | TAKEN: the host (the ESP32, or the Pico 2 while its leads are on: one at a time, section 8) | |
+| 6 | N14, engine pin 0 | TAKEN: the serial line. With the ESP32 as host, its GPIO 16 reads the chip's UART out. With the Pico as host (4 Nov night), **Pico GP0 (board pin 1, USB end, top left) sends to the chip** for `pico/uart_rx.py`; the ESP32 lead must be out of this hole then (an unpowered ESP32 clamps the line) | |
 | 8 | N16, engine pin 1 | TAKEN: the KY-022 IR receiver's S lead (4 Nov afternoon); the HC-SR04 echo will need it, one at a time | |
 | 10, 13 | M16, L15 = engine pins 2, 3 | TAKEN: I2C SCL and SDA, now to the AT24C256 module (section 9, 4 Nov night); before that the UNO's A5 and A4 (`-Cmd n` PASS). The UNO answers at 0x50 too: not both | |
 | 11, 12, 21, 22 | GND | ground | |

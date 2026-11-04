@@ -626,3 +626,16 @@ That's a driver change on the PC, so Mark does it himself. Then:
   (236.8 x 64.36 um, 15.2K um2, A_DLY tied 1, no BIST on this size) is complete at the pinned PDK commit. Recipe and
   numbers in `docs/memory_options.md`. Three macros would save about 56K um2 and double every program to 64 words;
   parked with the ISA v0.3 ideas since it reopens the proven layout.
+- 4 Nov 2026 (night): **UART receive, the missing must-do.** The chip had only ever sent serial; `programs/uart_rx.asm` (13 words,
+  engine B, pin 0) takes it in: 8N1, LSB first, 8 ticks a bit on the transmitter's divider rule, each byte pushed with its stop bit
+  in bit 8 so the host sees a framing error; the start bit is re-checked at a third of a bit (glitches dropped) and a bad stop bit
+  sends the engine back to waiting for idle, so a break is one 0x0000 and nothing more. Found on the way: the first draft re-armed
+  straight after a framing error (a break became a stream of zeros), and the engine is busy 78 of the 80 ticks of a frame, so a
+  sender can run bytes back to back only up to 2.5 % fast (4 % either way with gaps; the usual budget is 2 % an end).
+  `model/test_uart_rx.py` PASS at clkdiv 12 and 155 (115200 and 9600 at 12 MHz) and 53 (115200 at 50 MHz): gaps, twenty back to
+  back, 2 % fast/slow back to back, 4 % with gaps, a glitch, a framing error, a break, a 32-byte loopback from uart_tx; a planted
+  7-tick bit loop failed every byte, then removed. **Bench PASS from the Pico** (`pico/uart_rx.py`): loopback (engine A sends on
+  pin 0, engine B reads the same pad, no leads) 39 bytes exact at 9600, 19200, 57600 and 115200; then the Pico's own UART0 TX
+  (GP0) on J4-6 with A stopped: "The chip hears the Pico." and all 256 values in bursts of four at 115200, a 256-byte stream with
+  no gaps at 9600, all exact; 0x55s at 4800 into the 9600 receiver came back flagged (6 of 7). The chip now does all three
+  must-do protocols in both directions on real wires. Wiring sheet: hole 6 row.

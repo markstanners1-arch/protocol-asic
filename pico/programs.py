@@ -2,6 +2,7 @@
 # name -> (words, wrap_bottom, wrap_top), for the MicroPython host in pico/
 PROGRAMS = {
     "uart_tx": ([0xD881, 0x9FA0, 0xD727, 0x6001, 0x0643], 1, 4),
+    "uart_rx": ([0xC041, 0x2080, 0x2000, 0xC127, 0x07C1, 0x4001, 0x0645, 0x00CB, 0x4068, 0x8000, 0x0001, 0x4048, 0x8000], 2, 12),
     "measure_baud": ([0x2080, 0x2000, 0xE000, 0x2080, 0xE080, 0x8020, 0x0006], 0, 6),
     "measure_pulse": ([0x20A0, 0x2020, 0xE000, 0x20A0, 0xE080, 0x8020], 0, 5),
     "read_pins": ([0xA0C0, 0x8000, 0x0000], 0, 2),
@@ -16,6 +17,7 @@ PROGRAMS = {
 # name -> {label: address}: the routine numbers a host puts in a command word (i2c_master: xfer, start, stop)
 LABELS = {
     "uart_tx": {"bitloop": 3},
+    "uart_rx": {"start": 1, "bitloop": 5, "good": 11},
     "measure_baud": {"done": 6},
     "measure_pulse": {},
     "read_pins": {"loop": 0},
