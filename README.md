@@ -697,3 +697,12 @@ That's a driver change on the PC, so Mark does it himself. Then:
   eight LEDs, no RAM needed) with the Go Board as a second gear at another short address (the addressing demo); engine C on the
   Cyclone watches the wire as a DALI sniffer. The Waveshare Pico-DALI2 (20 GBP in the UK) and a driver are dropped unless real gear
   turns up; a transistor and a divider would then do the shield's job. The Go Board gear is proposed as its own task (card).
+- 4 Nov 2026 (night, last word): **ISA v0.3 bundle agreed** (Mark: "your judgement trumps mine"), to start after the Cyclone has
+  proven three engines on the bench, as one re-layout: (1) inter-engine flags, set/clear/wait, using WAIT index values above the
+  pins; (2) a shared free-running timestamp counter captured by the unused TIME actions, so three engines timestamp against one
+  clock (the bus-analyser demo); (3) a CRC unit per engine: 16-bit register, host-set polynomial and start value, every bit
+  entering the ISR passes through it under a mode bit, read as IN source 7 (today "zeros"), reset by TIME action 5; covers
+  Modbus RTU (0x8005), 1-Wire (0x31), USB CRC-5/16 and CAN CRC-15 (not Ethernet's 32 bits; DALI, DMX512, JTAG carry no CRC);
+  about sixty flip-flops an engine; (4) FIFOs 4 to 8 deep, last, dropped first if placement fights. Plus (0), layout-only and
+  first on a Tiny Tapeout branch: 64-word programs in the IHP `RM_IHPSG13_1P_64x16_c2` macro per Pettit's walkthrough. The
+  submission stays the proven three-engine 6x4 chip until the v0.3 layout has passed everything it has.
