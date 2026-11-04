@@ -613,3 +613,9 @@ That's a driver change on the PC, so Mark does it himself. Then:
   and the split-I2C plan: `programs/i2c_master_split.asm`, about two words changed from the 19-word master, data/clock out
   on the output-only pins and back on the input-only ones, no Verilog change, a P82B96 at the far end, demo = the AT24C256
   read over two metres of ribbon that plain I2C fails. Order agreed: identify-the-board set, DALI, then this.
+- 4 Nov 2026 (evening, later): **SRAM macros do get through the TT IHP flow.** A Discord post Mark pasted led to a public
+  competition entry (JLNuijens/ttihp-cpu-1-1-uart): 8x4 tiles, four 512x32 IHP SRAM macros, gds + precheck + gl_test +
+  viewer all passed on 19 Oct. It needed a substituted power-grid step, its own pdn_cfg.tcl and a hold SDC (details in
+  `docs/memory_options.md`). Our 64x16 macro exists in the PDK. The Discord question is now the narrower "is that route
+  accepted on the shuttle". Also: personal notes moved to a gitignored `CLAUDE.local.md`; the 3 Nov layout render saved
+  as `docs/layout/render_3nov_v02_3eng.jpg`; `docs/bus_variants.md` written; 8x4 would change no test for three engines.

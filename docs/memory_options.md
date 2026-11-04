@@ -60,3 +60,17 @@ flip-flop memory also needs its own read selector). Both builds match the Python
 each, using IHP's own behavioural model for the SRAM, and a planted fetch-timing bug (reading the current
 instead of the next address) was caught in both. The host port can now be built once, on SRAM rules.
 Still to check before layout: that this block is accepted on the CMOS5L shuttle.
+
+## Evidence from another entry (found 4 Nov 2026)
+
+J.L. Nuijens's competition entry (github.com/JLNuijens/ttihp-cpu-1-1-uart, public) is an **8x4** IHP CMOS5L design with
+**four `RM_IHPSG13_1P_512x32_c2_bm_bist` SRAM macros**, and its gds workflow run 39263918387 of 19 Oct 2026 passed all
+four jobs: gds, precheck, gl_test, viewer. So the Tiny Tapeout IHP flow does build and precheck designs with IHP SRAM
+macros, and 8x4 tiles work in the template (die 1724 x 711 um). The cost is visible in that repo's `src/`: a custom
+`config.json` that substitutes the flow's power-grid step (`+OpenROAD.GeneratePDN` -> `Project.ExtendPowerStripes`),
+its own `pdn_cfg.tcl` (comment: the CI's unpatched OpenROAD fails with PDN-0232/0233 on the macro grid, so the tile's
+Metal4 stripes are run across the macros instead), an `sram_hold.sdc` with hold margins of 0.3 ns, and a Verilog wrapper
+that is a behavioural array under `COCOTB_SIM` and a `(* blackbox *)` module for the GDS build. The macro we want,
+`RM_IHPSG13_1P_64x16_c2` (no bm_bist), is in the PDK's `libs.ref/sg13g2_sram/verilog` list alongside the bm_bist sizes.
+Still open for the Discord: whether that substituted PDN step is the sanctioned route and accepted on the shuttle, or
+whether the template has since gained macro support of its own.
