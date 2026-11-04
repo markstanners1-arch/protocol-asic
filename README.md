@@ -464,3 +464,9 @@ That's a driver change on the PC, so Mark does it himself. Then:
   Fix: SPI.end() before the begin(). Proven: regression PASS, then `p`, then regression PASS again. Lesson for the
   bench: when the chip's reply is on the wire but the host reads zero, suspect the host's pin setup before the leads.
 - 4 Nov 2026 (02:00): the three-engine confirming run (41697384154, TT commit 2c401e2) built in 2h44m, gate-level test PASS, and **the viewer job passed for the first time** now the repo is public with Pages on: the layout is viewable at https://markstanners1-arch.github.io/ttihp-protocol-emulator/ . Precheck was still running at this check; expected to pass as the measurement run did.
+- 4 Nov 2026 (01:30): **the backups had not reached GitHub since the isolation commit**: a 309 MB Copilot installer had
+  been downloaded into the project folder, the backup's "add everything" swept it in, and GitHub refuses files over
+  100 MB, so every push after that was rejected while the script's last line still read as success. Found while
+  removing the bench photo (which, as a result, had never reached GitHub: it was folded out of the unpushed commits and
+  is kept at D:\ outside the repo). Fix: installer dropped from the commit and moved to Downloads, `*.exe *.msi *.rar`
+  gitignored, nine local commits folded into one and pushed. Lesson: read the whole backup output, not its last line.
