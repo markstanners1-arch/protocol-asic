@@ -16,7 +16,7 @@
 //   5. reads engine B's measurement of engine A's bit time back over SPI
 // Results on the Serial Monitor at 115200. Send 'r' to run again, 'i' / 'n' for the I2C test (ESP32 / external slave),
 // 's' for SPI to the 74HC595, and the bench helpers: 'p' lead probe, 'q' hold the IRQ high for 15 s, 'l' repeating ID
-// reads for 30 s (a signal for the oscilloscope), 'y' keypad, 'm' NEC infrared remote, 'j' raw IR pulses, 'e' pin watch.
+// reads for 30 s (a signal for the oscilloscope), 'y' keypad, 'm' NEC infrared remote, 'j' raw IR pulses, 't' IR emitter to receiver loopback, 'e' pin watch.
 // From the PC: esp32\rerun.ps1 -Cmd <letter>.
 
 #include <SPI.h>
@@ -802,6 +802,60 @@ void irPulses() {
   Serial.printf("==== %d pulses ====\n", n);
 }
 
+// 't': IR loopback. Engine A runs programs/ir_tx.asm and flashes the IR emitter on engine pin 9 (J4-19) at 38 kHz in NEC frames;
+//      engine B runs programs/ir_nec.asm on the receiver (engine pin 1, J4-8). The emitter must face the receiver, a few cm apart.
+//      Each frame is sent, then B's two words are read back and compared. Distinguishes "A never sent it" (TX FIFO still full) from
+//      "the receiver did not see it" (A finished, B got nothing).
+void irLoopback() {
+  writeReg(ENG_A, R_CTRL, 0); writeReg(ENG_B, R_CTRL, 0);
+  loadProgram(ENG_A, PROG_IR_TX, PROG_IR_TX_LEN);
+  int divA = (int)(CHIP_HZ / (3.0 * 38400) + 0.5) - 1;                           // a third of a 38.4 kHz carrier cycle
+  writeReg(ENG_A, R_CLKDIV, divA);
+  writeReg(ENG_A, R_WRAP, wrapReg(0, PROG_IR_TX_WRAP_BOTTOM, PROG_IR_TX_WRAP_TOP));
+  writeReg(ENG_A, R_OUTCFG, 9 << 10);                                            // set_base 9: the emitter
+  writeReg(ENG_A, R_MISC, 1 | (1 << 11));                                        // set_count 1, out_right (LSB first)
+  loadProgram(ENG_B, PROG_IR_NEC, PROG_IR_NEC_LEN);
+  writeReg(ENG_B, R_CLKDIV, (int)(CHIP_HZ * 50e-6 + 0.5) - 1);
+  writeReg(ENG_B, R_WRAP, wrapReg(0, PROG_IR_NEC_WRAP_BOTTOM, PROG_IR_NEC_WRAP_TOP));
+  writeReg(ENG_B, R_OUTCFG, 0); writeReg(ENG_B, R_MISC, 1 << 12); writeReg(ENG_B, R_INCFG, 1 | (1 << 5));
+  for (int e = ENG_A; e <= ENG_B; e++) while (readReg(e, R_STATUS) & 0x70) readReg(e, R_RX);
+  writeReg(ENG_B, R_CTRL, 1); writeReg(ENG_A, R_CTRL, 1);
+  Serial.println();
+  Serial.printf("==== IR loopback: emitter J4-19 (engine pin 9, clkdiv %d, %.1f kHz carrier) to receiver J4-8 (engine pin 1); face them a few cm apart ====\n",
+                divA, CHIP_HZ / (3.0 * (divA + 1)) / 1000);
+  struct F { const char *name; uint16_t w1, w2; };
+  const F frames[] = {
+    {"address 00 command 45", 0x00 | (0xFF << 8), 0x45 | (0xBA << 8)},
+    {"address 04 command 08 (LG power)", 0x04 | (0xFB << 8), 0x08 | (0xF7 << 8)},
+    {"address 5A command 3C", 0x5A | (0xA5 << 8), 0x3C | (0xC3 << 8)},
+    {"all ones", 0xFFFF, 0xFFFF},
+    {"all zeros", 0x0000, 0x0000},
+    {"raw 2916 5CB7 (the Manhattan's button 1)", 0x2916, 0x5CB7},
+  };
+  int pass = 0, n = sizeof(frames) / sizeof(frames[0]);
+  for (int i = 0; i < n && !Serial.available(); i++) {
+    writeReg(ENG_A, R_TX, frames[i].w1); writeReg(ENG_A, R_TX, frames[i].w2);
+    unsigned long t0 = millis();
+    while (millis() - t0 < 130 && !Serial.available()) delay(5);                // the longest frame is 86 ms
+    int txLevel = readReg(ENG_A, R_STATUS) & 0x0F;                               // A's TX FIFO: 0 = both words taken
+    int rxLevel = (readReg(ENG_B, R_STATUS) >> 4) & 7;
+    uint16_t g1 = 0, g2 = 0;
+    if (rxLevel >= 1) g1 = readReg(ENG_B, R_RX);
+    if (rxLevel >= 2) g2 = readReg(ENG_B, R_RX);
+    bool ok = rxLevel == 2 && g1 == frames[i].w1 && g2 == frames[i].w2;
+    if (ok) pass++;
+    Serial.printf("  %-44s sent %04X %04X  got %s", frames[i].name, frames[i].w1, frames[i].w2, rxLevel == 0 ? "nothing" : "");
+    if (rxLevel) Serial.printf("%04X %04X", g1, g2);
+    Serial.printf("   %s", ok ? "ok" : "WRONG");
+    if (!ok) Serial.printf("   (A's TX FIFO holds %d: %s; B holds %d)", txLevel, txLevel ? "A has not sent it" : "A sent it", rxLevel);
+    Serial.println();
+    delay(30);
+  }
+  while (Serial.available()) Serial.read();
+  writeReg(ENG_A, R_CTRL, 0); writeReg(ENG_B, R_CTRL, 0);
+  Serial.printf("==== IR loopback %s: %d of %d frames came back exactly ====\n", pass == n ? "PASS" : "FAIL", pass, n);
+}
+
 void loop() {
-  if (Serial.available()) { int c = Serial.read(); if (c == 'r') runAll(); else if (c == 'i') i2cTest(); else if (c == 'n') i2cTest(true); else if (c == 's') spiTest(); else if (c == 'q') irqHold(); else if (c == 'p') leadProbe(); else if (c == 'l') scopeLoop(); else if (c == 'b') i2cWireCheck(); else if (c == 'k') sclHoldLow(); else if (c == 'w') ledWalk(); else if (c == 'a') i2cScan(); else if (c == 'x') isolationTest(); else if (c == 'o') i2cScopeLoop(); else if (c == 'z') { i2cScopeLoop(true); while (Serial.available()) Serial.read(); } else if (c == 'y') keypadTest(); else if (c == 'e') pinWatch(); else if (c == 'm') irTest(); else if (c == 'j') irPulses(); }
+  if (Serial.available()) { int c = Serial.read(); if (c == 'r') runAll(); else if (c == 'i') i2cTest(); else if (c == 'n') i2cTest(true); else if (c == 's') spiTest(); else if (c == 'q') irqHold(); else if (c == 'p') leadProbe(); else if (c == 'l') scopeLoop(); else if (c == 'b') i2cWireCheck(); else if (c == 'k') sclHoldLow(); else if (c == 'w') ledWalk(); else if (c == 'a') i2cScan(); else if (c == 'x') isolationTest(); else if (c == 'o') i2cScopeLoop(); else if (c == 'z') { i2cScopeLoop(true); while (Serial.available()) Serial.read(); } else if (c == 'y') keypadTest(); else if (c == 'e') pinWatch(); else if (c == 'm') irTest(); else if (c == 'j') irPulses(); else if (c == 't') irLoopback(); }
 }
