@@ -487,3 +487,27 @@ That's a driver change on the PC, so Mark does it himself. Then:
   resistors at the rail voltage (no current, so open), while the good rows showed a 0.5 V drop from the FPGA's internal
   pull-down. New sketch command `e` (live level of engine pins 15-19 for 30 s, a line on every change) found the lead
   fault at once. The kit's silkscreen marks the 3.3 V holes IO1, not a ball name.
+- 4 Nov 2026 (afternoon): **NEC infrared remote decoder** `programs/ir_nec.asm` (29 words, engine B, tick 50 us: clkdiv 599
+  at 12 MHz, 2499 at 50 MHz; in_base = jmp_pin = 1, no outputs). Every length is judged by a counting loop that polls the
+  pin with `jmp pin` while X counts down, no stopwatch: leader burst at least 4.5 ms (else noise, back to idle), leader
+  space over 3.3 ms = a data frame (shorter = the 2.25 ms repeat frame), bit space over 1.1 ms = a 1. Bits shift in LSB
+  first and `push iffull` sends each 16: two words a frame (address pair, then command pair); a repeat frame pushes
+  0xFFFF. A bit space stuck high for another 2.5 ms abandons the frame so a cut-short frame cannot garble the next one.
+  The inverse check is left to the host (the sketch). `model/test_ir_nec.py` plays a model receiver (frames, repeats,
+  stray pulses, 5 % fast and 5 % slow, a wrong inverse, extended NEC, frames cut at 9 and 20 bits) PASS at both dividers;
+  a planted bit threshold (10 changed to 20) failed every frame, then removed. The IR test session's review caught two
+  wrong comments (margins, and a loop loaded with N polls N+1 times); fixed. Sketch commands `m` (decoder: prints address
+  and command, repeat count, flags a bad inverse) and `j` (raw low-pulse lengths). **Bench PASS, with a long road to it:**
+  (1) three runs saw nothing because the module was not wired yet; pin 1 has a pull-up in the kit build, so "idle high"
+  proved nothing and the sketch now says so. (2) The line then read stuck LOW 800 of 800: Mark had wired the Elegoo IR
+  **emitter** (KY-005, a clear LED) instead of the receiver; the pads on the receiver are marked G R Y (ground, power, signal).
+  (3) With the receiver in, a raw capture showed a steady train of 5 ms pulses every 36 ms: a phone and a TV remote
+  in the room (Mark's TV in another room was being operated by it). (4) A scripted window then read back correctly:
+  1, 2, 3, 4, 5, 6, 7, 8, 9, 0, POWER, VOL+ held gave 12 frames in order (command bytes B7 B6 B5 C2 C1 C0 C7 C6 C5 C9
+  B3 E0, address word 2916, the VOL+ hold 17 repeats at 108 ms), and an earlier 1, 2, 3, VOL+, POWER window gave the same
+  codes. A TV remote's power key read address 04 command 08 with both inverses good. This remote has NEC timing but a
+  16-bit address and command with no inverse rule, so the sketch flags BAD INVERSE on every key; that is the remote, not
+  the decoder. Code table in `docs/bench_wiring.md` section 6 (PDF rebuilt), occupancy table section 7 (holes 2 and 8
+  taken). Not yet read: the Elegoo kit's own remote (expect address 00, POWER 45). Lessons: send a command letter twice
+  and the second stops the first, so check the sketch is idle before a timed window; a pulled-up input reads high
+  with nothing connected.

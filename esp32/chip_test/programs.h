@@ -43,3 +43,15 @@ const int PROG_KEYPAD_LEN = 16, PROG_KEYPAD_WRAP_BOTTOM = 0, PROG_KEYPAD_WRAP_TO
 const int KEYPAD_SCAN = 0;
 const int KEYPAD_CHANGED = 10;
 const int KEYPAD_PAUSE = 14;
+const uint16_t PROG_IR_NEC[] = {0x20A0, 0x2020, 0xC036, 0x00C0, 0x0243, 0x20A0, 0xC030, 0x00CB, 0xA0CB, 0x8000, 0x0000, 0x0247, 0x2020, 0xA0C3, 0xC05F, 0x20A0, 0xC02A, 0x00D4, 0x4061, 0x001B, 0x0051, 0x4021, 0xC02C, 0x00D9, 0x001B, 0x0257, 0x0000, 0x8040, 0x008F};
+const int PROG_IR_NEC_LEN = 29, PROG_IR_NEC_WRAP_BOTTOM = 0, PROG_IR_NEC_WRAP_TOP = 28;
+const int IR_NEC_IDLE = 0;
+const int IR_NEC_BURST = 3;
+const int IR_NEC_SPACE = 7;
+const int IR_NEC_LONG = 11;
+const int IR_NEC_BIT = 15;
+const int IR_NEC_POLL = 17;
+const int IR_NEC_HIGH = 20;
+const int IR_NEC_TAIL = 23;
+const int IR_NEC_STILL = 25;
+const int IR_NEC_NEXT = 27;

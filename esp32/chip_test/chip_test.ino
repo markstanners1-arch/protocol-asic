@@ -16,7 +16,8 @@
 //   5. reads engine B's measurement of engine A's bit time back over SPI
 // Results on the Serial Monitor at 115200. Send 'r' to run again, 'i' / 'n' for the I2C test (ESP32 / external slave),
 // 's' for SPI to the 74HC595, and the bench helpers: 'p' lead probe, 'q' hold the IRQ high for 15 s, 'l' repeating ID
-// reads for 30 s (a signal for the oscilloscope). From the PC: esp32\rerun.ps1 -Cmd <letter>.
+// reads for 30 s (a signal for the oscilloscope), 'y' keypad, 'm' NEC infrared remote, 'j' raw IR pulses, 'e' pin watch.
+// From the PC: esp32\rerun.ps1 -Cmd <letter>.
 
 #include <SPI.h>
 #include "programs.h"
@@ -721,6 +722,86 @@ void pinWatch() {
   Serial.println("==== pin watch done ====");
 }
 
+// 'm': NEC infrared remote on engine B (programs/ir_nec.asm): receiver module output on engine pin 1 (J4-8).
+//      The program pushes two words a frame (address | ~address << 8, then command | ~command << 8 within 36 ms)
+//      and 0xFFFF for a held button's repeat frame. Prints each frame as address and command, checks the inverses
+//      (an extended-NEC remote has a 16-bit address and no inverse: printed raw), until any serial character arrives.
+void irTest() {
+  writeReg(ENG_A, R_CTRL, 0); writeReg(ENG_B, R_CTRL, 0);
+  // first the receiver's idle level: engine B reads the raw pin (it must be 1; 0 means no power or the S lead open)
+  loadProgram(ENG_B, PROG_READ_PINS, PROG_READ_PINS_LEN);
+  writeReg(ENG_B, R_CLKDIV, 0); writeReg(ENG_B, R_WRAP, wrapReg(0, PROG_READ_PINS_WRAP_BOTTOM, PROG_READ_PINS_WRAP_TOP));
+  writeReg(ENG_B, R_MISC, 0); writeReg(ENG_B, R_INCFG, 1);
+  writeReg(ENG_B, R_CTRL, 1);
+  int highs = 0;
+  for (int j = 0; j < 8; j++) readReg(ENG_B, R_RX);                              // the first reads follow the synchroniser's reset (low): skip
+  for (int i = 0; i < 100; i++) { for (int j = 0; j < 8; j++) highs += readReg(ENG_B, R_RX) & 1; delay(2); }
+  writeReg(ENG_B, R_CTRL, 0);
+  Serial.println();
+  Serial.printf("  receiver line (engine pin 1, J4-8) read high %d of 800 times over 200 ms: %s\n", highs,
+                highs >= 790 ? "idle high (the chip gives pin 1 a pull-up, so this alone does not prove the receiver is wired: touch its S lead to GND and watch -Cmd j)" : highs == 0 ? "stuck LOW: S shorted to GND or the receiver is faulty" : "pulsing: a remote is sending, or light noise");
+  loadProgram(ENG_B, PROG_IR_NEC, PROG_IR_NEC_LEN);
+  int clkdiv = (int)(CHIP_HZ * 50e-6 + 0.5) - 1;                                // 50 us tick
+  writeReg(ENG_B, R_CLKDIV, clkdiv);
+  writeReg(ENG_B, R_WRAP, wrapReg(0, PROG_IR_NEC_WRAP_BOTTOM, PROG_IR_NEC_WRAP_TOP));
+  writeReg(ENG_B, R_OUTCFG, 0);
+  writeReg(ENG_B, R_MISC, 1 << 12);                                              // in_right: LSB first
+  writeReg(ENG_B, R_INCFG, 1 | (1 << 5));                                        // in_base 1, jmp_pin 1
+  while (readReg(ENG_B, R_STATUS) & 0x70) readReg(ENG_B, R_RX);                  // drain anything old
+  writeReg(ENG_B, R_CTRL, 1);
+  Serial.println();
+  Serial.printf("==== NEC remote: receiver on engine pin 1 (J4-8), tick 50 us (clkdiv %d); press buttons, any serial character stops ====\n", clkdiv);
+  int repeats = 0; unsigned long t0 = millis();
+  while (!Serial.available()) {
+    if (!digitalRead(PIN_IRQ)) { delay(1); continue; }
+    uint16_t w1 = readReg(ENG_B, R_RX);
+    unsigned long t = millis() - t0;
+    if (w1 == 0xFFFF) { repeats++; Serial.printf("  t=%6lu ms  repeat %d\n", t, repeats); continue; }
+    repeats = 0;
+    unsigned long tw = millis();                                                 // the command pair follows within 36 ms
+    while (!digitalRead(PIN_IRQ) && millis() - tw < 60) delay(1);
+    if (!digitalRead(PIN_IRQ)) { Serial.printf("  t=%6lu ms  incomplete frame: %04X\n", t, w1); continue; }
+    uint16_t w2 = readReg(ENG_B, R_RX);
+    bool aok = (w1 >> 8) == ((~w1) & 0xFF), cok = (w2 >> 8) == ((~w2) & 0xFF);
+    Serial.printf("  t=%6lu ms  ", t);
+    if (aok) Serial.printf("address %02X  ", w1 & 0xFF); else Serial.printf("address %04X (16-bit, no inverse)  ", w1);
+    Serial.printf("command %02X", w2 & 0xFF);
+    if (!cok) Serial.printf("  BAD INVERSE (%04X)", w2);
+    Serial.println();
+  }
+  while (Serial.available()) Serial.read();
+  writeReg(ENG_B, R_CTRL, 0);
+  Serial.println("==== NEC remote done ====");
+}
+
+// 'j': raw infrared pulses. Engine B runs programs/measure_pulse.asm on pin 1 with the same 50 us tick and the
+//      length of every low pulse is printed in ticks and microseconds (an NEC leader is 180 ticks = 9 ms, a bit
+//      burst 11 ticks), up to 400 pulses or until any serial character: shows what a remote actually sends.
+void irPulses() {
+  writeReg(ENG_A, R_CTRL, 0); writeReg(ENG_B, R_CTRL, 0);
+  loadProgram(ENG_B, PROG_MEASURE_PULSE, PROG_MEASURE_PULSE_LEN);
+  writeReg(ENG_B, R_CLKDIV, (int)(CHIP_HZ * 50e-6 + 0.5) - 1);
+  writeReg(ENG_B, R_WRAP, wrapReg(0, PROG_MEASURE_PULSE_WRAP_BOTTOM, PROG_MEASURE_PULSE_WRAP_TOP));
+  writeReg(ENG_B, R_OUTCFG, 0); writeReg(ENG_B, R_MISC, 0); writeReg(ENG_B, R_INCFG, 1);
+  while (readReg(ENG_B, R_STATUS) & 0x70) readReg(ENG_B, R_RX);
+  writeReg(ENG_B, R_CTRL, 1);
+  Serial.println();
+  Serial.println("==== raw IR pulses on engine pin 1: low pulse lengths in 50 us ticks (leader 180, bit burst 11); any serial character stops ====");
+  int n = 0; unsigned long t0 = millis(), tlast = 0;
+  while (!Serial.available() && n < 400) {
+    if (!digitalRead(PIN_IRQ)) { delay(1); continue; }
+    uint16_t w = readReg(ENG_B, R_RX);
+    unsigned long t = millis() - t0;
+    if (t - tlast > 20 || n == 0) Serial.printf("\n  t=%6lu ms:", t);          // a new frame after a gap
+    Serial.printf(" %d", w);
+    tlast = t; n++;
+  }
+  Serial.println();
+  while (Serial.available()) Serial.read();
+  writeReg(ENG_B, R_CTRL, 0);
+  Serial.printf("==== %d pulses ====\n", n);
+}
+
 void loop() {
-  if (Serial.available()) { int c = Serial.read(); if (c == 'r') runAll(); else if (c == 'i') i2cTest(); else if (c == 'n') i2cTest(true); else if (c == 's') spiTest(); else if (c == 'q') irqHold(); else if (c == 'p') leadProbe(); else if (c == 'l') scopeLoop(); else if (c == 'b') i2cWireCheck(); else if (c == 'k') sclHoldLow(); else if (c == 'w') ledWalk(); else if (c == 'a') i2cScan(); else if (c == 'x') isolationTest(); else if (c == 'o') i2cScopeLoop(); else if (c == 'z') { i2cScopeLoop(true); while (Serial.available()) Serial.read(); } else if (c == 'y') keypadTest(); else if (c == 'e') pinWatch(); }
+  if (Serial.available()) { int c = Serial.read(); if (c == 'r') runAll(); else if (c == 'i') i2cTest(); else if (c == 'n') i2cTest(true); else if (c == 's') spiTest(); else if (c == 'q') irqHold(); else if (c == 'p') leadProbe(); else if (c == 'l') scopeLoop(); else if (c == 'b') i2cWireCheck(); else if (c == 'k') sclHoldLow(); else if (c == 'w') ledWalk(); else if (c == 'a') i2cScan(); else if (c == 'x') isolationTest(); else if (c == 'o') i2cScopeLoop(); else if (c == 'z') { i2cScopeLoop(true); while (Serial.available()) Serial.read(); } else if (c == 'y') keypadTest(); else if (c == 'e') pinWatch(); else if (c == 'm') irTest(); else if (c == 'j') irPulses(); }
 }

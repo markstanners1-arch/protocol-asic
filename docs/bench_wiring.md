@@ -116,13 +116,38 @@ The 595's four leads share J4-14 to 17: unplug them (or leave the 595 unpowered)
 The sketch prints the raw 16-bit map with each key name (bit 4*(3-c)+r). If every key comes out as its mirror
 (1 reads as *, say), the tail is numbered the other way round: swap the two groups of four.
 
-**IR receiver module** (KY-022, three pins, happy at 3.3 V; program to follow). Point any of the remotes at it.
+**IR receiver module** (`rerun.ps1 -Cmd m`, engine B, `programs/ir_nec.asm`; KY-022, three pins, happy at 3.3 V).
+Point any NEC remote at it (the Elegoo kit's is one). The sketch first reports the line's idle level (must be high),
+then prints every frame as address and command with the inverse bytes checked, and "repeat n" while a button is held.
+`-Cmd j` prints the raw low-pulse lengths instead (leader 180 ticks of 50 us, bit bursts 11): what the remote really sends.
 
 | FROM | TO | AND | What it is |
 |---|---|---|---|
 | module S (signal) | J4-8 (N16) | | engine pin 1: idles high, pulses low under the 38 kHz bursts |
-| module + (VCC) | J4-1 (3.3 V) | | power |
+| module + (VCC) | J4-2 (3.3 V; or J4-1) | | power |
 | module - (GND) | common ground | | power |
+
+The module's pads are marked **G R Y** (green ground, red power, yellow signal): Y is the S lead. The kit also has an IR
+**emitter** (KY-005, a clear LED): it must not be on this pin, its LED pulls the line low (seen 4 Nov: `m` read the line
+stuck low). Pin 1 has a pull-up in the kit build, so an idle-high reading alone does not prove the receiver is wired.
+
+**Remote button codes, read on the kit 4 Nov 2026** (`-Cmd m`, twice, the same codes both times; pressed in the order
+shown with a stated sequence, so each row is a checked pair). The remote is an unnamed one with NEC timing (9 ms
+leader, 562.5 us bursts, repeat frames every 108 ms) but a 16-bit address and a 16-bit command with no inverse rule,
+so `m` prints BAD INVERSE for every key: that flag means "not the plain 8-bit NEC layout", not a read error. The
+address word is 2916 on every key. A tap gives 2 to 5 repeat frames, a hold keeps repeating at 108 ms.
+
+| Button | Command word | Command byte | Button | Command word | Command byte |
+|---|---|---|---|---|---|
+| 1 | 5CB7 | B7 | 7 | 5BC7 | C7 |
+| 2 | 6CB6 | B6 | 8 | 6BC6 | C6 |
+| 3 | 7CB5 | B5 | 9 | 7BC5 | C5 |
+| 4 | 0CC2 | C2 | 0 | 3BC9 | C9 |
+| 5 | 1CC1 | C1 | POWER | 9CB3 | B3 |
+| 6 | 2CC0 | C0 | VOL+ | 2AE0 | E0 |
+
+A TV remote read the same way (its power key): address 04, command 08, both inverses correct, so standard NEC
+passes the `m` checks. The Elegoo kit's own remote has not been read yet (expect address 00 and codes such as 45 for POWER).
 
 **Ultrasonic HC-SR04** (5 V part: its echo output must be divided down; program to follow). One at a time with the IR
 receiver, they share J4-8.
@@ -141,9 +166,9 @@ Every J4 hole, taken or free. A new program may only use a FREE hole; moving a l
 | J4 hole | Ball / engine pin | Now | |
 |---|---|---|---|
 | 1 | IO1, 3.3 V | TAKEN: the keypad's four 10 k pull-ups (and the I2C pull-ups if they are on the kit's rail) | |
-| 2 | IO1, 3.3 V | free (second 3.3 V hole) | |
+| 2 | IO1, 3.3 V | TAKEN: the IR receiver's + lead (or it is on hole 1) | |
 | 3, 4, 5, 6, 7, 9 | K12, K13, M14, N14, L14, M15 = CS, IRQ, MOSI, engine pin 0 UART, MISO, SCK | TAKEN: the ESP32 host, never moves | |
-| 8 | N16, engine pin 1 | **FREE**: next in line for the IR receiver, then the HC-SR04 echo (one at a time) | |
+| 8 | N16, engine pin 1 | TAKEN: the KY-022 IR receiver's S lead (4 Nov afternoon); the HC-SR04 echo will need it, one at a time | |
 | 10, 13 | M16, L15 = engine pins 2, 3 | TAKEN: I2C SCL and SDA with their 5.1 k pull-ups, to the UNO's A5 and A4 plus GND (confirmed 4 Nov midday: `-Cmd n` PASS) | |
 | 11, 12, 21, 22 | GND | ground | |
 | 14, 15, 16, 17 | L16, K14, K16, K15 = engine pins 4-7 | TAKEN: keypad columns (tail 5-8); the 74HC595 is out of circuit since 4 Nov | |
@@ -153,8 +178,8 @@ Every J4 hole, taken or free. A new program may only use a FREE hole; moving a l
 | 27, 28, 29, 30 | G16, F15, F16, E15 = engine pins 16-19 | TAKEN: keypad rows (tail 1-4) with 10 k to hole 1 | |
 
 ESP32 pins taken: 4, 5, 16, 17, 18, 19, 23 (host), 21 and 22 only if it is the I2C slave; VIN (5 V) is free for the HC-SR04.
-Free engine pins for anything new: **1** (two-way, J4-8), **8-13** (out only, J4-18..20 and 23..25). The
-two-way pins 0-7 are all spoken for while the keypad is on; a program needing more two-way pins means unplugging it.
+Free engine pins for anything new: **8-13** (out only, J4-18..20 and 23..25). The two-way pins 0-7 are all spoken for
+while the keypad and the IR receiver are on; a program needing a two-way pin means unplugging one of them.
 
 ## If it doesn't answer: bench helpers (`esp32
 erun.ps1 -Cmd <letter>`)
