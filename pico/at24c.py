@@ -136,5 +136,23 @@ cycle2 = wait_write(dev)
 restored = read_seq(dev, MEM, N)
 print("original put back:      %s   %s" % (" ".join("%02X" % b for b in restored) if restored else "READ FAILED", "ok" if restored == before else "WRONG"))
 ok &= restored == before and cycle2 is not None
+
+if ADDR_BYTES == 2:
+    # the high address byte: write at the top of a 32 KB part and check the low area did not change (no aliasing)
+    HIGH = 0x7FF0
+    hb = read_seq(dev, HIGH, N)
+    pat2 = pattern[::-1]
+    if pat2 == hb:
+        pat2 = [b ^ 0xFF for b in pat2]
+    w2 = write_page(dev, HIGH, pat2); c3 = wait_write(dev)
+    top = read_seq(dev, HIGH, N)
+    low = read_seq(dev, MEM, N)
+    print("top of memory 0x%04X:   %s   %s (wrote %s)" % (HIGH, " ".join("%02X" % b for b in top) if top else "READ FAILED", "ok" if top == pat2 else "WRONG", " ".join("%02X" % b for b in pat2)))
+    print("low area unchanged:     %s   %s" % (" ".join("%02X" % b for b in low) if low else "READ FAILED", "ok" if low == before else "WRONG: the high address byte is being ignored"))
+    ok &= w2 and c3 is not None and top == pat2 and low == before
+    write_page(dev, HIGH, hb); wait_write(dev)
+    back = read_seq(dev, HIGH, N)
+    print("top put back:           %s   %s" % (" ".join("%02X" % b for b in back) if back else "READ FAILED", "ok" if back == hb else "WRONG"))
+    ok &= back == hb
 chip.stop(ENG_A)
 print("PASS" if ok else "FAIL")

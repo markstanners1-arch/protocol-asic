@@ -173,5 +173,16 @@ s.append(wires([
     ["J4-4 (K13)", "Pico GP20 (pin 26)", "", "IRQ"],
     ["J4-11 (GND)", "Pico GND (pin 23)", "", "common ground, between GP18 and GP19"],
 ]))
+s.append(PageBreak())
+s.append(Paragraph("9. AT24C256 EEPROM module on the I2C bus (4 Nov 2026, from the Pico)", H2))
+s.append(Paragraph("Replaces the UNO test slave on J4-10 and J4-13 (the UNO also answers at 0x50: not both). Its pull-ups go to VCC: <b>power it from 3.3 V only</b>. "
+                   "Jumpers A0-A2 to GND = address 0x50, WP to GND = writes allowed. Test: pico/run.ps1 -Script at24c.py. "
+                   "<b>Ground:</b> the board's negative rail must be wired to a kit GND hole (J4-11 or 12); for a while only the logic analyser's lead tied it in.", P))
+s.append(wires([
+    ["module VCC", "J4-2 (3.3 V)", "", "power; the D1 LED lights"],
+    ["module SCL", "J4-10 (M16)", "", "engine pin 2"],
+    ["module SDA", "J4-13 (L15)", "", "engine pin 3"],
+    ["module GND", "negative rail", "rail wired to J4-11 or 12", "ground"],
+]))
 doc.build(s)
 print("wrote", out)

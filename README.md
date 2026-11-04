@@ -575,3 +575,16 @@ That's a driver change on the PC, so Mark does it himself. Then:
   the same sequence read D once and everything else identically (PASS). Not bounce as such: the program waits 20 ms after every change,
   so a double report needs the contact to open and close again for longer than that, e.g. a slow press on a tired membrane key. The chip needs no change to
   switch hosts: only the five host-port lines move. Scripts run with `pico/run.ps1 -Script <name>.py -Seconds n`.
+- 4 Nov 2026 (late night): **AT24C256 EEPROM on the I2C bus, from the Pico: PASS.** A blue AT24C256 module (32 KB, 2 address bytes, 64-byte
+  pages, jumpers A0-A2 to GND = 0x50) replaced the UNO slave on J4-10 / J4-13, powered from 3.3 V (its own pull-ups go to VCC). No engine
+  change: engine A runs the existing `i2c_master.asm`; `pico/at24c.py` is the host script (it needed `LABELS` added to `pico/programs.py`, and
+  `pico/run.ps1` now soft-resets the Pico first because it had cached an old module). The script: probe 0x50-0x57 and 0x68, read the
+  8 bytes as found, page-write a pattern seeded by the clock (so old contents cannot pass), time the write by ACK polling (6 ms), sequential
+  read back, random read, the top of memory at 0x7FF0 with the low area checked unchanged (proves the high address byte), then put every byte back.
+  PASS on the real chip. Planted bug (ADDR_BYTES = 1 on the 2-byte part): FAIL, writes went to the wrong place and read back blank; the 7
+  stray bytes it left (0x1055-0x105B) were found and cleaned, so the module is blank again. `pico/pins.py` shows live pin levels (note:
+  pins 0-7 have kit pull-ups, so "high" proves nothing about a lead). **The long way round to a pass:** nothing answered any of the eight
+  addresses although the analyser decoded perfect START / address / NACK / STOP from the chip (so the engine and the lines were right) and the
+  module's LED was lit but dim. Cause: the module's ground was on the board's negative rail, which had no wire to the kit's GND; the logic
+  analyser's ground lead had been tying the rail in. A wire from the kit's GND to the rail fixed it. Lesson: a lit LED proves only that a
+  little current flows; give every board a ground wire to the device under test, not via an instrument.
