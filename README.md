@@ -619,3 +619,10 @@ That's a driver change on the PC, so Mark does it himself. Then:
   `docs/memory_options.md`). Our 64x16 macro exists in the PDK. The Discord question is now the narrower "is that route
   accepted on the shuttle". Also: personal notes moved to a gitignored `CLAUDE.local.md`; the 3 Nov layout render saved
   as `docs/layout/render_3nov_v02_3eng.jpg`; `docs/bus_variants.md` written; 8x4 would change no test for three engines.
+- 4 Nov 2026 (evening, Discord): **the SRAM question is answered without posting.** A search of the Tiny Tapeout Discord
+  from Mark's account found Ken Pettit's PRISM entry (kdp1965/ihp-um-janestreet-prism, 8x4, two 512x32 macros, all four
+  gds jobs green) and his walkthrough "Dropping a real SRAM macro into your CMOS5L tile": the maintainers whitelisted the
+  macro marker layers in the precheck in September and confirmed the Metal4 stripe method on the Discord. Our 64x16 macro
+  (236.8 x 64.36 um, 15.2K um2, A_DLY tied 1, no BIST on this size) is complete at the pinned PDK commit. Recipe and
+  numbers in `docs/memory_options.md`. Three macros would save about 56K um2 and double every program to 64 words;
+  parked with the ISA v0.3 ideas since it reopens the proven layout.

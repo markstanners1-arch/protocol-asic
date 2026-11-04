@@ -74,3 +74,34 @@ that is a behavioural array under `COCOTB_SIM` and a `(* blackbox *)` module for
 `RM_IHPSG13_1P_64x16_c2` (no bm_bist), is in the PDK's `libs.ref/sg13g2_sram/verilog` list alongside the bm_bist sizes.
 Still open for the Discord: whether that substituted PDN step is the sanctioned route and accepted on the shuttle, or
 whether the template has since gained macro support of its own.
+
+## The route is documented and sanctioned (found 4 Nov 2026, evening, on the TT Discord)
+
+Ken Pettit's competition entry PRISM (github.com/kdp1965/ihp-um-janestreet-prism, 8x4, two 512x32 macros as packet
+FIFOs; gds + precheck + gl_test + viewer all passed on 15 Oct 2026) comes with a walkthrough, "Dropping a real SRAM macro
+into your CMOS5L tile" (https://kdp1965.github.io/ihp-um-janestreet-prism/ihp_sram_macro.html, 29 Sep 2026). It is the
+recipe, and it says the Tiny Tapeout maintainers have whitelisted the macro's two marker layers (GDS 25/0 and 16/0) in
+the precheck since September 2026 and confirmed on the Discord that a tile may carry any number of Metal4 VPWR/VGND
+stripes. So macros are accepted; the Discord question is answered without posting. The recipe, in short:
+
+- PDK: `PDK=ihp-sg13cmos5l`, the SRAM folder `libs.ref/sg13cmos5l_sram` is a symlink to `ihp-sg13g2/libs.ref/sg13g2_sram`.
+  Our macro `RM_IHPSG13_1P_64x16_c2` is complete there at the commit the precheck pins (2bbec755): gds, lef, cdl, doc,
+  verilog and three libs. Datasheet: 64 x 16, column mux 2, one port, **236.80 x 64.36 um = 15,240 um2**, one-cycle
+  data access, pins A_CLK, A_MEN, A_REN, A_WEN, A_ADDR[5:0], A_DIN[15:0], A_DOUT[15:0], A_DLY (**must be tied 1**); no
+  bit mask and no BIST port on this size. Three of them: 45.7K um2 against 102K for the flip-flop stores, so about
+  56K um2 (6 % of the 6x4 core) saved while doubling every program to 64 words.
+- RTL: instantiate by name, `(* blackbox *)` header for synthesis, the PDK behavioural model (`-DFUNCTIONAL`) for RTL and
+  gate-level simulation (the GL netlist keeps the macro as a black box, so the GL test needs the model too).
+- `config.json`: a `MACROS` block (gds, lef, cdl as spice, libs mapped onto LibreLane's corner names, one instance per
+  hierarchical path with location and orientation), a 2 um macro halo, `ROUTING_OBSTRUCTIONS` on Metal2-4 over the
+  footprint, and the power grid made to land on the macro's vertical Metal4 supply columns (VDD!, VDDARRAY!, VSS!):
+  `FP_PDN_MULTILAYER 0`, width 2.1, spacing 3.52, pitch 44.96, offset 6.15, macro at x = 3.36 for the 512x32; **read the
+  64x16's LEF for its own column positions** before copying numbers. `PDN_MACRO_CONNECTIONS` two lines per instance.
+- Sign-off: Magic DRC off and KLayout DRC on with the CMOS5L deck (Magic reports illegal overlaps at the VDD/VDDARRAY
+  break that are not real), LVS needs the cdl, antenna diodes on the macro inputs if the report asks, and check in the
+  OpenROAD GUI that every stripe crossing the macro sits on a column: an unfed macro passes DRC and LVS and is a brick.
+- Tests: write/read-back with the one-cycle latency, on RTL and on gates. Our model already behaves this way
+  (`USE_SRAM=1` in cosim), so the engine side needs no change.
+
+Decision still Mark's: it is a layout-only change (no ISA change) but it reopens the proven 6x4 layout, so it goes with
+the ISA v0.3 bundle if that happens, not on its own.
