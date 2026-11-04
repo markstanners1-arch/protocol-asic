@@ -134,6 +134,28 @@ receiver, they share J4-8.
 | HC-SR04 Trig | J4-18 (J14) | | engine pin 8 (out only): the 10 us trigger pulse; 3.3 V is enough |
 | HC-SR04 Echo | 1 k resistor | the other end to J4-8 (N16) and a 2 k resistor to GND | echo pulse (5 V) divided to 3.3 V, engine pin 1; 58 us per cm |
 
+## 7. What is plugged in right now (4 Nov 2026, midday): no double booking
+
+Every J4 hole, taken or free. A new program may only use a FREE hole; moving a lead means updating this table.
+
+| J4 hole | Ball / engine pin | Now | |
+|---|---|---|---|
+| 1 | IO1, 3.3 V | TAKEN: the keypad's four 10 k pull-ups (and the I2C pull-ups if they are on the kit's rail) | |
+| 2 | IO1, 3.3 V | free (second 3.3 V hole) | |
+| 3, 4, 5, 6, 7, 9 | K12, K13, M14, N14, L14, M15 = CS, IRQ, MOSI, engine pin 0 UART, MISO, SCK | TAKEN: the ESP32 host, never moves | |
+| 8 | N16, engine pin 1 | **FREE**: next in line for the IR receiver, then the HC-SR04 echo (one at a time) | |
+| 10, 13 | M16, L15 = engine pins 2, 3 | TAKEN: I2C SCL and SDA with their 5.1 k pull-ups, slave leads as left on 3 Nov (UNO A5/A4) | |
+| 11, 12, 21, 22 | GND | ground | |
+| 14, 15, 16, 17 | L16, K14, K16, K15 = engine pins 4-7 | TAKEN: keypad columns (tail 5-8); the 74HC595 is out of circuit since 4 Nov | |
+| 18, 19, 20 | J14, H14, J15 = engine pins 8, 9, 10 (out only) | **FREE**: 18 is pencilled for the HC-SR04 trigger | |
+| 23, 24, 25 | J16, H15, H16 = engine pins 11, 12, 13 (out only) | **FREE** | |
+| 26 | G15, engine pin 15 | TAKEN: ESP32 GPIO 17 test pulses (the regression needs it) | |
+| 27, 28, 29, 30 | G16, F15, F16, E15 = engine pins 16-19 | TAKEN: keypad rows (tail 1-4) with 10 k to hole 1 | |
+
+ESP32 pins taken: 4, 5, 16, 17, 18, 19, 23 (host), 21 and 22 only if it is the I2C slave; VIN (5 V) is free for the HC-SR04.
+Free engine pins for anything new: **1** (two-way, J4-8), **8-13** (out only, J4-18..20 and 23..25). The
+two-way pins 0-7 are all spoken for while the keypad is on; a program needing more two-way pins means unplugging it.
+
 ## If it doesn't answer: bench helpers (`esp32
 erun.ps1 -Cmd <letter>`)
 

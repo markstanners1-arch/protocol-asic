@@ -102,6 +102,15 @@ s.append(Spacer(1, 4))
 s.append(Paragraph("Holes and balls pair up in order: hole 6 is ball N14 (engine pin 0), hole 8 is N16 (pin 1), and so on along each row. "
                    "Kit LEDs: P16 lights for IRQ, N15 is the heartbeat (they light when driven low).", P))
 s.append(Paragraph("<b>Cyclone IV board</b> (black EP4CE6E22C8N core board): everything on the right-hand header, pins 38-72, both bank jumpers at 3.3. CS 38, SCK 39, MOSI 42, MISO 43, IRQ 44 to the same ESP32 GPIOs as section 1; engine pin 0 = 46 (to GPIO 16), pins 1-7 = 49 50 51 52 53 54 55 (I2C SCL 50 / SDA 51; SPI 52-55), pins 8-13 = 58 59 60 64 65 66, pin 15 = 67 (from GPIO 17), 16-19 = 68-71. Clock 50 MHz on pin 24, LEDs 1 (IRQ) and 2 (heartbeat). Needs a USB Blaster on the JTAG header (ordered 3 Nov, due 5-6 Nov): bash fpga/cyclone4/build.sh load. Sketch: CHIP_HZ = 50e6. This board runs three engines (ID 0x0023); the kit two.", P))
+s.append(Paragraph("What is plugged in right now (4 Nov 2026, midday): no double booking", H2))
+s.append(Paragraph("A new program may only use a FREE hole; moving a lead means updating this list. "
+                   "TAKEN: hole 1 (IO1 3.3 V: the keypad's four 10 k pull-ups); holes 3, 4, 5, 6, 7, 9 (ESP32 host: CS, IRQ, MOSI, engine pin 0 UART, MISO, SCK, never moves); "
+                   "holes 10 and 13 (I2C SCL/SDA with 5.1 k pull-ups, slave leads as left on 3 Nov); holes 14-17 (keypad columns, tail 5-8; the 74HC595 is out of circuit since 4 Nov); "
+                   "hole 26 (ESP32 GPIO 17 test pulses, the regression needs it); holes 27-30 (keypad rows, tail 1-4, 10 k to hole 1). "
+                   "<b>FREE</b>: hole 2 (second 3.3 V); <b>hole 8 (engine pin 1, two-way): next for the IR receiver, then the HC-SR04 echo, one at a time</b>; "
+                   "holes 18, 19, 20 (engine pins 8-10, out only; 18 pencilled for the HC-SR04 trigger); holes 23, 24, 25 (engine pins 11-13, out only). "
+                   "ESP32 pins taken: 4, 5, 16, 17, 18, 19, 23, plus 21 and 22 only if it is the I2C slave; VIN (5 V) is free for the HC-SR04. "
+                   "All two-way engine pins 0-7 are spoken for while the keypad is on.", P))
 s.append(Paragraph("If it doesn't answer: esp32 rerun.ps1 -Cmd p (lead probe: a FLOATING pin = lead open or wrong hole; ID 0x0000 with MISO driven = CS/SCK/MOSI not arriving; 0xFFFF = MISO open), -Cmd q (IRQ held high 15 s), -Cmd b (I2C wire check: names the chip pin each I2C lead reaches), -Cmd k (GPIO 22 held low 30 s to meter), -Cmd l (repeating ID reads for the oscilloscope), -Cmd y (keypad: names every key pressed; every key 'pressed' = row pull-ups not reaching J4-27..30), -Cmd e (live level of engine pins 15-19 for 30 s, a line on every change: a row with its 10 k in place reads 1). Writes working but reads all zero = MISO lead's J4 end in a hole held low (11/12 GND, 18-25 driven low). The kit forgets its build on any power blip: reload with bash fpga/machxo3/build.sh load.", P))
 s.append(Paragraph("Order of work after replugging", H2))
 s.append(Paragraph("1. Section 1 only. Load the kit, upload the sketch, rerun.ps1 (command r): ID 0x0022, 0 problems.&nbsp;&nbsp; "
