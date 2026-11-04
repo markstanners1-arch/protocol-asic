@@ -565,3 +565,12 @@ That's a driver change on the PC, so Mark does it himself. Then:
   `pico/put.ps1` copies files over the serial raw REPL and `pico/run.ps1` runs a script and shows the output. Checked with nothing wired:
   the code runs and fails cleanly (a floating MISO reads 0x0000). Wiring in sheet section 8 (CS GP17, MOSI GP19, MISO GP16, SCK GP18,
   IRQ GP20, GND pin 23; one host at a time). Next: wire it, ID register 0x0022, then port the IR decoder and the keypad.
+- 4 Nov 2026 (night, Pico on the bench): **the Pico 2 drives the chip.** Five SPI/IRQ leads and the ground moved from the ESP32 to the
+  Pico (sheet section 8). `pico/id_test.py`: ID register 0x0022 five times, spec 2, two engines, PASS. Ported from the ESP32 sketch
+  and run from the Pico, all against the same kit build: `pico/ir_loopback.py` (engine A transmits through the emitter, engine B
+  decodes from the receiver) **PASS 6 of 6 frames exactly**, the first run; `pico/ir_decode.py` (the sketch's `m`) with the Manhattan
+  remote pressing 1, 2, 3, POWER read B7, B6, B5, B3 with a tap's two or three repeats each: the same codes the ESP32 read; `pico/keypad.py`
+  (the sketch's `y`) with the sequence 1, 5, 9, D, * with #, 4 with 6 read back line by line, each key one report on press and one of
+  0000 on release, pairs as both bits, except that **D appeared twice** where the sequence had it once (a second tap, not bounce: the
+  program waits 20 ms after every change and a bounce would not make a clean release; Mark to confirm). The chip needs no change to
+  switch hosts: only the five host-port lines move. Scripts run with `pico/run.ps1 -Script <name>.py -Seconds n`.
