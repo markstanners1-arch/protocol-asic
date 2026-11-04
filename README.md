@@ -571,6 +571,7 @@ That's a driver change on the PC, so Mark does it himself. Then:
   decodes from the receiver) **PASS 6 of 6 frames exactly**, the first run; `pico/ir_decode.py` (the sketch's `m`) with the Manhattan
   remote pressing 1, 2, 3, POWER read B7, B6, B5, B3 with a tap's two or three repeats each: the same codes the ESP32 read; `pico/keypad.py`
   (the sketch's `y`) with the sequence 1, 5, 9, D, * with #, 4 with 6 read back line by line, each key one report on press and one of
-  0000 on release, pairs as both bits, except that **D appeared twice** where the sequence had it once (a second tap, not bounce: the
-  program waits 20 ms after every change and a bounce would not make a clean release; Mark to confirm). The chip needs no change to
+  0000 on release, pairs as both bits, except that **D appeared twice** the first time where the sequence had it once. Mark did not knowingly press it twice; a rerun of
+  the same sequence read D once and everything else identically (PASS). Not bounce as such: the program waits 20 ms after every change,
+  so a double report needs the contact to open and close again for longer than that, e.g. a slow press on a tired membrane key. The chip needs no change to
   switch hosts: only the five host-port lines move. Scripts run with `pico/run.ps1 -Script <name>.py -Seconds n`.
