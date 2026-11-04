@@ -132,7 +132,7 @@ The module's pads are marked **G R Y** (green ground, red power, yellow signal):
 stuck low). Pin 1 has a pull-up in the kit build, so an idle-high reading alone does not prove the receiver is wired.
 
 **Remote button codes, read on the kit 4 Nov 2026** (`-Cmd m`, twice, the same codes both times; pressed in the order
-shown with a stated sequence, so each row is a checked pair). The remote is an unnamed one with NEC timing (9 ms
+shown with a stated sequence, so each row is a checked pair). The remote is a Manhattan one (a second, non-LG remote) with NEC timing (9 ms
 leader, 562.5 us bursts, repeat frames every 108 ms) but a 16-bit address and a 16-bit command with no inverse rule,
 so `m` prints BAD INVERSE for every key: that flag means "not the plain 8-bit NEC layout", not a read error. The
 address word is 2916 on every key. A tap gives 2 to 5 repeat frames, a hold keeps repeating at 108 ms.

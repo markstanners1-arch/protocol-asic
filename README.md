@@ -505,7 +505,7 @@ That's a driver change on the PC, so Mark does it himself. Then:
   in the room (Mark's TV in another room was being operated by it). (4) A scripted window then read back correctly:
   1, 2, 3, 4, 5, 6, 7, 8, 9, 0, POWER, VOL+ held gave 12 frames in order (command bytes B7 B6 B5 C2 C1 C0 C7 C6 C5 C9
   B3 E0, address word 2916, the VOL+ hold 17 repeats at 108 ms), and an earlier 1, 2, 3, VOL+, POWER window gave the same
-  codes. Mark's LG smart remote (thumb wheel) power key read address 04 command 08 with both inverses good. This remote has NEC timing but a
+  codes. Mark's LG smart remote (thumb wheel) power key read address 04 command 08 with both inverses good. This remote (a Manhattan) has NEC timing but a
   16-bit address and command with no inverse rule, so the sketch flags BAD INVERSE on every key; that is the remote, not
   the decoder. Code table in `docs/bench_wiring.md` section 6 (PDF rebuilt), occupancy table section 7 (holes 2 and 8
   taken). Not yet read: the Elegoo kit's own remote (expect address 00, POWER 45). Lessons: send a command letter twice

@@ -147,7 +147,7 @@ s.append(wires([
 s.append(Spacer(1, 6))
 s.append(Paragraph("IR module pads are marked G R Y (ground, power, signal): Y is the S lead. The IR <b>emitter</b> (KY-005) must not share J4-8: its LED holds the line low. "
                    "Pin 1 has a pull-up, so idle-high alone proves nothing about the wiring.", P))
-s.append(Paragraph("Remote button codes read on the kit, 4 Nov 2026 (-Cmd m, twice, same both times). NEC timing, 16-bit address and 16-bit command with no inverse, so the sketch prints BAD INVERSE for every key: not a read error. Address word 2916 on every key.", PB))
+s.append(Paragraph("Manhattan remote button codes read on the kit, 4 Nov 2026 (-Cmd m, twice, same both times). NEC timing, 16-bit address and 16-bit command with no inverse, so the sketch prints BAD INVERSE for every key: not a read error. Address word 2916 on every key.", PB))
 codes = [("1", "5CB7"), ("2", "6CB6"), ("3", "7CB5"), ("4", "0CC2"), ("5", "1CC1"), ("6", "2CC0"),
          ("7", "5BC7"), ("8", "6BC6"), ("9", "7BC5"), ("0", "3BC9"), ("POWER", "9CB3"), ("VOL+", "2AE0")]
 rows = [[Paragraph(h, CB) for h in ("Button", "Command word", "Button", "Command word")]]
