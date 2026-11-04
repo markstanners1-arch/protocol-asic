@@ -652,3 +652,8 @@ That's a driver change on the PC, so Mark does it himself. Then:
   supply rail, so the highs sag and the slave sees marginal levels; its ground lead had also been part of the rail's ground path.
   Analyser powered on: EEPROM PASS (6 ms write cycle), sniffer PASS. Rule: an instrument on the bus is powered or unclipped,
   never off and attached. The flaky runs left FD FD FD FD at 0x0020 on the blank module; `pico/eeprom_blank.py` put it back to FF.
+- 4 Nov 2026 (night, last): the Feit "smart LED strip" in the drawer is Wi-Fi with a USB-C-shaped plug from a mains box, not DALI:
+  parked (too messy to get at). **Decision (Mark): buy proper DALI gear.** Shopping note: a small DALI LED driver (Mean Well
+  LCM-xxDA or any "DALI dimmable" constant-voltage driver, 15-25 GBP) and a bus supply (a DALI PS, or a 12-18 V DC wall wart
+  through 56 ohm 2 W); a USB-C breakout if the strip is ever revisited; the P82B96 for split I2C; a 3-pin addressable strip as
+  the one-wire LED demo. Chip side of DALI (both programs and a model gear) can be written before the parts come.
