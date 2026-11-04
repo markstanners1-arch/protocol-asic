@@ -5,3 +5,6 @@ fpga/*/build/
 fpga/*/db/
 fpga/*/incremental_db/
 *.zip
+*.exe
+*.msi
+*.rar

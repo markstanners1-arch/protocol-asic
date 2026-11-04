@@ -110,6 +110,14 @@ Lessons of 3 Nov: writes working but reads all zero = the MISO lead's J4 end in 
 18-25 are driven low when no engine owns them); everything zero and nothing received = CS/SCK/MOSI; everything 0xFFFF
 = no leads at all. The kit's SRAM build is lost on any power blip: reload it (`bash fpga/machxo3/build.sh load`).
 
+## Oscilloscope (Hantek DSO5102P)
+
+Pictures go to a **FAT32 stick (32 GB or under) in the front socket**; the rear USB needs a driver Windows 11 refuses.
+Probes clip onto spare pins in breadboard rows the leads pass through, grounds to the ground rail; probe switches and
+channel settings both at 10x. For I2C: CH1 SCL, CH2 SDA, 1 V/div, 20 us/div for a byte or 100 us/div for a
+transaction, trigger CH2 falling at 1.5 V (the START) with holdoff about 1 ms, mode Normal. Signal: `rerun.ps1 -Cmd z`
+runs transactions until any key (`-Cmd o` for 60 s); `-Cmd l` is repeating host-port reads for SCK/MISO.
+
 ## Order of work after replugging
 
 1. Section 1 only. Load the kit, upload the sketch, `rerun.ps1` (command `r`): ID 0x0022, 0 problems.

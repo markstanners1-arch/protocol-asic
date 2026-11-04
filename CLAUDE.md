@@ -34,7 +34,7 @@ the roadmap and a dated progress log of everything done and found. Specs: `docs/
   dead. Moving it to another USB socket needs Zadig (WinUSB on interface 0) again.
 - **Cyclone IV EP4CE6 board**: arriving 3 Nov 2026. Plan: build the same chip in Quartus as a second-opinion
   toolchain, run the same ESP32 test.
-- **Tiny Tapeout repo**: `D:\ProtocolASIC_TT` = github.com/markstanners1-arch/ttihp-protocol-emulator (private, IHP
+- **Tiny Tapeout repo**: `D:\ProtocolASIC_TT` = github.com/markstanners1-arch/ttihp-protocol-emulator (public since 3 Nov, as is protocol-asic; Pages on, viewer at markstanners1-arch.github.io/ttihp-protocol-emulator; IHP
   CMOS5L template, 6x4 tiles, 50 MHz, top `tt_um_gosforth_protocol_emu`). Its `src/` is a copy of this repo's `src/`;
   re-copy after changes. The cocotb test passes on GitHub; the first two layout (gds) runs were still building at
   ~21:45 on 2 Nov: check `gh run list -R markstanners1-arch/ttihp-protocol-emulator`.

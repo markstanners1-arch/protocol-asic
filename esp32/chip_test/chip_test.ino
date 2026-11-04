@@ -423,7 +423,7 @@ void leadProbe() {
                   up == dn ? (up ? "driven HIGH by something" : "driven LOW by something") : "FLOATING: lead open or in the wrong hole");
     Serial.println();
   }
-  SPI.begin(PIN_SCK, PIN_MISO, PIN_MOSI, -1);
+  SPI.end(); SPI.begin(PIN_SCK, PIN_MISO, PIN_MOSI, -1);   // end first: a second begin() leaves GPIO 19 as a plain input (found 3 Nov, late)
   uint16_t id = readReg(ENG_A, R_ID);
   Serial.printf("  raw ID read: 0x%04X (0x0022 = two engines answering; 0x0000 = chip not seeing the command, check MOSI J4-5/M14 -> GPIO 23, CS J4-3/K12 -> GPIO 5, SCK J4-9/M15 -> GPIO 18; 0xFFFF = MISO open)", id);
   Serial.println();
@@ -634,6 +634,35 @@ void isolationTest() {
   Serial.println(); Serial.printf("==== isolation %s (%d problems) ====", errors ? "FAIL" : "PASS", errors); Serial.println();
 }
 
+// 'o': scope loop for I2C. For 60 s, every 20 ms: START, address 0x50 + W, pointer 3, one data byte 0xA5, STOP at
+// 100 kHz. Trigger the scope on SDA falling (the START) with SCL on the other channel; the UNO or ESP32 slave acks.
+void i2cScopeLoop(bool forever = false) {
+  Wire.end(); pinMode(ESP_SDA, INPUT); pinMode(ESP_SCL, INPUT);
+  writeReg(ENG_A, R_CTRL, 0); writeReg(ENG_B, R_CTRL, 0);
+  writeReg(ENG_A, R_FILTER, 0);
+  int clkdiv = (int)(CHIP_HZ / (10.0 * 100000) + 0.5) - 1;
+  loadProgram(ENG_A, PROG_I2C_MASTER, PROG_I2C_MASTER_LEN);
+  writeReg(ENG_A, R_CLKDIV, clkdiv);
+  writeReg(ENG_A, R_WRAP, wrapReg(0, PROG_I2C_MASTER_WRAP_BOTTOM, PROG_I2C_MASTER_WRAP_TOP));
+  writeReg(ENG_A, R_OUTCFG, I2C_SDA_ENG | (1 << 5) | (I2C_SDA_ENG << 10));
+  writeReg(ENG_A, R_MISC, 1 | (I2C_SCL_ENG << 3) | (1 << 8) | (1 << 10) | (1 << 13));
+  writeReg(ENG_A, R_INCFG, I2C_SDA_ENG);
+  writeReg(ENG_A, R_CTRL, 1); delay(5);
+  Serial.println();
+  Serial.println(forever ? "==== I2C scope loop: running until any key; [START 0xA0 0x03 0xA5 STOP] at 100 kHz every 20 ms ====" : "==== I2C scope loop: 60 s of [START 0xA0 0x03 0xA5 STOP] at 100 kHz every 20 ms; trigger on SDA falling ====");
+  int acked = 0, total = 0;
+  for (int t = 0; t < 3000 || (forever && !Serial.available()); t++) {   // 'z': until any character arrives
+    i2cCmd(i2cWord(I2C_MASTER_START), false);
+    int r1 = i2cSend(0xA0), r2 = i2cSend(0x03), r3 = i2cSend(0xA5);
+    i2cCmd(i2cWord(I2C_MASTER_STOP), false);
+    total++; if (r1 >= 0 && (r1 & 1) == 0 && (r2 & 1) == 0 && (r3 & 1) == 0) acked++;
+    if (t % 500 == 499 && (!forever || t % 5000 == 4999)) { Serial.printf("  %d transactions, %d fully acked", total, acked); Serial.println(); }
+    delay(20);
+  }
+  writeReg(ENG_A, R_CTRL, 0);
+  Serial.println("==== scope loop done ====");
+}
+
 void loop() {
-  if (Serial.available()) { int c = Serial.read(); if (c == 'r') runAll(); else if (c == 'i') i2cTest(); else if (c == 'n') i2cTest(true); else if (c == 's') spiTest(); else if (c == 'q') irqHold(); else if (c == 'p') leadProbe(); else if (c == 'l') scopeLoop(); else if (c == 'b') i2cWireCheck(); else if (c == 'k') sclHoldLow(); else if (c == 'w') ledWalk(); else if (c == 'a') i2cScan(); else if (c == 'x') isolationTest(); }
+  if (Serial.available()) { int c = Serial.read(); if (c == 'r') runAll(); else if (c == 'i') i2cTest(); else if (c == 'n') i2cTest(true); else if (c == 's') spiTest(); else if (c == 'q') irqHold(); else if (c == 'p') leadProbe(); else if (c == 'l') scopeLoop(); else if (c == 'b') i2cWireCheck(); else if (c == 'k') sclHoldLow(); else if (c == 'w') ledWalk(); else if (c == 'a') i2cScan(); else if (c == 'x') isolationTest(); else if (c == 'o') i2cScopeLoop(); else if (c == 'z') { i2cScopeLoop(true); while (Serial.available()) Serial.read(); } }
 }

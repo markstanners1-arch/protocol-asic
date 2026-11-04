@@ -432,3 +432,35 @@ That's a driver change on the PC, so Mark does it himself. Then:
   section). Same test in the sketch (`rerun.ps1 -Cmd x`, push_789 now exported to programs.h): **PASS on the kit**.
   Nothing joins the engines but the host's selector, the pin priority chain and the IRQ OR; the chip-wide glitch
   filter setting is the one shared knob.
+- 3 Nov 2026 (late): **both repos made public** (Mark: "no need for secrecy"): markstanners1-arch/protocol-asic and
+  ttihp-protocol-emulator, scanned first for credentials or personal data (none). GitHub Pages enabled on the TT repo
+  (source: Actions), so the layout viewer job should now pass; it will publish at
+  https://markstanners1-arch.github.io/ttihp-protocol-emulator/ after the next gds run (41697384154, the three-engine
+  confirmation, in progress). Next open question for the Tiny Tapeout Discord: is IHP's RM_IHPSG13_1P_64x16_c2 SRAM
+  block accepted on the CMOS5L shuttle? (Decides whether four engines is ever an option.)
+- 3 Nov 2026 (23:30): **first oscilloscope captures of the chip on real wires** (`docs/bench/i2c_scope_1.png`, `_2.png`,
+  Hantek DSO5102P, saved to a FAT32 stick: the scope's PC driver is Windows-7 era and Windows 11's core isolation
+  refuses it; the scope's rear USB is no use without it). CH1 SCL, CH2 SDA, engine A as I2C master to the UNO slave at
+  100 kHz, new sketch commands `o` (60 s of START 0xA0 0x03 0xA5 STOP every 20 ms) and `z` (the same until a key).
+  The trace shows the address byte 1010 0000 = 0xA0 on nine clocks with the UNO's ACK low on the ninth, and the
+  host-paced gaps either side (SCL held low while the master waits for the host's next command word, a few hundred
+  us at the ESP32's 100 us polling): a faithful picture of a host-paced master. Scope hints kept: probes on breadboard
+  rows beside the leads, trigger CH1 rising or SDA falling with holdoff ~1 ms to frame the START, 1 V/div, 20-50
+  us/div. To check with cursors next time: one SCL period = 10 us. Also tonight: a 2010-2015 USB stick backed up to
+  D:\USB stick backup 2010-2015 before it went in the scope.
+- 3 Nov 2026 (23:45): scope cursors on one SCL period: **10.0 us**, i.e. 100 kHz as set (clkdiv 11 at 12 MHz, 10 ticks a bit); the chip's timing confirmed by an outside instrument for the first time.
+- 3 Nov 2026 (23:55): three more captures (`docs/bench/i2c_scope_3..5.png`), cursors on. Picture 4 is the period:
+  adjacent SCL rising edges, **dt 10.80 us** by the scope's cursors (Mark read 10.0 by eye earlier), i.e. 93-100 kHz
+  against 100 nominal. The designed bit is 10 ticks of 1 us; the cursor is good to about half a microsecond at this
+  zoom, and a bit can honestly be 11 ticks when the pull-up's rise (5.1 k into breadboard + two probes) plus the
+  2-clock synchroniser pushes the "SCL seen high" past the tick boundary, as the program comment warns. To pin down:
+  2 us/div and cursors on one period; and a 2.2 k pull-up would sharpen the rise. Pictures 3 and 5 are partial widths.
+- 4 Nov 2026 (00:30): **a sketch bug found by the scope.** After the photo session the kit answered every read with
+  0x0000 while writes worked (UART text arrived, IRQ followed), the afternoon's "MISO lead off" signature, but the
+  leads were fine: CH2 on the MISO wire at GPIO 19 during the ID-read loop showed two pulses per read, i.e. 0x0022
+  arriving at the ESP32's pin. The ESP32 was not sampling it: the `p` lead probe sets GPIO 19 to a plain input to
+  test it and then calls SPI.begin() again, and on this ESP32 core a second begin() does not hand the pin back to the
+  SPI hardware. Every earlier `p` had been followed by an upload (a reboot) before the next test, which hid it.
+  Fix: SPI.end() before the begin(). Proven: regression PASS, then `p`, then regression PASS again. Lesson for the
+  bench: when the chip's reply is on the wire but the host reads zero, suspect the host's pin setup before the leads.
+- 4 Nov 2026 (02:00): the three-engine confirming run (41697384154, TT commit 2c401e2) built in 2h44m, gate-level test PASS, and **the viewer job passed for the first time** now the repo is public with Pages on: the layout is viewable at https://markstanners1-arch.github.io/ttihp-protocol-emulator/ . Precheck was still running at this check; expected to pass as the measurement run did.
