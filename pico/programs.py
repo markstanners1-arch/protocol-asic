@@ -13,3 +13,17 @@ PROGRAMS = {
     "ir_nec": ([0x20A0, 0x2020, 0xC036, 0x00C0, 0x0243, 0x20A0, 0xC030, 0x00CB, 0xA0CB, 0x8000, 0x0000, 0x0247, 0x2020, 0xA0C3, 0xC05F, 0x20A0, 0xC02A, 0x00D4, 0x4061, 0x001B, 0x0051, 0x4021, 0xC02C, 0x00D9, 0x001B, 0x0257, 0x0000, 0x8040, 0x008F], 0, 28),
     "ir_tx": ([0xC081, 0x80A0, 0xA0C3, 0xC02A, 0xC05D, 0xC001, 0xC000, 0x0085, 0x0044, 0xC02F, 0x1F4A, 0x6021, 0xC054, 0xC001, 0xC000, 0x008D, 0xBF42, 0xBD42, 0x0035, 0xC023, 0x1F54, 0x00EB, 0xA026, 0x003C, 0xC054, 0xC001, 0xC000, 0x0099, 0xA0CB, 0x80A0, 0x000B], 1, 27),
 }
+# name -> {label: address}: the routine numbers a host puts in a command word (i2c_master: xfer, start, stop)
+LABELS = {
+    "uart_tx": {"bitloop": 3},
+    "measure_baud": {"done": 6},
+    "measure_pulse": {},
+    "read_pins": {"loop": 0},
+    "push_789": {"done": 9},
+    "i2c_master": {"entry": 1, "xfer": 3, "xfer_bit": 5, "start": 12, "stop": 15},
+    "i2c_sniff": {"sync": 1, "bit": 3, "poll0": 7, "maybe_stop": 12, "got1": 16, "poll1": 18, "next": 26},
+    "spi_master": {"entry": 2, "xfer": 4, "xfer_bit": 5, "select": 10, "deselect": 12},
+    "keypad": {"scan": 0, "changed": 10, "pause": 14},
+    "ir_nec": {"idle": 0, "burst": 3, "space": 7, "long": 11, "bit": 15, "poll": 17, "high": 20, "tail": 23, "still": 25, "next": 27},
+    "ir_tx": {"idle": 1, "lead_o": 4, "lead_i": 5, "lead_s": 10, "bit": 11, "burst": 13, "long": 20, "next": 21, "final": 25, "word2": 28},
+}

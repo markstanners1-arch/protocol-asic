@@ -12,6 +12,7 @@ $sp.DtrEnable = $true; $sp.RtsEnable = $true
 $sp.Open()
 try {
     $sp.Write([byte[]](3, 3), 0, 2); Start-Sleep -Milliseconds 300; $null = $sp.ReadExisting()
+    $sp.Write([byte[]](4), 0, 1); Start-Sleep -Milliseconds 1500; $null = $sp.ReadExisting()     # Ctrl-D: soft reset, so edited modules load afresh
     $sp.Write("exec(open('$Script').read())`r")
     $null = $sp.ReadLine()    # the echoed command line
     $end = (Get-Date).AddSeconds($Seconds)
