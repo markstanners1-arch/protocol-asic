@@ -501,8 +501,9 @@ That's a driver change on the PC, so Mark does it himself. Then:
   (1) three runs saw nothing because the module was not wired yet; pin 1 has a pull-up in the kit build, so "idle high"
   proved nothing and the sketch now says so. (2) The line then read stuck LOW 800 of 800: Mark had wired the Elegoo IR
   **emitter** (KY-005, a clear LED) instead of the receiver; the pads on the receiver are marked G R Y (ground, power, signal).
-  (3) With the receiver in, a raw capture showed a steady train of 5 ms pulses every 36 ms: Mark's phone, confirmed later (its
-  infrared sensor sets the receiver off: keep phones away from it during captures; a phone camera pointed at the emitter is fine). (4) A scripted window then read back correctly:
+  (3) With the receiver in, a raw capture showed a steady train of 5 ms pulses every 36 ms: Mark's phone, confirmed later: opening its
+  camera app does it (the infrared autofocus or depth sensor pulses at the receiver). Keep a phone with its camera open away from the receiver
+  during captures; to check the emitter with a phone camera, hold it well to the side of the receiver. (4) A scripted window then read back correctly:
   1, 2, 3, 4, 5, 6, 7, 8, 9, 0, POWER, VOL+ held gave 12 frames in order (command bytes B7 B6 B5 C2 C1 C0 C7 C6 C5 C9
   B3 E0, address word 2916, the VOL+ hold 17 repeats at 108 ms), and an earlier 1, 2, 3, VOL+, POWER window gave the same
   codes. Mark's LG smart remote (thumb wheel) power key read address 04 command 08 with both inverses good. This remote (a Manhattan) has NEC timing but a
