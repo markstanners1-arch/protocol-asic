@@ -22,7 +22,7 @@ Fit these eight first, then `esp32\rerun.ps1` (command `r`): the ID register rea
 | J4-6 (N14) | ESP32 GPIO 16 | | engine pin 0: engine A's UART out, into ESP32 Serial2 RX |
 | J4-26 (G15) | ESP32 GPIO 17 | | engine pin 15: the ESP32 sends test pulses into the chip (glitch filter) |
 
-J4-1 and J4-2 are the kit's 3.3 V: for pull-ups only, never joined to the ESP32's 3.3 V.
+J4-1 and J4-2 are the kit's 3.3 V (printed IO1 on the silkscreen, the bank supply, not a ball name): for pull-ups only, never joined to the ESP32's 3.3 V.
 Kit: `bash fpga/machxo3/build.sh load` (volatile SRAM only, never the NVCM). ESP32: the scripts find its CH340 port themselves:
 `esp32\upload_and_watch.ps1 -Sketch chip_test`.
 
@@ -144,7 +144,8 @@ erun.ps1 -Cmd <letter>`)
 | `b` | I2C wire check: engine B reads all 20 engine pins while the ESP32 pulls its SDA, then its SCL, low | the chip pin each I2C lead actually reaches (expect SDA = pin 3, SCL = pin 2); nothing moving = that lead is in a hole the chip cannot read (3 Nov: H16, hole 25, read as M16) |
 | `k` | GPIO 22 (the ESP32's SCL) held low for 30 s | time to meter both ends of the SCL lead |
 | `l` | ID reads over and over for 30 s | a repeating burst on CS, SCK, MOSI and MISO for the oscilloscope; MISO should read 0x0022 |
-| `y` | keypad: names every key pressed until any character is sent | section 6 wiring; a key that never shows = its row or column lead; every key mirrored = the tail numbered the other way |
+| `y` | keypad: names every key pressed until any character is sent | section 6 wiring; a key that never shows = its row or column lead; every key mirrored = the tail numbered the other way; every key "pressed" (map FFFF, or 5555 / AAAA) = those rows' pull-ups not reaching J4-27..30 (an open input-only hole reads low: the kit build gives pins 15-19 internal pull-downs) |
+| `e` | live level of engine pins 15-19 (J4-26..30) for 30 s, a line on every change | wiggle a lead or touch a jumper from 3.3 V to a hole while it runs; a row with its 10 k in place must read 1, and its resistor shows about 0.5 V drop (the internal pull-down's 50 uA); no drop = that row is open |
 
 Lessons of 3 Nov: writes working but reads all zero = the MISO lead's J4 end in a hole that is held low (11/12 are GND,
 18-25 are driven low when no engine owns them); everything zero and nothing received = CS/SCK/MOSI; everything 0xFFFF

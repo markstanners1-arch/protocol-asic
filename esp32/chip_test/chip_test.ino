@@ -693,6 +693,34 @@ void keypadTest() {
   Serial.println("==== keypad done ====");
 }
 
+// 'e': live level of the input-only pins 15..19 (J4 holes 26..30) for 30 s, a line whenever one changes and every
+//      2 s anyway, so a lead can be wiggled or a hole probed while watching. 1 = high; an open hole reads 0 (the kit
+//      build gives these pins internal pull-downs), so a row with its 10 k pull-up in place must show 1.
+void pinWatch() {
+  writeReg(ENG_A, R_CTRL, 0); writeReg(ENG_B, R_CTRL, 0);
+  loadProgram(ENG_B, PROG_READ_PINS, PROG_READ_PINS_LEN);
+  writeReg(ENG_B, R_CLKDIV, 0);
+  writeReg(ENG_B, R_WRAP, wrapReg(0, PROG_READ_PINS_WRAP_BOTTOM, PROG_READ_PINS_WRAP_TOP));
+  writeReg(ENG_B, R_MISC, 0); writeReg(ENG_B, R_INCFG, 15);
+  writeReg(ENG_B, R_CTRL, 1);
+  Serial.println();
+  Serial.println("==== pin watch: pins 15 16 17 18 19 = J4 holes 26 27 28 29 30 (G15 G16 F15 F16 E15), 30 s ====");
+  uint16_t last = 0xFFFF; unsigned long t0 = millis(), tl = 0;
+  while (millis() - t0 < 30000 && !Serial.available()) {
+    uint16_t v = 0;
+    for (int i = 0; i < 8; i++) v = readReg(ENG_B, R_RX);
+    if (v != last || millis() - tl >= 2000) {
+      Serial.printf("  t=%5lu ms  pins 15..19 = %d %d %d %d %d", millis() - t0, v & 1, (v >> 1) & 1, (v >> 2) & 1, (v >> 3) & 1, (v >> 4) & 1);
+      Serial.println();
+      last = v; tl = millis();
+    }
+    delay(50);
+  }
+  while (Serial.available()) Serial.read();
+  writeReg(ENG_B, R_CTRL, 0);
+  Serial.println("==== pin watch done ====");
+}
+
 void loop() {
-  if (Serial.available()) { int c = Serial.read(); if (c == 'r') runAll(); else if (c == 'i') i2cTest(); else if (c == 'n') i2cTest(true); else if (c == 's') spiTest(); else if (c == 'q') irqHold(); else if (c == 'p') leadProbe(); else if (c == 'l') scopeLoop(); else if (c == 'b') i2cWireCheck(); else if (c == 'k') sclHoldLow(); else if (c == 'w') ledWalk(); else if (c == 'a') i2cScan(); else if (c == 'x') isolationTest(); else if (c == 'o') i2cScopeLoop(); else if (c == 'z') { i2cScopeLoop(true); while (Serial.available()) Serial.read(); } else if (c == 'y') keypadTest(); }
+  if (Serial.available()) { int c = Serial.read(); if (c == 'r') runAll(); else if (c == 'i') i2cTest(); else if (c == 'n') i2cTest(true); else if (c == 's') spiTest(); else if (c == 'q') irqHold(); else if (c == 'p') leadProbe(); else if (c == 'l') scopeLoop(); else if (c == 'b') i2cWireCheck(); else if (c == 'k') sclHoldLow(); else if (c == 'w') ledWalk(); else if (c == 'a') i2cScan(); else if (c == 'x') isolationTest(); else if (c == 'o') i2cScopeLoop(); else if (c == 'z') { i2cScopeLoop(true); while (Serial.available()) Serial.read(); } else if (c == 'y') keypadTest(); else if (c == 'e') pinWatch(); }
 }
