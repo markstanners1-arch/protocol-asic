@@ -471,8 +471,8 @@ That's a driver change on the PC, so Mark does it himself. Then:
   is kept at D:\ outside the repo). Fix: installer dropped from the commit and moved to Downloads, `*.exe *.msi *.rar`
   gitignored, nine local commits folded into one and pushed. Lesson: read the whole backup output, not its last line.
 - 4 Nov 2026 (morning): run 41697384154 precheck PASS, so the three-engine chip as it stands is a complete, submittable
-  layout. Morning's bus talk (speed grades, the 400 pF capacitance limit, three- and four-wire variants, fire loops)
-  turned into a "what else can it do" list; Mark's Elegoo kits cover most of it. **First new program: the 4x4 keypad
+  layout. Morning's bus talk (speed grades, the 400 pF capacitance limit, three- and four-wire variants, fire loops;
+  written up in `docs/bus_variants.md` that afternoon) turned into a "what else can it do" list; Mark's Elegoo kits cover most of it. **First new program: the 4x4 keypad
   scanner** `programs/keypad.asm` (16 words): one column pulled low at a time, open drain, so two keys on a row can never
   short two drivers; rows read with pull-ups; the 16-key map is pushed only when it changes, then a 20 ms pause for the
   bounce. `model/test_keypad.py` scans a model keypad (one key, a key bouncing for 5 ms each way, two keys on one row,
@@ -604,3 +604,12 @@ That's a driver change on the PC, so Mark does it himself. Then:
   does not: the TIME stopwatch for measuring a bus, WAIT with timeout, the input glitch filter, open-drain through side-set directions,
   three engines with a host SPI port, a Python reference model proven against the Verilog), and if 8x4 is offered four engines (61 % of 6x4
   failed placement, so roughly 46 % of 8x4 should place) can be reconsidered.
+- 4 Nov 2026 (afternoon, write-up): **the three- and four-wire bus talk recorded** in `docs/bus_variants.md`, after a second
+  session could find only the one README line about it. Contents: why I2C stops at a few metres (the 400 pF RC ramp, with
+  the fire loop as the same physics at 100 nF and a few kbit/s, screen earthed at one end); three meanings of "three wire"
+  (split SDA into data-out and data-in for push-pull edges and distance, SMBus alert line, three-wire SPI), all program
+  changes; four wires (both lines split, differential pairs, data plus power, plain SPI); the wire-count ladder, whose
+  single-wire end (DALI, 1-Wire) is where a programmable engine beats a fixed peripheral and so what to show the judges;
+  and the split-I2C plan: `programs/i2c_master_split.asm`, about two words changed from the 19-word master, data/clock out
+  on the output-only pins and back on the input-only ones, no Verilog change, a P82B96 at the far end, demo = the AT24C256
+  read over two metres of ribbon that plain I2C fails. Order agreed: identify-the-board set, DALI, then this.

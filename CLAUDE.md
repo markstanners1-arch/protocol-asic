@@ -2,7 +2,8 @@
 
 Mark Stanners + Claude, started 2 Nov 2026. **Submit by 18 Jan 2027** (aim 11 Jan). Read `README.md` first:
 the roadmap and a dated progress log of everything done and found. Specs: `docs/core_design.md`, `docs/isa.md`
-(exact engine rules), `docs/host_port.md`, `docs/input_filter.md`, `docs/memory_options.md`.
+(exact engine rules), `docs/host_port.md`, `docs/input_filter.md`, `docs/memory_options.md`; `docs/bus_variants.md`
+is the three/four-wire bus write-up (split I2C plan).
 
 ## Mark
 - (personal note removed)
