@@ -5,15 +5,12 @@ the roadmap and a dated progress log of everything done and found. Specs: `docs/
 (exact engine rules), `docs/host_port.md`, `docs/input_filter.md`, `docs/memory_options.md`; `docs/bus_variants.md`
 is the three/four-wire bus write-up (split I2C plan).
 
-## Mark
-- (personal note removed)
-
-
-
-- Check leads by continuity to the labelled pads, or with
-  `programs/read_pins.asm`, before blaming the design.
+Personal notes about Mark and how to work with him are in `CLAUDE.local.md` (gitignored, read it too). This file
+is public with the repo.
 
 ## Rules
+- Bench rule: a lead or key fault is checked by continuity to the labelled pads, or with `programs/read_pins.asm`,
+  before blaming the design; a bench pass needs a scripted sequence read back line by line.
 - After changes, back up: `pwsh D:\NINA\backup_scripts.ps1 "what changed"` (pushes the private GitHub repo
   markstanners1-arch/protocol-asic and copies to G:\My Drive\Astro scripts\ProtocolASIC).
 - Every design change is proven three ways: the Python model (`model/`, the reference), the side-by-side

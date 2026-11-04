@@ -30,10 +30,10 @@ would drive either with no program change.
 A fire loop is the same physics scaled up a thousand times: a kilometre of 1.5 mm2 cable is about 100 nF, so the
 panels run at a few kbit/s with fat slow pulses (400 pF at 100 kHz and 100 nF at a few kHz are about the same
 ratio). The screen is earthed at one end only so it drains interference without becoming a second return path;
-earthed at both ends it is a loop antenna with current in it. A case from the trade: sheath bonded to the steel frame at
-every box, the whole factory became the return path, the panel showed every fault in the book and the earth-fault
-monitor saw a few hundred nanofarads instead of an open circuit. The 400 pF figure is that factory floor written
-down small.
+earthed at both ends it is a loop antenna with current in it. A case from the trade, mineral-insulated cable in a
+factory: sheath bonded to the steel frame at every box, the whole building became the return path, the panel showed
+every fault in the book and the earth-fault monitor saw a few hundred nanofarads instead of an open circuit. The
+400 pF figure is that factory floor written down small.
 
 ## 2. Three meanings of "three wire", all program changes
 
