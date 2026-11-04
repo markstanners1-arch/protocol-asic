@@ -131,6 +131,15 @@ The module's pads are marked **G R Y** (green ground, red power, yellow signal):
 **emitter** (KY-005, a clear LED): it must not be on this pin, its LED pulls the line low (seen 4 Nov: `m` read the line
 stuck low). Pin 1 has a pull-up in the kit build, so an idle-high reading alone does not prove the receiver is wired.
 
+**IR emitter board** (`rerun.ps1 -Cmd t`: engine A transmits NEC frames, engine B decodes them from the receiver; `programs/ir_tx.asm`).
+Face the LED at the receiver's black dome, a few cm apart. A phone camera shows the emitter's flicker as a faint purple glow.
+
+| FROM | TO | AND | What it is |
+|---|---|---|---|
+| emitter signal (S/Y) | J4-19 (H14) | | engine pin 9, out only: the 38 kHz bursts |
+| emitter - (G) | J4-11 or J4-12 (GND) | | ground |
+| emitter middle pin | not connected | | unused on this board (the loopback passed with it open) |
+
 **Remote button codes, read on the kit 4 Nov 2026** (`-Cmd m`, twice, the same codes both times; pressed in the order
 shown with a stated sequence, so each row is a checked pair). The remote is a Manhattan one (a second, non-LG remote) with NEC timing (9 ms
 leader, 562.5 us bursts, repeat frames every 108 ms) but a 16-bit address and a 16-bit command with no inverse rule,
@@ -172,13 +181,14 @@ Every J4 hole, taken or free. A new program may only use a FREE hole; moving a l
 | 10, 13 | M16, L15 = engine pins 2, 3 | TAKEN: I2C SCL and SDA with their 5.1 k pull-ups, to the UNO's A5 and A4 plus GND (confirmed 4 Nov midday: `-Cmd n` PASS) | |
 | 11, 12, 21, 22 | GND | ground | |
 | 14, 15, 16, 17 | L16, K14, K16, K15 = engine pins 4-7 | TAKEN: keypad columns (tail 5-8); the 74HC595 is out of circuit since 4 Nov | |
-| 18, 19, 20 | J14, H14, J15 = engine pins 8, 9, 10 (out only) | **FREE**: 18 is pencilled for the HC-SR04 trigger | |
+| 18, 20 | J14, J15 = engine pins 8, 10 (out only) | **FREE**: 18 is pencilled for the HC-SR04 trigger | |
+| 19 | H14 = engine pin 9 (out only) | TAKEN: the IR emitter's signal lead (4 Nov evening) | |
 | 23, 24, 25 | J16, H15, H16 = engine pins 11, 12, 13 (out only) | **FREE** | |
 | 26 | G15, engine pin 15 | TAKEN: ESP32 GPIO 17 test pulses (the regression needs it) | |
 | 27, 28, 29, 30 | G16, F15, F16, E15 = engine pins 16-19 | TAKEN: keypad rows (tail 1-4) with 10 k to hole 1 | |
 
 ESP32 pins taken: 4, 5, 16, 17, 18, 19, 23 (host), 21 and 22 only if it is the I2C slave; VIN (5 V) is free for the HC-SR04.
-Free engine pins for anything new: **8-13** (out only, J4-18..20 and 23..25). The two-way pins 0-7 are all spoken for
+Free engine pins for anything new: **8, 10-13** (out only, J4-18, 20 and 23..25). The two-way pins 0-7 are all spoken for
 while the keypad and the IR receiver are on; a program needing a two-way pin means unplugging one of them.
 
 ## If it doesn't answer: bench helpers (`esp32

@@ -525,3 +525,22 @@ That's a driver change on the PC, so Mark does it himself. Then:
   edge (the receiver module shortens bursts and lengthens spaces by about 20 and 40 us). The capture is saved as
   `docs/bench/ir_nec_manhattan_button1.sr` (open it in PulseView or sigrok-cli). Not done: a chip-side trace beside it
   (CH1 on J4-8 plus the ESP32's CS on CH2) and I2C/SPI captures.
+- 4 Nov 2026 (night): **NEC infrared transmitter** `programs/ir_tx.asm` (31 words, engine A, partner of the decoder). The host pushes the
+  same two words the decoder pushes (address | ~address << 8, command | ~command << 8, so extended 16-bit addresses and odd
+  remotes go through); the engine sends the 9 ms / 4.5 ms leader, 32 bits LSB first and the closing burst, with the 38 kHz
+  carrier made in software. Tick = a third of a carrier cycle (8.67 us: clkdiv 103 at 12 MHz, 433 at 50 MHz); a cycle is pin
+  high, pin low, loop = 38.4 kHz at one third duty in a bit burst, 37.7 kHz averaged over the leader (its two nested loops add
+  2 ticks per 30 cycles; the first version, 18 x 18, averaged 36.8 kHz, found by the model test and fixed). One space a frame
+  (after bit 16, where the second word is fetched) is 44 us long. The repeat frame (2.25 ms space) is not generated: 31 of 32
+  words are used, and receivers accept repeated full frames. `model/test_ir_tx.py` runs transmitter, a model receiver module
+  (low while carrier was seen in the last 40 us) and `ir_nec.asm` together: LED idle and low, carrier within tolerance, leader 8.74 ms
+  and space 4.49 ms, every bit within 8 % and each bit period within 2 %, an independent decoder in the test reads back the word, the
+  line stays low after the closing burst, and engine B pushes the two words sent. PASS at 12 MHz (plain NEC, all zeros, all
+  ones, the Manhattan's raw words) and at 50 MHz (two frames). Planted bug (the 1-space loop cut from 4 x 32 to 2 x 32 ticks):
+  16 bits out of tolerance and engine B decoded 8400 / 8000 and similar garbage; removed. Sketch command `t` (A transmits to the
+  emitter on engine pin 9, J4-19 / H14; B decodes the receiver; six frames compared word for word, and a failure says whether A never
+  sent it or the receiver did not see it). **Bench PASS first time**: emitter signal to H14, G to GND, middle pin open, facing the
+  receiver a few cm away: all six frames (address 00 command 45, LG power 04/08, 5A/3C, all ones, all zeros, the Manhattan's raw
+  2916 5CB7) came back exactly. With the emitter unwired the same command failed as designed: A sent it, B got nothing.
+  Wiring sheet: emitter rows, hole 19 taken (PDF rebuilt). Not yet done: the emitter pin on the logic analyser (CH2 on H14, CH1 on J4-8)
+  to measure the real carrier and burst lengths.
