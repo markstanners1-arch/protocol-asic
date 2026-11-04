@@ -5,7 +5,7 @@ board). Kit pins are written **J4-n (ball)**: n is the numbered hole on header J
 own label printed beside it, the same connection under a second name, for checking by continuity. **Go by the hole number**: the ball letters H and M (H16 is hole 25, M16 is hole 10) are easy to misread on the silkscreen. **Engine pin**
 numbers (0-19) are what the chip's programs call that pin. Everything is **3.3 V logic** (FPGA and ESP32 pins are not
 5 V tolerant); one common ground between every board. `programs/read_pins.asm` shows what the chip sees on every pin.
-Section 6 (4 Nov) adds the keypad, IR receiver and ultrasonic. The same sheet as a landscape PDF for the monitor: `docs/bench_wiring.pdf` (`python docs/make_bench_wiring_pdf.py`).
+Section 6 (4 Nov) adds the keypad, IR receiver and ultrasonic; section 10 the DALI shield (planned, not yet wired). The same sheet as a landscape PDF for the monitor: `docs/bench_wiring.pdf` (`python docs/make_bench_wiring_pdf.py`).
 
 ## 1. Core: kit to ESP32 host
 
@@ -177,12 +177,12 @@ Every J4 hole, taken or free. A new program may only use a FREE hole; moving a l
 | 1 | IO1, 3.3 V | TAKEN: the keypad's four 10 k pull-ups (and the I2C pull-ups if they are on the kit's rail) | |
 | 2 | IO1, 3.3 V | TAKEN: the IR receiver's + lead (or it is on hole 1); the AT24C module's VCC (4 Nov night) | |
 | 3, 4, 5, 7, 9 | K12, K13, M14, L14, M15 = CS, IRQ, MOSI, MISO, SCK | TAKEN: the host (the ESP32, or the Pico 2 while its leads are on: one at a time, section 8) | |
-| 6 | N14, engine pin 0 | TAKEN: the serial line. With the ESP32 as host, its GPIO 16 reads the chip's UART out. With the Pico as host (4 Nov night), **Pico GP0 (board pin 1, USB end, top left) sends to the chip** for `pico/uart_rx.py`; the ESP32 lead must be out of this hole then (an unpowered ESP32 clamps the line) | |
+| 6 | N14, engine pin 0 | TAKEN: the serial line (the DALI RX will take it instead, section 10, planned). With the ESP32 as host, its GPIO 16 reads the chip's UART out. With the Pico as host (4 Nov night), **Pico GP0 (board pin 1, USB end, top left) sends to the chip** for `pico/uart_rx.py`; the ESP32 lead must be out of this hole then (an unpowered ESP32 clamps the line) | |
 | 8 | N16, engine pin 1 | TAKEN: the KY-022 IR receiver's S lead (4 Nov afternoon); the HC-SR04 echo will need it, one at a time | |
 | 10, 13 | M16, L15 = engine pins 2, 3 | TAKEN: I2C SCL and SDA, now to the AT24C256 module (section 9, 4 Nov night); before that the UNO's A5 and A4 (`-Cmd n` PASS). The UNO answers at 0x50 too: not both | |
 | 11, 12, 21, 22 | GND | ground | |
 | 14, 15, 16, 17 | L16, K14, K16, K15 = engine pins 4-7 | TAKEN: keypad columns (tail 5-8); the 74HC595 is out of circuit since 4 Nov | |
-| 18, 20 | J14, J15 = engine pins 8, 10 (out only) | **FREE**: 18 is pencilled for the HC-SR04 trigger | |
+| 18, 20 | J14, J15 = engine pins 8, 10 (out only) | **FREE**: 18 is pencilled for the HC-SR04 trigger and for the DALI TX (section 10, planned), one at a time | |
 | 19 | H14 = engine pin 9 (out only) | TAKEN: the IR emitter's signal lead (4 Nov evening) | |
 | 23, 24, 25 | J16, H15, H16 = engine pins 11, 12, 13 (out only) | **FREE** | |
 | 26 | G15, engine pin 15 | TAKEN: ESP32 GPIO 17 test pulses (the regression needs it) | |
@@ -229,6 +229,26 @@ to VCC, so **power it from 3.3 V only** (5 V would put 5 V on the FPGA's I2C pin
 
 Test: `pwsh D:/ProtocolASIC/pico/run.ps1 -Script at24c.py` (probe, read as found, page write, write cycle, sequential and random read, the top of the
 memory for the 2-byte address, then everything put back). Edit ADDR_BYTES at the top for a part with 1 address byte.
+
+## 10. DALI (planned 4 Nov 2026, NOT YET WIRED: the gear and the shield are on order)
+
+The chip side is model-proven (`programs/dali_tx.asm`, `programs/dali_rx.asm`, `model/test_dali.py`); the run is
+`pico/dali.py` from the Pico, the full note `docs/dali_bench.md`. Interface: the **Waveshare Pico-DALI2** shield (isolated,
+polarity-free DALI terminal, no bus supply of its own; no Pico in it, jumper leads into its female header, pins numbered as a
+Pico's). Bus supply: a DALI PSU, or 12-18 V DC through 56 ohm 2 W. The gear (a DALI LED driver) across the bus.
+**Leads that move:** the Pico's GP0 UART lead comes out of J4-6; J4-18 is the HC-SR04 trigger's hole, one at a time.
+
+| FROM | TO | AND | What it is |
+|---|---|---|---|
+| J4-18 (J14) | shield pin 9 (DALI TX) | | engine pin 8, out only: high = bus shorted, idle low |
+| shield pin 5 (DALI RX) | J4-6 (N14) | | engine pin 0: bus high = 1, bus shorted = 0 (pins 15-19 have pull-downs in the kit build, so not those) |
+| J4-1 or J4-2 (3.3 V) | shield pin 36 (3V3) | | logic-side power |
+| J4-11 or J4-12 (GND) | shield pin 3 (or any GND pin) | | common ground; the bus side is isolated from it |
+| shield DALI terminal | the gear's DA terminals | the bus supply (DALI PSU, or 12-18 V through 56 ohm 2 W) | the bus, any polarity |
+| shield pin 4 | not connected | | the shield's bus-voltage sense |
+
+Expected printout: DAPC 254 no answer, QUERY LEVEL 254, DAPC 127, QUERY LEVEL 127, DEVICE TYPE 6, STATUS with "lamp on",
+OFF, QUERY LEVEL 0: PASS. If nothing comes back, `docs/dali_bench.md` has the order of checks (pin 0 with `read_pins.asm` first).
 
 ## If it doesn't answer: bench helpers (`esp32
 erun.ps1 -Cmd <letter>`)

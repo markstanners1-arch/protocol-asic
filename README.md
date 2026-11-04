@@ -664,3 +664,29 @@ That's a driver change on the PC, so Mark does it himself. Then:
   RX** (bus level, non-inverted: high = idle), **pin 9 = TX** (pin high = bus shorted, idle low: Tasmota's "TX_i"), pin 36 = 3V3,
   pins 3/8/... = GND; pin 4 carries a divided bus-voltage sense, unused. That polarity is what the DALI programs assume. Jumper
   leads into the shield's header from the kit; no Pico sits in it. Passed to the DALI session.
+- 4 Nov 2026 (night, DALI, chip side): **DALI control-device programs, model-proven; the bench run waits for the gear.**
+  `programs/dali_tx.asm` (13 words, engine pin 8): one host word per forward frame, start bit, 16 bits MSB first, 1200 bit/s
+  Manchester at a tick of an eighth of a bit (104.17 us: clkdiv 1249 at 12 MHz, 5207 at 50 MHz; every half bit exactly 4 ticks,
+  so the only error is the divider's rounding, 0.006 % at 50 MHz), pin high = NPN on = bus shorted, and after each frame it holds
+  the bus idle 9.5 ms (the standard's 9.17 ms settling) so frames can be queued in the FIFO. `programs/dali_rx.asm` (26 words,
+  engine pin 0): the host arms it with the listening window (96 ticks = 10 ms) before pushing the forward frame; it skips that
+  frame on the bus (a falling edge, then the bus high at 8 polls 2 ticks apart = the end of the frame, since a Manchester frame
+  is never high for more than a bit), listens for the answer's start bit, decodes the 8 bits resyncing on every mid-bit edge
+  (a gear may be 10 % off and nine bits of drift would be most of a half bit; from one edge to the next it is under a tick:
+  first half sampled at T+5 after the edge seen at T, the opposite level waited for with a timeout at T+10) and pushes one word:
+  0x100 | byte, 0x000 for no answer, or 0x200 | the bits read before a missing edge (a framing error). `model/test_dali.py`:
+  a model gear on the bus decodes the forward frames independently (edges, timing measured), keeps an arc level and answers
+  after 2.9, 5.5 or 9.2 ms at 0 and +-5 % timing, each answer at a different phase of the engine's tick; sequence DAPC 254,
+  QUERY LEVEL (nine times, every phase), DAPC 127, QUERY LEVEL, DEVICE TYPE (6), STATUS (lamp on, no short address), OFF, QUERY
+  LEVEL (0), STATUS, LAMP FAILURE ("no" = no frame), a query to short address 5 (nobody), then seven coding violations (start
+  bit and bits 0, 3, 7 sent both halves high or both low: 0x201, 0x201, 0x20A, 0x2AA) each followed by a clean query, and two
+  DAPC words queued together (9.48 ms apart). **PASS at 12 MHz (five runs) and 50 MHz**; a gear 10 % fast and slow also
+  passes. Planted bugs: the transmitter's first half a tick short (3 ticks) failed the timing check (bit periods 12.5 % off)
+  though the gear still decoded it; in the receiver, the bit read two ticks late (past the boundary) gave wrong bytes at
+  both +-5 %; the first data bit sampled a tick early passed the first test and was caught only once the answers were spread
+  across the tick's phases (phase 8 of 9 with a +5 % gear): the phase sweep stays in the test. Both bugs removed. Bench
+  interface decided: the **Waveshare Pico-DALI2** shield (isolated; its TX input is pin high = bus shorted, its RX output the plain
+  bus level, exactly the programs' polarity; no bus supply of its own, so a DALI PSU or 12-18 V through 56 ohm 2 W) wired as
+  `docs/dali_bench.md` and wiring sheet section 10 (planned, not yet wired: J4-18 to its pin 9, its pin 5 to J4-6 because the
+  kit's input-only pins 15-19 carry pull-downs; the Pico's GP0 lead comes out of J4-6). `pico/dali.py` is the scripted run:
+  eight frames, every answer checked, PASS only if all match. Tables regenerated (`esp32/make_programs_h.py`).

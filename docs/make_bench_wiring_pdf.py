@@ -109,7 +109,7 @@ s.append(Paragraph("A new program may only use a FREE hole; moving a lead means 
                    "holes 10 and 13 (I2C SCL/SDA with 5.1 k pull-ups, to the UNO's A5 and A4 plus GND, confirmed 4 Nov by -Cmd n PASS); holes 14-17 (keypad columns, tail 5-8; the 74HC595 is out of circuit since 4 Nov); "
                    "hole 26 (ESP32 GPIO 17 test pulses, the regression needs it); holes 27-30 (keypad rows, tail 1-4, 10 k to hole 1). "
                    "hole 19 (engine pin 9, H14: the IR emitter's signal lead since 4 Nov evening); hole 8 (engine pin 1: the KY-022 IR receiver's S lead since 4 Nov afternoon; the HC-SR04 echo needs it later, one at a time); hole 2 (second 3.3 V: the receiver's +). <b>FREE</b>: "
-                   "holes 18 and 20 (engine pins 8 and 10, out only; 18 pencilled for the HC-SR04 trigger); holes 23, 24, 25 (engine pins 11-13, out only). "
+                   "holes 18 and 20 (engine pins 8 and 10, out only; 18 pencilled for the HC-SR04 trigger and the DALI TX, section 10, planned); holes 23, 24, 25 (engine pins 11-13, out only). "
                    "ESP32 pins taken: 4, 5, 16, 17, 18, 19, 23, plus 21 and 22 only if it is the I2C slave; VIN (5 V) is free for the HC-SR04. "
                    "All two-way engine pins 0-7 are spoken for while the keypad and the IR receiver are on.", P))
 s.append(Paragraph("If it doesn't answer: esp32 rerun.ps1 -Cmd p (lead probe: a FLOATING pin = lead open or wrong hole; ID 0x0000 with MISO driven = CS/SCK/MOSI not arriving; 0xFFFF = MISO open), -Cmd q (IRQ held high 15 s), -Cmd b (I2C wire check: names the chip pin each I2C lead reaches), -Cmd k (GPIO 22 held low 30 s to meter), -Cmd l (repeating ID reads for the oscilloscope), -Cmd y (keypad: names every key pressed; every key 'pressed' = row pull-ups not reaching J4-27..30), -Cmd e (live level of engine pins 15-19 for 30 s, a line on every change: a row with its 10 k in place reads 1). Writes working but reads all zero = MISO lead's J4 end in a hole held low (11/12 GND, 18-25 driven low). The kit forgets its build on any power blip: reload with bash fpga/machxo3/build.sh load.", P))
@@ -185,5 +185,22 @@ s.append(wires([
     ["module SDA", "J4-13 (L15)", "", "engine pin 3"],
     ["module GND", "negative rail", "rail wired to J4-11 or 12", "ground"],
 ]))
+s.append(PageBreak())
+s.append(Paragraph("10. DALI: PLANNED 4 Nov 2026, NOT YET WIRED (the gear and the shield are on order)", H2))
+s.append(Paragraph("Chip side model-proven (programs/dali_tx.asm, dali_rx.asm, model/test_dali.py); the run is pico/dali.py from the Pico; full note docs/dali_bench.md. "
+                   "Interface: the <b>Waveshare Pico-DALI2</b> shield (isolated, polarity-free DALI terminal, no bus supply of its own; no Pico in it: jumper leads into its female header, "
+                   "pins numbered as a Pico's). Bus supply: a DALI PSU, or 12-18 V DC through 56 ohm 2 W. The gear (a DALI LED driver) across the bus. "
+                   "<b>Leads that move:</b> the Pico's GP0 UART lead comes out of J4-6; J4-18 is also the HC-SR04 trigger's hole, one at a time.", P))
+s.append(wires([
+    ["J4-18 (J14)", "shield pin 9  (DALI TX)", "", "engine pin 8, out only: high = bus shorted, idle low"],
+    ["shield pin 5  (DALI RX)", "J4-6 (N14)", "", "engine pin 0: bus high = 1, shorted = 0 (not pins 15-19: the kit gives them pull-downs)"],
+    ["J4-1 or J4-2 (3.3 V)", "shield pin 36  (3V3)", "", "logic-side power"],
+    ["J4-11 or J4-12 (GND)", "shield pin 3  (or any GND pin)", "", "common ground; the bus side is isolated from it"],
+    ["shield DALI terminal", "the gear's DA terminals", "the bus supply: DALI PSU, or 12-18 V through 56 ohm 2 W", "the bus, any polarity"],
+    ["shield pin 4", "not connected", "", "the shield's bus-voltage sense"],
+]))
+s.append(Spacer(1, 4))
+s.append(Paragraph("Expected printout: DAPC 254 no answer, QUERY LEVEL 254, DAPC 127, QUERY LEVEL 127, DEVICE TYPE 6, STATUS with 'lamp on', OFF, QUERY LEVEL 0: PASS. "
+                   "Nothing back: docs/dali_bench.md has the order of checks (pin 0 with read_pins.asm first).", PB))
 doc.build(s)
 print("wrote", out)
