@@ -545,3 +545,15 @@ That's a driver change on the PC, so Mark does it himself. Then:
   2916 5CB7) came back exactly. With the emitter unwired the same command failed as designed: A sent it, B got nothing.
   Wiring sheet: emitter rows, hole 19 taken (PDF rebuilt). Not yet done: the emitter pin on the logic analyser (CH2 on H14, CH1 on J4-8)
   to measure the real carrier and burst lengths.
+- 4 Nov 2026 (night, later): **IR transmitter checked on the logic analyser.** CH1 on the receiver output (J4-8), CH2 on the emitter
+  signal (H14), GND on J4-11, 24 MHz, trigger on the emitter's first edge; the capture is `docs/bench/ir_tx_loopback_00_45.sr`
+  (address 00 command 45, the first frame of the `t` run). The receiver channel, an independent witness of what the emitter really
+  sends, shows: leader low 8.76 ms, space 4.47 ms, 32 bit lows of 526-555 us, short spaces 564-592 us, long spaces 1681-1726 us,
+  closing low 531 us, frame 67.5 ms, and the 32 bits read back as BA45FF00, exactly what was sent. Compared with the Manhattan
+  remote's real frame (9.01 / 4.53 ms, lows 531-556 us, spaces 600 and 1706-1733 us) every figure is within 5 %. The emitter channel
+  gives the carrier cycle (median 26.00 us = 38.46 kHz, the 3-tick design) but not the pulse width or a full burst train: the IR LED
+  holds its own pin near its forward voltage (about 1.2 V), below the analyser's input threshold, so only the leading edge spikes
+  above it, intermittently. To see that waveform use the Hantek scope on H14. Bench lessons: the analyser's CLK lead is not an
+  input (it was clipped there for a while); sigrok-cli sometimes exits without writing its file when the output path is in the
+  temp folder, so captures now go to D:\Tools\sigrok_captures first; and an unconnected analyser input floats high, so "all
+  channels high" proves nothing.
