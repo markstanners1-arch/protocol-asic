@@ -595,3 +595,12 @@ That's a driver change on the PC, so Mark does it himself. Then:
   identification page answer at device code 1011 as well, so the demo says so (the chip's marking does not say whose part it is: not confirmed).
   Not done: an SPI JEDEC ID read (needs an SPI flash chip, none on the bench) and period/frequency of a running signal (the survey times low
   pulses only; press a remote button during it to see the receiver's). Also `pico/pins.py` (live levels). That is the end of 4 Nov.
+- 4 Nov 2026 (evening): **the competition rules, as pasted by Mark from Jane Street's page.** IHP 130 nm CMOS5L through Tiny Tapeout, from the
+  ttihp-verilog-template (cmos5l branch); tile size 6x4 in info.yaml (ours already is); the maximum is 6x4, with 8x4 (about 30 % more area)
+  possible later: they will update the page and email everyone who signed up (Mark has signed up). Open source required, building in public
+  welcome; teams recommended; **deadline 18 Jan 2027**; **the prize is a tape-out of the "most novel designs"** on the March 2027 CMOS5L shuttle
+  (subject to the foundry), chips and dev boards back after fabrication. The final submission form is not published yet (it will appear on the
+  competition page closer to the deadline). Consequences: the write-up must make the case for novelty (what the chip does that an RP2040's PIO
+  does not: the TIME stopwatch for measuring a bus, WAIT with timeout, the input glitch filter, open-drain through side-set directions,
+  three engines with a host SPI port, a Python reference model proven against the Verilog), and if 8x4 is offered four engines (61 % of 6x4
+  failed placement, so roughly 46 % of 8x4 should place) can be reconsidered.
