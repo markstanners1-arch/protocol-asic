@@ -706,3 +706,23 @@ That's a driver change on the PC, so Mark does it himself. Then:
   about sixty flip-flops an engine; (4) FIFOs 4 to 8 deep, last, dropped first if placement fights. Plus (0), layout-only and
   first on a Tiny Tapeout branch: 64-word programs in the IHP `RM_IHPSG13_1P_64x16_c2` macro per Pettit's walkthrough. The
   submission stays the proven three-engine 6x4 chip until the v0.3 layout has passed everything it has.
+- 4 Nov 2026 (night, for the parts due 5 Nov): **three Pico host scripts written and desk-checked, not yet run** (the W25Q32
+  SPI flash, DS3231 clock and MCP4725 DAC modules arrive 5 Nov). Each has its expected readback in its header and prints PASS/FAIL.
+  `pico/w25q.py`: engine A runs `spi_master.asm` (mode 0, 1 MHz) to the flash: JEDEC ID expect EF 40 16 (decoded: maker, type,
+  capacity, with the other common IDs named), the 64-bit unique ID read twice, status 1 = 00, 16 bytes at address 0 as found, then
+  a non-destructive write proof (the first all-FF 16-byte region from the top of memory down is page-programmed with a
+  clock-seeded pattern, BUSY polled, read back, WEL seen set then cleared; `ERASE = True` erases the top 4 KB sector since erase
+  wears the part). **Pins:** `spi_master.asm` takes SCK, MOSI, MISO and CS as one group from `set_base` (base + 0..3, MISO the
+  third) and sets the directions itself, so the four must be consecutive with the third readable: on the kit that is engine pins
+  4-7 only (8-13 output only, 15-19 input only, 14 not on the header), the 74HC595's holes J4-14 to 17; the keypad's column leads
+  come out for it, as for the 595. `pico/ds3231.py`: scan expects 0x50, 0x57, 0x68; register 0x75 must not read 0x68 (that is the
+  GY-521's MPU6050, the other 0x68 in the drawer); the time registers twice two seconds apart must show the seconds advanced by
+  2 +-1; the temperature in degrees; then the module's AT24C32 at 0x57 with the at24c.py logic (2 address bytes, 8-byte write,
+  0x0FF0 written without disturbing 0x0010 to prove the high address byte within 4 KB); `SET_TIME` sets the clock and clears OSF.
+  `pico/mcp4725.py`: probes 0x60-0x67, fast-mode writes of 0, 2048 and 4095 held 3 s each (meter 0, 1.65, 3.30 V), a 64-step
+  sawtooth and a triangle for 10 s each inside one transaction at 400 kHz, with the ramp frequency measured and printed for the
+  scope (the wire would allow 347 Hz; the host round trip per byte sets the real rate). All three were run on the desktop against a
+  fake chip that models the engines' command words and the slaves (`spi_master` in front of a modelled W25Q32; `i2c_master` in
+  front of a DS3231 with a running clock, two AT24Cs and a DAC): every path runs and every check passes, which proves the scripts'
+  logic and the register maps, not the bench. Wiring sheet sections 11-13 and the PDF, section 7 updated (holes 14-17 shared with
+  the flash; 10 and 13 gain the two I2C modules); `whatis.py` guesses 0x57, 0x60-0x63 and 0x68 by name.

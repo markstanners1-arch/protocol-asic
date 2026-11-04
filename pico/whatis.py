@@ -51,12 +51,15 @@ def probe(addr):
 
 GUESS = {0x20: "PCF8574 or MCP23008 I/O expander", 0x27: "PCF8574 LCD backpack", 0x3F: "PCF8574A LCD backpack",
          0x3C: "SSD1306 OLED", 0x3D: "SSD1306 OLED", 0x40: "INA219, Si7021 or HTU21D", 0x48: "ADS1115, PCF8591 or TMP102",
-         0x68: "DS1307 / DS3231 clock or MPU6050", 0x69: "MPU6050", 0x76: "BMP280 / BME280", 0x77: "BMP180 / BMP280 / BME280"}
+         0x57: "AT24C32/64 on a DS3231 module (or an AT24C with A0-A2 high)",
+         0x60: "MCP4725 DAC (A0 low; pico/mcp4725.py)", 0x61: "MCP4725 DAC (A0 high)", 0x62: "MCP4725 DAC (A1 part, A0 low)", 0x63: "MCP4725 DAC (A1 part, A0 high)",
+         0x68: "DS3231 RTC or MPU6050: read register 0x75 (0x68 = MPU6050; pico/ds3231.py does)", 0x69: "MPU6050 (AD0 high)",
+         0x76: "BMP280 / BME280", 0x77: "BMP180 / BMP280 / BME280"}
 print("\nI2C scan (engine A, SCL pin %d, SDA pin %d, 100 kHz): addresses 0x08-0x77" % (SCL, SDA))
 found = []
 for a in range(0x08, 0x78):
     if probe(a):
-        g = "AT24Cxx EEPROM (address pins A0-A2 = %d)" % (a - 0x50) if 0x50 <= a <= 0x57 else "EEPROM identification page (24Cxxx parts with an ID page answer here as well as at 0x50)" if 0x58 <= a <= 0x5F else GUESS.get(a, "unknown")
+        g = GUESS[a] if a == 0x57 else "AT24Cxx EEPROM (address pins A0-A2 = %d)" % (a - 0x50) if 0x50 <= a <= 0x56 else "EEPROM identification page (24Cxxx parts with an ID page answer here as well as at 0x50)" if 0x58 <= a <= 0x5F else GUESS.get(a, "unknown")
         found.append(a)
         print("  0x%02X answered: %s" % (a, g))
 if not found:

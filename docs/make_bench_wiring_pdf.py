@@ -106,12 +106,12 @@ s.append(Paragraph("<b>Lesson of 4 Nov night: an instrument on the bus is powere
 s.append(Paragraph("What is plugged in right now (4 Nov 2026, midday): no double booking", H2))
 s.append(Paragraph("A new program may only use a FREE hole; moving a lead means updating this list. "
                    "TAKEN: hole 1 (IO1 3.3 V: the keypad's four 10 k pull-ups); holes 3, 4, 5, 7, 9 (the host, ESP32 or Pico: CS, IRQ, MOSI, MISO, SCK); hole 6 (engine pin 0, the serial line: ESP32 GPIO 16 reads the chip's UART out, or with the Pico as host its GP0 sends to the chip for pico/uart_rx.py, the ESP32 lead out of the hole then, 4 Nov night); "
-                   "holes 10 and 13 (I2C SCL/SDA with 5.1 k pull-ups, to the UNO's A5 and A4 plus GND, confirmed 4 Nov by -Cmd n PASS); holes 14-17 (keypad columns, tail 5-8; the 74HC595 is out of circuit since 4 Nov); "
+                   "holes 10 and 13 (I2C SCL/SDA: the AT24C256 module, section 9, and from 5 Nov the DS3231 and MCP4725 modules on the same wires, sections 12-13; before that the UNO's A5 and A4); holes 14-17 (keypad columns, tail 5-8; the 74HC595 is out of circuit since 4 Nov; the W25Q32 flash takes these four holes, section 11, columns out first); "
                    "hole 26 (ESP32 GPIO 17 test pulses, the regression needs it); holes 27-30 (keypad rows, tail 1-4, 10 k to hole 1). "
                    "hole 19 (engine pin 9, H14: the IR emitter's signal lead since 4 Nov evening); hole 8 (engine pin 1: the KY-022 IR receiver's S lead since 4 Nov afternoon; the HC-SR04 echo needs it later, one at a time); hole 2 (second 3.3 V: the receiver's +). <b>FREE</b>: "
                    "holes 18 and 20 (engine pins 8 and 10, out only; 18 pencilled for the HC-SR04 trigger and the DALI TX, section 10, planned); holes 23, 24, 25 (engine pins 11-13, out only). "
                    "ESP32 pins taken: 4, 5, 16, 17, 18, 19, 23, plus 21 and 22 only if it is the I2C slave; VIN (5 V) is free for the HC-SR04. "
-                   "All two-way engine pins 0-7 are spoken for while the keypad and the IR receiver are on.", P))
+                   "All two-way engine pins 0-7 are spoken for while the keypad and the IR receiver are on; spi_master.asm needs four consecutive pins with the third able to read: pins 4-7 only on this kit.", P))
 s.append(Paragraph("If it doesn't answer: esp32 rerun.ps1 -Cmd p (lead probe: a FLOATING pin = lead open or wrong hole; ID 0x0000 with MISO driven = CS/SCK/MOSI not arriving; 0xFFFF = MISO open), -Cmd q (IRQ held high 15 s), -Cmd b (I2C wire check: names the chip pin each I2C lead reaches), -Cmd k (GPIO 22 held low 30 s to meter), -Cmd l (repeating ID reads for the oscilloscope), -Cmd y (keypad: names every key pressed; every key 'pressed' = row pull-ups not reaching J4-27..30), -Cmd e (live level of engine pins 15-19 for 30 s, a line on every change: a row with its 10 k in place reads 1). Writes working but reads all zero = MISO lead's J4 end in a hole held low (11/12 GND, 18-25 driven low). The kit forgets its build on any power blip: reload with bash fpga/machxo3/build.sh load.", P))
 s.append(Paragraph("Order of work after replugging", H2))
 s.append(Paragraph("1. Section 1 only. Load the kit, upload the sketch, rerun.ps1 (command r): ID 0x0022, 0 problems.&nbsp;&nbsp; "
@@ -202,5 +202,56 @@ s.append(wires([
 s.append(Spacer(1, 4))
 s.append(Paragraph("Expected printout: DAPC 254 no answer, QUERY LEVEL 254, DAPC 127, QUERY LEVEL 127, DEVICE TYPE 6, STATUS with 'lamp on', OFF, QUERY LEVEL 0: PASS. "
                    "Nothing back: docs/dali_bench.md has the order of checks (pin 0 with read_pins.asm first).", PB))
+s.append(PageBreak())
+s.append(Paragraph("11. W25Q32 SPI flash module: parts due 5 Nov 2026, NOT YET RUN (pico/w25q.py)", H2))
+s.append(Paragraph("Engine A runs programs/spi_master.asm (mode 0, MSB first, SCK 1 MHz) to a Winbond W25Q32 module (4 MB, 3.3 V). <b>Why these holes:</b> the program takes its "
+                   "four pins as one group: SCK = base + 0, MOSI = base + 1, MISO = base + 2 (the input), CS = base + 3, so they must be four consecutive engine pins with the third able to read: "
+                   "on the kit that is pins 4-7 only (8-13 are output only, 15-19 input only, 14 is not on the header, 0-3 are taken). So the flash takes the 74HC595's holes: "
+                   "<b>the keypad's four column leads (tail 5-8) come out of J4-14 to 17 first</b>; the rows and their pull-ups stay. WP and HOLD are usually pulled up on the module; if bare, tie both to 3.3 V.", P))
+s.append(wires([
+    ["J4-14 (L16)", "module CLK", "", "SCK, engine pin 4"],
+    ["J4-15 (K14)", "module DI (IO0)", "", "MOSI, engine pin 5"],
+    ["J4-16 (K16)", "module DO (IO1)", "", "MISO, engine pin 6: the flash's data back"],
+    ["J4-17 (K15)", "module CS", "", "CS, engine pin 7 (idles high)"],
+    ["module VCC", "J4-1 or J4-2 (3.3 V)", "", "power: 3.3 V only"],
+    ["module GND", "negative rail", "rail wired to J4-11 or 12", "ground"],
+    ["module WP, HOLD", "as the module has them (pulled up on board)", "or to 3.3 V if bare", "both must be high"],
+]))
+s.append(Spacer(1, 4))
+s.append(Paragraph("Test: pico/run.ps1 -Script w25q.py -Seconds 30. Expect JEDEC ID <b>EF 40 16</b> (Winbond, 4 MB), a unique ID read twice the same, status 1 = 00, 16 bytes at address 0 as found, "
+                   "then the write proof: the first all-FF 16-byte region from the top of memory down is programmed with a clock-seeded pattern, BUSY polled (under 3 ms), read back equal; address 0 unchanged: PASS. "
+                   "Each run uses one more region; ERASE = True in the script erases the top 4 KB sector (wears the part: only when the regions run out). All 00 or FF for the ID = a lead: CS and CLK, DO, then power.", PB))
+s.append(PageBreak())
+s.append(Paragraph("12. DS3231 clock module on the I2C bus: parts due 5 Nov 2026, NOT YET RUN (pico/ds3231.py)", H2))
+s.append(Paragraph("The ZS-042-type module: a DS3231 at <b>0x68</b> and an AT24C32 EEPROM (4 KB, 2 address bytes, 32-byte pages) at <b>0x57</b>, pull-ups to VCC on board, so <b>3.3 V only</b>. "
+                   "It joins the AT24C256 (0x50) on the same two wires: no lead moves. At 3.3 V the module's LIR2032 charge path sits below a 3 V cell and does nothing, so a plain CR2032 is safe here. "
+                   "Two things in the drawer answer at 0x68 (this and the GY-521's MPU6050): the script reads register 0x75 (an MPU6050 answers 0x68 there) and proves the clock by its running seconds.", P))
+s.append(wires([
+    ["module VCC", "J4-1 or J4-2 (3.3 V)", "", "power: 3.3 V only"],
+    ["module GND", "negative rail", "rail wired to J4-11 or 12", "ground"],
+    ["module SCL", "J4-10 (M16)", "the AT24C256 module's SCL stays", "engine pin 2"],
+    ["module SDA", "J4-13 (L15)", "the AT24C256 module's SDA stays", "engine pin 3"],
+    ["module 32K, SQW", "not connected", "", "unused outputs"],
+]))
+s.append(Spacer(1, 4))
+s.append(Paragraph("Test: pico/run.ps1 -Script ds3231.py -Seconds 20. Expect answered 0x50 0x57 0x68; register 0x75 not 0x68; the time registers twice, two seconds apart, <b>seconds advanced by 2</b> (1-3 passes); "
+                   "24-hour mode; the temperature in degrees (the room); the AT24C32 page write and read back, the top of the 4 KB (0x0FF0) written without disturbing 0x0010, all put back: PASS. "
+                   "OSF set in status 0x0F = the clock stopped since it was set: put a tuple in SET_TIME at the top of the script.", PB))
+s.append(PageBreak())
+s.append(Paragraph("13. MCP4725 DAC module on the I2C bus: parts due 5 Nov 2026, NOT YET RUN (pico/mcp4725.py)", H2))
+s.append(Paragraph("A 12-bit DAC at <b>0x60</b> (0x61 with A0 high; 0x62/0x63 on an A1 part: the script probes 0x60-0x67), on the same two wires, the master at 400 kHz. "
+                   "Output = VDD x code / 4096: with the 3.3 V supply 0, 1.65 and 3.30 V for codes 0, 2048 and 4095. Meter OUT against the rail; the scope on OUT for the ramps. Fast-mode writes leave the DAC's EEPROM alone.", P))
+s.append(wires([
+    ["module VDD (VCC)", "J4-1 or J4-2 (3.3 V)", "", "power: 3.3 V only; the output's full scale"],
+    ["module GND", "negative rail", "rail wired to J4-11 or 12", "ground"],
+    ["module SCL", "J4-10 (M16)", "the other modules' SCL stay", "engine pin 2"],
+    ["module SDA", "J4-13 (L15)", "the other modules' SDA stay", "engine pin 3"],
+    ["module OUT", "meter red lead / scope CH1", "black lead / probe ground to the rail", "the DAC output"],
+    ["module A0", "as the module has it", "", "address low bit: open or low = 0x60"],
+]))
+s.append(Spacer(1, 4))
+s.append(Paragraph("Test: pico/run.ps1 -Script mcp4725.py -Seconds 40. Expect the address found; 0 V, 1.65 V, 3.30 V held 3 s each for the meter; a 64-step sawtooth 10 s and a triangle 10 s, every byte acked: PASS. "
+                   "The ramp rate is host-limited (a round trip per byte): the script measures the ramps it made and prints the Hz the scope must show (the wire alone would allow 347 Hz at 400 kHz). "
+                   "Scope: CH1 on OUT, 1 V/div, trigger on the sawtooth's falling flyback.", PB))
 doc.build(s)
 print("wrote", out)

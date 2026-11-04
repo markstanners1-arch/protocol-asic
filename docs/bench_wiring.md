@@ -5,7 +5,7 @@ board). Kit pins are written **J4-n (ball)**: n is the numbered hole on header J
 own label printed beside it, the same connection under a second name, for checking by continuity. **Go by the hole number**: the ball letters H and M (H16 is hole 25, M16 is hole 10) are easy to misread on the silkscreen. **Engine pin**
 numbers (0-19) are what the chip's programs call that pin. Everything is **3.3 V logic** (FPGA and ESP32 pins are not
 5 V tolerant); one common ground between every board. `programs/read_pins.asm` shows what the chip sees on every pin.
-Section 6 (4 Nov) adds the keypad, IR receiver and ultrasonic; section 10 the DALI shield (planned, not yet wired). The same sheet as a landscape PDF for the monitor: `docs/bench_wiring.pdf` (`python docs/make_bench_wiring_pdf.py`).
+Section 6 (4 Nov) adds the keypad, IR receiver and ultrasonic; section 10 the DALI shield (planned, not yet wired); sections 11-13 the W25Q32 flash, DS3231 clock and MCP4725 DAC modules (due 5 Nov, scripts written, not yet run). The same sheet as a landscape PDF for the monitor: `docs/bench_wiring.pdf` (`python docs/make_bench_wiring_pdf.py`).
 
 ## 1. Core: kit to ESP32 host
 
@@ -175,13 +175,13 @@ Every J4 hole, taken or free. A new program may only use a FREE hole; moving a l
 | J4 hole | Ball / engine pin | Now | |
 |---|---|---|---|
 | 1 | IO1, 3.3 V | TAKEN: the keypad's four 10 k pull-ups (and the I2C pull-ups if they are on the kit's rail) | |
-| 2 | IO1, 3.3 V | TAKEN: the IR receiver's + lead (or it is on hole 1); the AT24C module's VCC (4 Nov night) | |
+| 2 | IO1, 3.3 V | TAKEN: the IR receiver's + lead (or it is on hole 1); the AT24C module's VCC (4 Nov night); the DS3231, MCP4725 and W25Q32 modules' VCC too when they are in (sections 11-13: a 3.3 V rail fed from hole 1 or 2 is tidier) | |
 | 3, 4, 5, 7, 9 | K12, K13, M14, L14, M15 = CS, IRQ, MOSI, MISO, SCK | TAKEN: the host (the ESP32, or the Pico 2 while its leads are on: one at a time, section 8) | |
 | 6 | N14, engine pin 0 | TAKEN: the serial line (the DALI RX will take it instead, section 10, planned). With the ESP32 as host, its GPIO 16 reads the chip's UART out. With the Pico as host (4 Nov night), **Pico GP0 (board pin 1, USB end, top left) sends to the chip** for `pico/uart_rx.py`; the ESP32 lead must be out of this hole then (an unpowered ESP32 clamps the line) | |
 | 8 | N16, engine pin 1 | TAKEN: the KY-022 IR receiver's S lead (4 Nov afternoon); the HC-SR04 echo will need it, one at a time | |
-| 10, 13 | M16, L15 = engine pins 2, 3 | TAKEN: I2C SCL and SDA, now to the AT24C256 module (section 9, 4 Nov night); before that the UNO's A5 and A4 (`-Cmd n` PASS). The UNO answers at 0x50 too: not both | |
+| 10, 13 | M16, L15 = engine pins 2, 3 | TAKEN: I2C SCL and SDA, now to the AT24C256 module (section 9, 4 Nov night); the DS3231 module (0x57 and 0x68, section 12) and the MCP4725 DAC (0x60, section 13) join the same two wires from 5 Nov. Before that the UNO's A5 and A4 (`-Cmd n` PASS). The UNO answers at 0x50 too: not both | |
 | 11, 12, 21, 22 | GND | ground | |
-| 14, 15, 16, 17 | L16, K14, K16, K15 = engine pins 4-7 | TAKEN: keypad columns (tail 5-8); the 74HC595 is out of circuit since 4 Nov | |
+| 14, 15, 16, 17 | L16, K14, K16, K15 = engine pins 4-7 | TAKEN: keypad columns (tail 5-8); the 74HC595 is out of circuit since 4 Nov. **The W25Q32 flash (section 11) takes these same four holes**: the column leads come out for it, one at a time, as for the 595 | |
 | 18, 20 | J14, J15 = engine pins 8, 10 (out only) | **FREE**: 18 is pencilled for the HC-SR04 trigger and for the DALI TX (section 10, planned), one at a time | |
 | 19 | H14 = engine pin 9 (out only) | TAKEN: the IR emitter's signal lead (4 Nov evening) | |
 | 23, 24, 25 | J16, H15, H16 = engine pins 11, 12, 13 (out only) | **FREE** | |
@@ -190,7 +190,8 @@ Every J4 hole, taken or free. A new program may only use a FREE hole; moving a l
 
 ESP32 pins taken: 4, 5, 16, 17, 18, 19, 23 (host), 21 and 22 only if it is the I2C slave; VIN (5 V) is free for the HC-SR04.
 Free engine pins for anything new: **8, 10-13** (out only, J4-18, 20 and 23..25). The two-way pins 0-7 are all spoken for
-while the keypad and the IR receiver are on; a program needing a two-way pin means unplugging one of them.
+while the keypad and the IR receiver are on; a program needing a two-way pin means unplugging one of them. `spi_master.asm`
+needs four consecutive pins with the third (MISO) able to read, which on this kit is pins 4-7 only (section 11).
 
 ## 8. Pico 2 as the host instead of the ESP32 (4 Nov 2026)
 
@@ -249,6 +250,76 @@ Pico's). Bus supply: a DALI PSU, or 12-18 V DC through 56 ohm 2 W. The gear (a D
 
 Expected printout: DAPC 254 no answer, QUERY LEVEL 254, DAPC 127, QUERY LEVEL 127, DEVICE TYPE 6, STATUS with "lamp on",
 OFF, QUERY LEVEL 0: PASS. If nothing comes back, `docs/dali_bench.md` has the order of checks (pin 0 with `read_pins.asm` first).
+
+## 11. W25Q32 SPI flash module (parts due 5 Nov 2026, NOT YET RUN; `pico/w25q.py`)
+
+Engine A runs `programs/spi_master.asm` (mode 0, MSB first, SCK 1 MHz) to a Winbond W25Q32 module (32 Mbit = 4 MB, 3.3 V).
+**Why these holes:** the program takes its four pins as one group from `set_base`: SCK = base + 0, MOSI = base + 1,
+MISO = base + 2 (the one input), CS = base + 3, and sets the directions itself, so the four must be consecutive engine pins with
+the third able to read. On the kit that is engine pins 4-7 only: 8-13 are output only (a MISO there reads nothing), 15-19 input
+only, pin 14 is not on the header, and 0-3 are the serial line, the IR receiver and I2C. So the flash takes the 74HC595's holes:
+**the keypad's four column leads (tail 5-8) come out of J4-14 to 17 first**; the rows and their pull-ups can stay in.
+Most modules pull WP and HOLD up on the board; if yours brings them out bare, tie both to 3.3 V (a low on either stops writes
+or stalls the part).
+
+| FROM | TO | AND | What it is |
+|---|---|---|---|
+| J4-14 (L16) | module CLK | | SCK, engine pin 4 |
+| J4-15 (K14) | module DI (IO0) | | MOSI, engine pin 5 |
+| J4-16 (K16) | module DO (IO1) | | MISO, engine pin 6: the flash's data back |
+| J4-17 (K15) | module CS | | CS, engine pin 7 (idles high) |
+| module VCC | J4-1 or J4-2 (3.3 V) | | power: 3.3 V only |
+| module GND | the negative rail | rail wired to J4-11 or J4-12 | ground |
+| module WP, HOLD | as the module has them (pulled up on board) | or to 3.3 V if bare | write protect and hold, both must be high |
+
+Test: `pwsh D:/ProtocolASIC/pico/run.ps1 -Script w25q.py -Seconds 30`. Expected lines: JEDEC ID **EF 40 16** (Winbond, 4 MB;
+other IDs are decoded), a unique ID read twice the same, status 1 = 00, 16 bytes at address 0 as found (FF on a new part), then the
+write proof: the first all-FF 16-byte region from the top of memory down is page-programmed with a clock-seeded pattern, BUSY
+polled (under 3 ms), read back equal, WEL cleared; address 0 unchanged: PASS. Each run uses one more 16-byte region of the top
+4 KB sector (flash only clears bits); `ERASE = True` at the top of the script erases that sector (0x20, 50-400 ms), which wears the
+part, so only when the regions run out. All 00 or all FF for the ID = a lead: CS and CLK (J4-17, 14), DO to J4-16, then power.
+
+## 12. DS3231 clock module on the I2C bus (parts due 5 Nov 2026, NOT YET RUN; `pico/ds3231.py`)
+
+The ZS-042-type module: a DS3231 at **0x68** and an AT24C32 EEPROM (4 KB, 2 address bytes, 32-byte pages) at **0x57** (its A0-A2
+pads are pulled high), 4.7 k pull-ups to VCC on board, so **3.3 V only**. It joins the AT24C256 (0x50) on the same two wires: no
+lead moves. At 3.3 V the module's LIR2032 charge path (VCC, diode, 200 ohm) sits below a 3 V cell and does nothing, so a plain
+CR2032 is safe in it here. Two things in the drawer answer at 0x68 (this and the GY-521's MPU6050): the script reads register
+0x75 (an MPU6050 answers 0x68 there, its WHO_AM_I) and proves the clock by its running seconds.
+
+| FROM | TO | AND | What it is |
+|---|---|---|---|
+| module VCC | J4-1 or J4-2 (3.3 V) | | power: 3.3 V only |
+| module GND | the negative rail | rail wired to J4-11 or J4-12 | ground |
+| module SCL | J4-10 (M16) | the AT24C256 module's SCL stays | engine pin 2 |
+| module SDA | J4-13 (L15) | the AT24C256 module's SDA stays | engine pin 3 |
+| module 32K, SQW | not connected | | 32 kHz and square-wave outputs, unused |
+
+Test: `pwsh D:/ProtocolASIC/pico/run.ps1 -Script ds3231.py -Seconds 20`. Expected lines: answered 0x50 0x57 0x68; register 0x75
+not 0x68; the seven time registers, then again two seconds later with **seconds advanced by 2** (1-3 passes); 24-hour mode; the
+temperature in degrees (the room, 10-35 C); the AT24C32 page write, read back, the top of the 4 KB (0x0FF0) written without
+disturbing 0x0010 (the high address byte is used), everything put back: PASS. Status bit OSF set = the clock has stopped since it
+was set (no battery): put a tuple in `SET_TIME` at the top of the script to set it.
+
+## 13. MCP4725 DAC module on the I2C bus (parts due 5 Nov 2026, NOT YET RUN; `pico/mcp4725.py`)
+
+A 12-bit DAC at **0x60** (or 0x61 with its A0 pad high; 0x62/0x63 on an A1 part: the script probes 0x60-0x67), on the same two wires,
+the master at 400 kHz. Output = VDD x code / 4096, so with the 3.3 V supply 0, 1.65 and 3.30 V for codes 0, 2048 and 4095. Meter
+the OUT pin against the rail; the scope on OUT for the ramps. Fast-mode writes (two bytes a value) leave the DAC's EEPROM alone.
+
+| FROM | TO | AND | What it is |
+|---|---|---|---|
+| module VDD (VCC) | J4-1 or J4-2 (3.3 V) | | power: 3.3 V only; the output's full scale |
+| module GND | the negative rail | rail wired to J4-11 or J4-12 | ground |
+| module SCL | J4-10 (M16) | the other modules' SCL stay | engine pin 2 |
+| module SDA | J4-13 (L15) | the other modules' SDA stay | engine pin 3 |
+| module OUT | meter red lead / scope CH1 probe | black lead / probe ground to the rail | the DAC output |
+| module A0 | as the module has it | | address low bit: open or low = 0x60 |
+
+Test: `pwsh D:/ProtocolASIC/pico/run.ps1 -Script mcp4725.py -Seconds 40`. Expected: the address found; 0 V, 1.65 V, 3.30 V held
+3 s each for the meter; a 64-step sawtooth for 10 s and a triangle for 10 s with every byte acked: PASS. The ramp frequency is
+host-limited (each byte is a host round trip), so the script measures the ramps it made and prints the Hz the scope must show;
+the wire itself would allow 18 bits a step = 347 Hz at 400 kHz. Scope: CH1 on OUT, 1 V/div, trigger on the sawtooth's falling flyback.
 
 ## If it doesn't answer: bench helpers (`esp32
 erun.ps1 -Cmd <letter>`)
