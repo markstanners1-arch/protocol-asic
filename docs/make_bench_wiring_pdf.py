@@ -161,5 +161,17 @@ t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1a3d6d"
                        ("GRID", (0, 0), (-1, -1), 0.6, colors.HexColor("#9aa7b8")),
                        ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
 s.append(t)
+s.append(PageBreak())
+s.append(Paragraph("8. Pico 2 as the host instead of the ESP32 (4 Nov 2026)", H2))
+s.append(Paragraph("One host at a time: move the five SPI/IRQ leads and the ground from the ESP32 to the Pico (kit ends stay put). MicroPython v1.29.0. "
+                   "Files in pico/: chip_host.py, programs.py, id_test.py; copy with pico\put.ps1, run with pico\run.ps1 -Script id_test.py. First test: ID 0x0022 five times.", P))
+s.append(wires([
+    ["J4-3 (K12)", "Pico GP17 (pin 22)", "", "CS"],
+    ["J4-5 (M14)", "Pico GP19 (pin 25)", "", "MOSI (SPI0 TX)"],
+    ["J4-7 (L14)", "Pico GP16 (pin 21)", "", "MISO (SPI0 RX)"],
+    ["J4-9 (M15)", "Pico GP18 (pin 24)", "", "SCK"],
+    ["J4-4 (K13)", "Pico GP20 (pin 26)", "", "IRQ"],
+    ["J4-11 (GND)", "Pico GND (pin 23)", "", "common ground, between GP18 and GP19"],
+]))
 doc.build(s)
 print("wrote", out)
