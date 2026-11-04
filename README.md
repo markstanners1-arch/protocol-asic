@@ -690,3 +690,10 @@ That's a driver change on the PC, so Mark does it himself. Then:
   `docs/dali_bench.md` and wiring sheet section 10 (planned, not yet wired: J4-18 to its pin 9, its pin 5 to J4-6 because the
   kit's input-only pins 15-19 carry pull-downs; the Pico's GP0 lead comes out of J4-6). `pico/dali.py` is the scripted run:
   eight frames, every answer checked, PASS only if all match. Tables regenerated (`esp32/make_programs_h.py`).
+- 4 Nov 2026 (night, DALI plan settled, Mark): **no shield.** "We don't need to see the race car speed down the track to prove we can
+  start the engine." The 16 V bus is the electrical layer only; the protocol is proven on a 3.3 V open-drain wire with a pull-up
+  (idle high, either end pulls low). Order: the USB Blaster arrives, the chip moves to the Cyclone IV (three engines, 50 MHz, ID
+  0x0023, every bench test re-run from the Pico), which frees the MachXO3L kit to be a DALI control gear in Verilog (3.3 V I/O,
+  eight LEDs, no RAM needed) with the Go Board as a second gear at another short address (the addressing demo); engine C on the
+  Cyclone watches the wire as a DALI sniffer. The Waveshare Pico-DALI2 (20 GBP in the UK) and a driver are dropped unless real gear
+  turns up; a transistor and a divider would then do the shield's job. The Go Board gear is proposed as its own task (card).
