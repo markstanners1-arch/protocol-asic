@@ -657,3 +657,10 @@ That's a driver change on the PC, so Mark does it himself. Then:
   LCM-xxDA or any "DALI dimmable" constant-voltage driver, 15-25 GBP) and a bus supply (a DALI PS, or a 12-18 V DC wall wart
   through 56 ohm 2 W); a USB-C breakout if the strip is ever revisited; the P82B96 for split I2C; a 3-pin addressable strip as
   the one-wire LED demo. Chip side of DALI (both programs and a model gear) can be written before the parts come.
+- 4 Nov 2026 (night, DALI interface): **Waveshare Pico-DALI2** (SKU 28643, about 5.50 USD) chosen as the chip's DALI interface:
+  an isolated board (two optocouplers, bridge rectifier, polarity-free bus terminal) on the Pico footprint, 3.3 V logic, **no bus
+  power supply** (a DALI PSU or 12-18 V DC through 56 ohm 2 W still needed) and a DALI LED driver as the gear. Pins on its 40-pin
+  header, from Tasmota's test on an ESP32-S3-Pico (GPIO14 = DALI RX, GPIO17 = DALI TX_i) and Waveshare's S3-Pico pinout: **pin 5 =
+  RX** (bus level, non-inverted: high = idle), **pin 9 = TX** (pin high = bus shorted, idle low: Tasmota's "TX_i"), pin 36 = 3V3,
+  pins 3/8/... = GND; pin 4 carries a divided bus-voltage sense, unused. That polarity is what the DALI programs assume. Jumper
+  leads into the shield's header from the kit; no Pico sits in it. Passed to the DALI session.
