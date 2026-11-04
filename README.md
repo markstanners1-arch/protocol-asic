@@ -639,3 +639,12 @@ That's a driver change on the PC, so Mark does it himself. Then:
   (GP0) on J4-6 with A stopped: "The chip hears the Pico." and all 256 values in bursts of four at 115200, a 256-byte stream with
   no gaps at 9600, all exact; 0x55s at 4800 into the 9600 receiver came back flagged (6 of 7). The chip now does all three
   must-do protocols in both directions on real wires. Wiring sheet: hole 6 row.
+- 4 Nov 2026 (night, later): **baud measurer PASS from the Pico** (`pico/baud.py`): engine B on pin 0 at clkdiv 0 times the
+  start bit of a 'U' from the Pico's GP0 at 1200, 2400, 9600, 19200, 38400, 57600, 115200, 230400 and 460800 baud; every rate
+  identified within 0.16 % (the 12 MHz clock's rounding: 104 clocks for 115200, 26 for 460800). **I2C sniffer on the kit**
+  (`pico/i2c_sniff.py`): engine B watches the pads engine A drives to the AT24C256; in every transaction at 100 and 400 kHz
+  (probes, a 2-address-byte read with a repeated START, a page write, ACK polling, the put-back) the watcher's words equalled the
+  master's own replies byte for byte, ACK for ACK. But the EEPROM itself went flaky during these runs (page writes NAKed from the
+  address byte, ACK polling never ending, data reads FD FD FD FD) and `pico/at24c.py`, which passed earlier tonight, fails the same
+  way, so the bench changed, not the chip: suspects are the leads disturbed when the Pico's GP0 went into J4-6 (the module's
+  ground-to-rail wire or VCC, the earlier dim-LED fault), or the WP jumper. To settle before the sniffer counts as passed.
