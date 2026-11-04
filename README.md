@@ -508,6 +508,6 @@ That's a driver change on the PC, so Mark does it himself. Then:
   codes. Mark's LG smart remote (thumb wheel) power key read address 04 command 08 with both inverses good. This remote (a Manhattan) has NEC timing but a
   16-bit address and command with no inverse rule, so the sketch flags BAD INVERSE on every key; that is the remote, not
   the decoder. Code table in `docs/bench_wiring.md` section 6 (PDF rebuilt), occupancy table section 7 (holes 2 and 8
-  taken). Not yet read: the Elegoo kit's own remote (expect address 00, POWER 45). Lessons: send a command letter twice
+  taken). There is no Elegoo remote (the kit has only the IR emitter board), so the remotes read were an LG smart remote and a Manhattan. Lessons: send a command letter twice
   and the second stops the first, so check the sketch is idle before a timed window; a pulled-up input reads high
   with nothing connected.

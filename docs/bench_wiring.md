@@ -117,7 +117,7 @@ The sketch prints the raw 16-bit map with each key name (bit 4*(3-c)+r). If ever
 (1 reads as *, say), the tail is numbered the other way round: swap the two groups of four.
 
 **IR receiver module** (`rerun.ps1 -Cmd m`, engine B, `programs/ir_nec.asm`; KY-022, three pins, happy at 3.3 V).
-Point any NEC remote at it (the Elegoo kit's is one). The sketch first reports the line's idle level (must be high),
+Point any NEC remote at it (this Elegoo kit has no remote, only the receiver and the emitter board). The sketch first reports the line's idle level (must be high),
 then prints every frame as address and command with the inverse bytes checked, and "repeat n" while a button is held.
 `-Cmd j` prints the raw low-pulse lengths instead (leader 180 ticks of 50 us, bit bursts 11): what the remote really sends.
 
@@ -147,7 +147,7 @@ address word is 2916 on every key. A tap gives 2 to 5 repeat frames, a hold keep
 | 6 | 2CC0 | C0 | VOL+ | 2AE0 | E0 |
 
 Mark's LG "smart" remote (the one with the thumb wheel) read the same way, its POWER key: address 04, command 08, both
-inverses correct, so standard NEC passes the `m` checks. The Elegoo kit's own remote has not been read yet (expect address 00 and codes such as 45 for POWER).
+inverses correct, so standard NEC passes the `m` checks. No Elegoo remote exists on the bench: the kit came with the emitter board only.
 
 **Ultrasonic HC-SR04** (5 V part: its echo output must be divided down; program to follow). One at a time with the IR
 receiver, they share J4-8.
