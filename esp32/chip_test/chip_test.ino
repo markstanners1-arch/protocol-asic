@@ -663,6 +663,36 @@ void i2cScopeLoop(bool forever = false) {
   Serial.println("==== scope loop done ====");
 }
 
+// 'y': 4x4 keypad on engine B (programs/keypad.asm): columns = engine pins 4-7 (J4 14-17), rows = pins 16-19
+// (J4 27-30) with 10 k pull-ups to 3.3 V. Every change of the 16-key map is pushed; keys are named until any
+// serial character arrives. The raw map is printed too (bit 4*(3-c)+r), in case the keypad's tail is wired the other way round.
+const char KEYPAD_KEYS[4][5] = {"123A", "456B", "789C", "*0#D"};   // [row][column], as printed on the keypad
+void keypadTest() {
+  writeReg(ENG_A, R_CTRL, 0); writeReg(ENG_B, R_CTRL, 0);
+  loadProgram(ENG_B, PROG_KEYPAD, PROG_KEYPAD_LEN);
+  writeReg(ENG_B, R_CLKDIV, (int)(CHIP_HZ * 20e-6 + 0.5) - 1);                 // 20 us tick
+  writeReg(ENG_B, R_WRAP, wrapReg(0, PROG_KEYPAD_WRAP_BOTTOM, PROG_KEYPAD_WRAP_TOP));
+  writeReg(ENG_B, R_OUTCFG, 0 | (0 << 5) | (4 << 10));                           // set_base 4
+  writeReg(ENG_B, R_MISC, 4);                                                    // set_count 4, MSB first in
+  writeReg(ENG_B, R_INCFG, 16);                                                  // in_base 16
+  while (readReg(ENG_B, R_STATUS) & 0x70) readReg(ENG_B, R_RX);                  // drain anything old
+  writeReg(ENG_B, R_CTRL, 1);
+  Serial.println();
+  Serial.println("==== keypad: press keys; any serial character stops ====");
+  while (!Serial.available()) {
+    if (!digitalRead(PIN_IRQ)) { delay(1); continue; }
+    uint16_t map = readReg(ENG_B, R_RX);
+    Serial.printf("  map %04X  ", map);
+    if (map == 0) Serial.print("(nothing pressed)");
+    for (int b = 15; b >= 0; b--)
+      if (map & (1 << b)) Serial.printf("[%c] ", KEYPAD_KEYS[b % 4][3 - b / 4]);
+    Serial.println();
+  }
+  while (Serial.available()) Serial.read();
+  writeReg(ENG_B, R_CTRL, 0);
+  Serial.println("==== keypad done ====");
+}
+
 void loop() {
-  if (Serial.available()) { int c = Serial.read(); if (c == 'r') runAll(); else if (c == 'i') i2cTest(); else if (c == 'n') i2cTest(true); else if (c == 's') spiTest(); else if (c == 'q') irqHold(); else if (c == 'p') leadProbe(); else if (c == 'l') scopeLoop(); else if (c == 'b') i2cWireCheck(); else if (c == 'k') sclHoldLow(); else if (c == 'w') ledWalk(); else if (c == 'a') i2cScan(); else if (c == 'x') isolationTest(); else if (c == 'o') i2cScopeLoop(); else if (c == 'z') { i2cScopeLoop(true); while (Serial.available()) Serial.read(); } }
+  if (Serial.available()) { int c = Serial.read(); if (c == 'r') runAll(); else if (c == 'i') i2cTest(); else if (c == 'n') i2cTest(true); else if (c == 's') spiTest(); else if (c == 'q') irqHold(); else if (c == 'p') leadProbe(); else if (c == 'l') scopeLoop(); else if (c == 'b') i2cWireCheck(); else if (c == 'k') sclHoldLow(); else if (c == 'w') ledWalk(); else if (c == 'a') i2cScan(); else if (c == 'x') isolationTest(); else if (c == 'o') i2cScopeLoop(); else if (c == 'z') { i2cScopeLoop(true); while (Serial.available()) Serial.read(); } else if (c == 'y') keypadTest(); }
 }

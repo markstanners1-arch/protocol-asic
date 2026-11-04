@@ -5,7 +5,7 @@ board). Kit pins are written **J4-n (ball)**: n is the numbered hole on header J
 own label printed beside it, the same connection under a second name, for checking by continuity. **Go by the hole number**: the ball letters H and M (H16 is hole 25, M16 is hole 10) are easy to misread on the silkscreen. **Engine pin**
 numbers (0-19) are what the chip's programs call that pin. Everything is **3.3 V logic** (FPGA and ESP32 pins are not
 5 V tolerant); one common ground between every board. `programs/read_pins.asm` shows what the chip sees on every pin.
-The same sheet as a landscape PDF for the monitor: `docs/bench_wiring.pdf` (`python docs/make_bench_wiring_pdf.py`).
+Section 6 (4 Nov) adds the keypad, IR receiver and ultrasonic. The same sheet as a landscape PDF for the monitor: `docs/bench_wiring.pdf` (`python docs/make_bench_wiring_pdf.py`).
 
 ## 1. Core: kit to ESP32 host
 
@@ -95,6 +95,45 @@ USB-C, power only for us), LEDs on 1 (IRQ) and 2 (heartbeat). Program over the 1
 | 58, 59, 60, 64, 65, 66 | | engine pins 8-13 (out only) |
 | 68, 69, 70, 71 | | engine pins 16-19 (in only) |
 
+## 6. Keypad, IR receiver and ultrasonic (4 Nov 2026, the Elegoo kit parts)
+
+**Keypad** (`rerun.ps1 -Cmd y`, engine B, `programs/keypad.asm`). The membrane keypad's tail has eight pins; with the keys
+facing you and the tail at the bottom, pin 1 is on the left: pins 1-4 are the **rows** top to bottom, 5-8 the **columns**
+left to right. The chip pulls one column low at a time and reads the rows, so the four rows need pull-ups.
+The 595's four leads share J4-14 to 17: unplug them (or leave the 595 unpowered) while the keypad is in.
+
+| FROM | TO | AND | What it is |
+|---|---|---|---|
+| keypad pin 1 (row 1: 1 2 3 A) | J4-27 (G16) | 10 k resistor to J4-1 (3.3 V) | row 1, engine pin 16 |
+| keypad pin 2 (row 2: 4 5 6 B) | J4-28 (F15) | 10 k resistor to J4-1 | row 2, engine pin 17 |
+| keypad pin 3 (row 3: 7 8 9 C) | J4-29 (F16) | 10 k resistor to J4-1 | row 3, engine pin 18 |
+| keypad pin 4 (row 4: * 0 # D) | J4-30 (E15) | 10 k resistor to J4-1 | row 4, engine pin 19 |
+| keypad pin 5 (column 1: 1 4 7 *) | J4-14 (L16) | | column 1, engine pin 4 |
+| keypad pin 6 (column 2: 2 5 8 0) | J4-15 (K14) | | column 2, engine pin 5 |
+| keypad pin 7 (column 3: 3 6 9 #) | J4-16 (K16) | | column 3, engine pin 6 |
+| keypad pin 8 (column 4: A B C D) | J4-17 (K15) | | column 4, engine pin 7 |
+
+The sketch prints the raw 16-bit map with each key name (bit 4*(3-c)+r). If every key comes out as its mirror
+(1 reads as *, say), the tail is numbered the other way round: swap the two groups of four.
+
+**IR receiver module** (KY-022, three pins, happy at 3.3 V; program to follow). Point any of the remotes at it.
+
+| FROM | TO | AND | What it is |
+|---|---|---|---|
+| module S (signal) | J4-8 (N16) | | engine pin 1: idles high, pulses low under the 38 kHz bursts |
+| module + (VCC) | J4-1 (3.3 V) | | power |
+| module - (GND) | common ground | | power |
+
+**Ultrasonic HC-SR04** (5 V part: its echo output must be divided down; program to follow). One at a time with the IR
+receiver, they share J4-8.
+
+| FROM | TO | AND | What it is |
+|---|---|---|---|
+| HC-SR04 VCC | ESP32 5 V pin (VIN) | | 5 V power |
+| HC-SR04 GND | common ground | | power |
+| HC-SR04 Trig | J4-18 (J14) | | engine pin 8 (out only): the 10 us trigger pulse; 3.3 V is enough |
+| HC-SR04 Echo | 1 k resistor | the other end to J4-8 (N16) and a 2 k resistor to GND | echo pulse (5 V) divided to 3.3 V, engine pin 1; 58 us per cm |
+
 ## If it doesn't answer: bench helpers (`esp32
 erun.ps1 -Cmd <letter>`)
 
@@ -105,6 +144,7 @@ erun.ps1 -Cmd <letter>`)
 | `b` | I2C wire check: engine B reads all 20 engine pins while the ESP32 pulls its SDA, then its SCL, low | the chip pin each I2C lead actually reaches (expect SDA = pin 3, SCL = pin 2); nothing moving = that lead is in a hole the chip cannot read (3 Nov: H16, hole 25, read as M16) |
 | `k` | GPIO 22 (the ESP32's SCL) held low for 30 s | time to meter both ends of the SCL lead |
 | `l` | ID reads over and over for 30 s | a repeating burst on CS, SCK, MOSI and MISO for the oscilloscope; MISO should read 0x0022 |
+| `y` | keypad: names every key pressed until any character is sent | section 6 wiring; a key that never shows = its row or column lead; every key mirrored = the tail numbered the other way |
 
 Lessons of 3 Nov: writes working but reads all zero = the MISO lead's J4 end in a hole that is held low (11/12 are GND,
 18-25 are driven low when no engine owns them); everything zero and nothing received = CS/SCK/MOSI; everything 0xFFFF
@@ -123,3 +163,4 @@ runs transactions until any key (`-Cmd o` for 60 s); `-Cmd l` is repeating host-
 1. Section 1 only. Load the kit, upload the sketch, `rerun.ps1` (command `r`): ID 0x0022, 0 problems.
 2. Add section 2. `rerun.ps1 -Cmd i` (ESP32 slave) or `-Cmd n` (UNO slave).
 3. Add section 3. `rerun.ps1 -Cmd s`.
+4. Keypad: section 6 (the 595's four leads out), `rerun.ps1 -Cmd y`, press keys.

@@ -102,10 +102,37 @@ s.append(Spacer(1, 4))
 s.append(Paragraph("Holes and balls pair up in order: hole 6 is ball N14 (engine pin 0), hole 8 is N16 (pin 1), and so on along each row. "
                    "Kit LEDs: P16 lights for IRQ, N15 is the heartbeat (they light when driven low).", P))
 s.append(Paragraph("<b>Cyclone IV board</b> (black EP4CE6E22C8N core board): everything on the right-hand header, pins 38-72, both bank jumpers at 3.3. CS 38, SCK 39, MOSI 42, MISO 43, IRQ 44 to the same ESP32 GPIOs as section 1; engine pin 0 = 46 (to GPIO 16), pins 1-7 = 49 50 51 52 53 54 55 (I2C SCL 50 / SDA 51; SPI 52-55), pins 8-13 = 58 59 60 64 65 66, pin 15 = 67 (from GPIO 17), 16-19 = 68-71. Clock 50 MHz on pin 24, LEDs 1 (IRQ) and 2 (heartbeat). Needs a USB Blaster on the JTAG header (ordered 3 Nov, due 5-6 Nov): bash fpga/cyclone4/build.sh load. Sketch: CHIP_HZ = 50e6. This board runs three engines (ID 0x0023); the kit two.", P))
-s.append(Paragraph("If it doesn't answer: esp32 rerun.ps1 -Cmd p (lead probe: a FLOATING pin = lead open or wrong hole; ID 0x0000 with MISO driven = CS/SCK/MOSI not arriving; 0xFFFF = MISO open), -Cmd q (IRQ held high 15 s), -Cmd b (I2C wire check: names the chip pin each I2C lead reaches), -Cmd k (GPIO 22 held low 30 s to meter), -Cmd l (repeating ID reads for the oscilloscope). Writes working but reads all zero = MISO lead's J4 end in a hole held low (11/12 GND, 18-25 driven low). The kit forgets its build on any power blip: reload with bash fpga/machxo3/build.sh load.", P))
+s.append(Paragraph("If it doesn't answer: esp32 rerun.ps1 -Cmd p (lead probe: a FLOATING pin = lead open or wrong hole; ID 0x0000 with MISO driven = CS/SCK/MOSI not arriving; 0xFFFF = MISO open), -Cmd q (IRQ held high 15 s), -Cmd b (I2C wire check: names the chip pin each I2C lead reaches), -Cmd k (GPIO 22 held low 30 s to meter), -Cmd l (repeating ID reads for the oscilloscope), -Cmd y (keypad: names every key pressed). Writes working but reads all zero = MISO lead's J4 end in a hole held low (11/12 GND, 18-25 driven low). The kit forgets its build on any power blip: reload with bash fpga/machxo3/build.sh load.", P))
 s.append(Paragraph("Order of work after replugging", H2))
 s.append(Paragraph("1. Section 1 only. Load the kit, upload the sketch, rerun.ps1 (command r): ID 0x0022, 0 problems.&nbsp;&nbsp; "
                    "2. Add section 2: rerun.ps1 -Cmd i (ESP32 slave) or -Cmd n (UNO slave).&nbsp;&nbsp; "
-                   "3. Add section 3: rerun.ps1 -Cmd s.", PB))
+                   "3. Add section 3: rerun.ps1 -Cmd s.&nbsp;&nbsp; 4. Keypad: section 6 (595 leads out), rerun.ps1 -Cmd y.", PB))
+s.append(PageBreak())
+s.append(Paragraph("6. Keypad (rerun.ps1 -Cmd y), IR receiver and ultrasonic: the Elegoo kit parts (4 Nov 2026)", H2))
+s.append(Paragraph("Keypad tail, keys facing you and the tail at the bottom, pin 1 on the left: pins 1-4 are the <b>rows</b> top to bottom, 5-8 the <b>columns</b> left to right. "
+                   "The chip pulls one column low at a time and reads the rows, so each row needs a 10 k pull-up. The 595 shares J4-14 to 17: unplug its four leads first.", P))
+s.append(wires([
+    ["keypad pin 1  (row 1: 1 2 3 A)", "J4-27 (G16)", "10 k resistor to J4-1 (3.3 V)", "row 1, engine pin 16"],
+    ["keypad pin 2  (row 2: 4 5 6 B)", "J4-28 (F15)", "10 k resistor to J4-1", "row 2, engine pin 17"],
+    ["keypad pin 3  (row 3: 7 8 9 C)", "J4-29 (F16)", "10 k resistor to J4-1", "row 3, engine pin 18"],
+    ["keypad pin 4  (row 4: * 0 # D)", "J4-30 (E15)", "10 k resistor to J4-1", "row 4, engine pin 19"],
+    ["keypad pin 5  (column 1: 1 4 7 *)", "J4-14 (L16)", "", "column 1, engine pin 4"],
+    ["keypad pin 6  (column 2: 2 5 8 0)", "J4-15 (K14)", "", "column 2, engine pin 5"],
+    ["keypad pin 7  (column 3: 3 6 9 #)", "J4-16 (K16)", "", "column 3, engine pin 6"],
+    ["keypad pin 8  (column 4: A B C D)", "J4-17 (K15)", "", "column 4, engine pin 7"],
+]))
+s.append(Spacer(1, 4))
+s.append(Paragraph("The sketch names each key and prints the raw map. Every key mirrored (1 reads as *) = the tail is numbered the other way: swap the two groups of four. "
+                   "A key that never shows = its row or column lead.", P))
+s.append(Paragraph("IR receiver (KY-022, 3.3 V) and ultrasonic HC-SR04 (5 V part, echo divided down): one at a time, they share J4-8. Programs to follow.", PB))
+s.append(wires([
+    ["IR module S (signal)", "J4-8 (N16)", "", "engine pin 1: idles high, pulses low under the 38 kHz bursts"],
+    ["IR module + (VCC)", "J4-1 (3.3 V)", "", "power"],
+    ["IR module - (GND)", "common ground", "", "power"],
+    ["HC-SR04 VCC", "ESP32 5 V pin (VIN)", "", "5 V power"],
+    ["HC-SR04 GND", "common ground", "", "power"],
+    ["HC-SR04 Trig", "J4-18 (J14)", "", "engine pin 8 (out only): the 10 us trigger; 3.3 V is enough"],
+    ["HC-SR04 Echo", "1 k resistor", "other end to J4-8 (N16) and a 2 k resistor to GND", "echo (5 V) divided to 3.3 V, engine pin 1; 58 us per cm"],
+]))
 doc.build(s)
 print("wrote", out)

@@ -470,3 +470,13 @@ That's a driver change on the PC, so Mark does it himself. Then:
   removing the bench photo (which, as a result, had never reached GitHub: it was folded out of the unpushed commits and
   is kept at D:\ outside the repo). Fix: installer dropped from the commit and moved to Downloads, `*.exe *.msi *.rar`
   gitignored, nine local commits folded into one and pushed. Lesson: read the whole backup output, not its last line.
+- 4 Nov 2026 (morning): run 41697384154 precheck PASS, so the three-engine chip as it stands is a complete, submittable
+  layout. Morning's bus talk (speed grades, the 400 pF capacitance limit, three- and four-wire variants, fire loops)
+  turned into a "what else can it do" list; Mark's Elegoo kits cover most of it. **First new program: the 4x4 keypad
+  scanner** `programs/keypad.asm` (16 words): one column pulled low at a time, open drain, so two keys on a row can never
+  short two drivers; rows read with pull-ups; the 16-key map is pushed only when it changes, then a 20 ms pause for the
+  bounce. `model/test_keypad.py` scans a model keypad (one key, a key bouncing for 5 ms each way, two keys on one row,
+  all sixteen in turn, one column ever driven) PASS at the kit's and the ASIC's dividers; a planted short pause was
+  caught (extra pushes on bounce). Sketch command `y` (engine B, names the keys, compiles); wiring sheet section 6
+  (keypad on J4-14..17 columns and 27..30 rows with 10 k pull-ups, plus IR receiver and HC-SR04 rows for the next two
+  programs). Not yet run on the kit: wiring next.
