@@ -27,6 +27,7 @@ Tools: OSS CAD Suite 2026-11-02, unpacked at `D:\Tools\oss-cad-suite`
     ./run.sh size     # rough cell count per module
     python model/compare_uart.py   # model running programs/uart_tx.asm vs uart_tx.v, every clock
     python model/test_measure.py   # TIME stopwatch measuring a UART bit time
+    python model/test_serialiser.py   # serialiser + CRC unit on the model, Manchester decoded back, FCS against zlib
     python model/cosim.py 1000 400 11   # Verilog engine vs model: 1000 random programs x 400 clocks, every clock
     USE_SRAM=1 python model/cosim.py    # same, with IHP's SRAM block as program memory
     bash test/run_chip.sh               # whole chip, end to end, driven only through the SPI host port
@@ -733,3 +734,29 @@ That's a driver change on the PC, so Mark does it himself. Then:
   seed 30.14 MHz before, 27.02 after; seeds 1-4 gave 28.96-30.81 MHz before and 26.47-29.49 after, all PASS at 12 MHz, critical
   path inside engine 0 (INCFG to the stopwatch carry chain) in both. `fpga/cyclone4/chip_c4.qsf` lists the new file; the Tiny
   Tapeout repo's `src/` copy has not been refreshed.
+- 5 Nov 2026 (branch `serialiser`): **ISA v0.3 part: bit-cell serialiser and 64-word TX FIFO on engine 0, a 32-bit CRC unit on
+  every engine.** New `src/serialiser.v` (16-bit shift register fed from the TX FIFO, half-bit divider SERDIV + 1 clocks, NRZ or
+  Manchester, differential option on `out_base + 1`, CRC append optionally complemented, end marker 6 half-bits high, bit order
+  from `out_right`) and `src/crc32.v` (reflected form, host-set polynomial and start value). Engine encodings: `MOV` destination 3
+  (`mov ser, src`: start a frame of `src` words, 0 stops), `WAIT` number 24 (serialiser busy, `wait 0, ser`), `IN` source 7 (CRC
+  low 16 bits), `TIME` action 5 (`time crc reset`); `MOV status` bits 8-9 busy and underrun. Host registers 0x2B SERCFG ([12:10]
+  CRC skip words, so the FCS leaves out the preamble), 0x2C SERDIV, 0x2D-0x30 CRCPOLY and CRCINIT, 0x31-0x32 CRC, 0x33 SERSTAT
+  (full TX level); STATUS bits 14 busy and 15 underrun, its TX field saturating at 7; ID unchanged. Corner rules in
+  `docs/isa.md`. `programs/eth_tx.asm` (16 words): a frame from a count and its words, then a 100 ns link pulse every 16.4 ms.
+  Tests: `model/test_serialiser.py` PASS (Ethernet minimum frame at SERDIV 0 and 1 decoded from the pair, FCS equal to
+  `zlib.crc32`, TP_IDL, link pulse at 16.39 ms; NRZ with CRC-16/MODBUS appended; MSB-first Manchester at SERDIV 4999; 70 words
+  streamed through 64; underrun at word 65; abort; CRC IN mode against CRC-16/MODBUS; an engine without the serialiser); every
+  earlier model test PASS. Cosim now runs two engines (with and without the serialiser) and randomises SERCFG, SERDIV, CRCPOLY,
+  CRCINIT: 1000 x 400 clocks at seeds 1, 2, 3 and seed 4 with `USE_SRAM=1`, plus 100 x 6000 clocks at seed 5, every clock
+  identical (pins, FIFOs, CRC, busy and underrun compared). `test/run_chip.sh` PASS at `NENG=3`, `NENG=2`, `LATE=1`, with a
+  whole-chip Ethernet transmit (count and 34 words in one SPI burst, all 72 bytes and the FCS decoded at uo_out[2]/[3], TP_IDL,
+  CRC registers, an underrun and its clearing) and the kit's build (`SER0=0 CRC=0 TXDEPTH0=4 NENG=2`). Planted bugs: Manchester
+  halves swapped in the model (8 checks of `test_serialiser.py` failed); in `serialiser.v`, the CRC not complemented (whole-chip
+  test: FCS byte 0x53 for 0xAC; cosim: 8 of 1000 tests) and the end marker one half-bit short (whole-chip test: 1157 half-bits for
+  1158; cosim: 18 of 1000 tests); all removed. Size (`./run.sh size`, generic cells): whole chip 17,351 before, 22,576 after;
+  engine without the serialiser 5,968 to 6,108; serialiser 559, CRC unit 132. MachXO3L kit: two engines with the serialiser do
+  not fit (64-word FIFO 7,688 of 6,864 LUTs; 32 words 7,156; 16 words 6,937), so `fpga/machxo3/chip_mxo3.v` now builds with
+  `SER0=0 CRC=0 TXDEPTH0=4` (the v0.2 engines): 5,953 LUTs (86 %), 2,087 flip-flops, 28.74 MHz. `KIT="NENG=1 SER0=1 CRC=1
+  TXDEPTH0=64" bash fpga/machxo3/build.sh` builds one engine with the serialiser: 4,785 LUTs (69 %), 2,328 flip-flops,
+  29.63 MHz. `fpga/cyclone4/chip_c4.v` uses the same parameters as the kit (not rebuilt in Quartus). The Tiny Tapeout repo's
+  `src/` copy has not been refreshed.

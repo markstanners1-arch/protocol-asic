@@ -8,8 +8,10 @@ set -e
 cd "$(dirname "$0")"
 export PATH="/d/Tools/oss-cad-suite/bin:/d/Tools/oss-cad-suite/lib:$PATH"
 mkdir -p build
-S="../../src/chip.v ../../src/cluster.v ../../src/host_spi.v ../../src/engine.v ../../src/prog_mem.v ../../src/glitch_filter.v chip_mxo3.v"
-yosys -q -p "read_verilog $S; synth_lattice -family xo3 -nolutram -nobram -top chip_mxo3 -json build/chip.json"
+S="../../src/chip.v ../../src/cluster.v ../../src/host_spi.v ../../src/engine.v ../../src/serialiser.v ../../src/crc32.v ../../src/prog_mem.v ../../src/glitch_filter.v chip_mxo3.v"
+# KIT="NENG=1 SER0=1 CRC=1 TXDEPTH0=64" overrides the wrapper's parameters (default: two engines, no serialiser, no CRC units)
+CHP=""; for kv in $KIT; do CHP="$CHP chparam -set ${kv%%=*} ${kv#*=} chip_mxo3;"; done
+yosys -q -p "read_verilog $S; $CHP synth_lattice -family xo3 -nolutram -nobram -top chip_mxo3 -json build/chip.json"
 nextpnr-machxo2 --device LCMXO3L-6900C-5BG256C --json build/chip.json --lpf chip_mxo3.lpf --textcfg build/chip.config --freq 12 -q -l build/chip_pnr.log
 ecppack build/chip.config --bit build/chip.bit
 grep -E "TRELLIS_COMB:|TRELLIS_RAMW:|Max frequency" build/chip_pnr.log | tail -3

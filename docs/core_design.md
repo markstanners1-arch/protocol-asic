@@ -184,6 +184,33 @@ protocol_chip  (src/chip.v)        NENG = 3 (engines per cluster, 1-4), NCLUSTER
   on cluster numbers 1, 2 and 63; two planted bugs in `cluster.v` (engine 1's pin bank rotated by 8; CLKDIV taken from
   the mirrored slot) each failed the whole-chip test at its first measurement.
 
+## Serialiser and CRC unit (5 Nov 2026, ISA v0.3)
+
+Engine 0 has a **bit-cell serialiser** (`src/serialiser.v`) and a 64-word TX FIFO; every engine has a **CRC unit**
+(`src/crc32.v`). Exact rules: `docs/isa.md`, sections "Serialiser" and "CRC unit"; registers: `docs/host_port.md`.
+
+| Block | What it is | Flip-flops |
+|---|---|---|
+| Shift register | 16 bits, loaded from the TX FIFO head, shifts right (LSB first) or left (MSB first) by `out_right` | 16 |
+| Half-bit divider | 16-bit down-counter, reloads from SERDIV: a half-bit is SERDIV + 1 clocks of the chip clock, not the engine tick | 16 |
+| Half-bit flip-flop, bit counter | 1 + 5 bits: which half of which bit (0-15 data, 0-31 CRC, 0-5 end marker) | 6 |
+| Word counter | 16-bit down-counter loaded by `MOV ser`: words still to pull | 16 |
+| Phase | 2 bits: FILL (wait until the whole frame is in the FIFO), DATA, CRC, END | 2 |
+| Skip counter | 3 bits: the first N words of a frame bypass the CRC (Ethernet's preamble) | 3 + 1 |
+| Busy, underrun flip-flops | `WAIT` 24, `MOV status` bits 8-9, STATUS bits 14-15 | 2 |
+| Encoder mux | NRZ: the bit; Manchester: the inverse in the first half, the bit in the second; END: 1 | |
+| Pin mux | while sending, the line replaces the program's level on `out_base`, its inverse on `out_base + 1` (differential) | |
+| CRC unit, per engine | 32-bit shift register with an XOR per bit under a gated polynomial (the reflected form), fed by IN or by the serialiser | 32 |
+| CRC settings, per engine | CRCPOLY and CRCINIT, 32 bits each | 64 |
+
+Engine 0's TX FIFO is 64 x 16 flip-flops (engines 1 and 2 keep 4 words), so a minimum Ethernet frame (34 words with
+the preamble; the FCS comes from the CRC unit) is in the chip before its first bit goes out.
+
+The FPGA wrappers take the parameters `SER0`, `CRC` and `TXDEPTH0` (`src/chip.v`). The MachXO3L kit and the Cyclone IV
+board build with `SER0 = 0, CRC = 0, TXDEPTH0 = 4`: the v0.2 engines (MOV ser and TIME 5 do nothing, IN source 7 and
+the new registers read 0). `KIT="NENG=1 SER0=1 CRC=1 TXDEPTH0=64" bash fpga/machxo3/build.sh` builds the kit with one
+engine carrying the serialiser.
+
 1. **Two engines or one?** Two lets, say, an SPI master and a UART run at once, or TX and RX separately. *Lean: two.*
 2. **16-bit registers or 32?** 16 is enough for UART/SPI/I2C and saves area; Ethernet would want 32. *Lean: 16.*
 3. **Is the measuring side (stopwatch, WAIT timeout, glitch filters) our headline?** *Lean: yes.*

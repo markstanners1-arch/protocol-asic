@@ -1,4 +1,4 @@
-"""Assembler for the engine instruction set (docs/isa.md, v0.1).
+"""Assembler for the engine instruction set (docs/isa.md, v0.3).
 
     prog = assemble(text)       ->  Program(words, wrap_bottom, wrap_top, side_count, side_opt, side_dir, labels)
 
@@ -10,12 +10,13 @@ from dataclasses import dataclass, field
 
 OPS = {"jmp": 0, "wait": 1, "in": 2, "out": 3, "push": 4, "pull": 4, "mov": 5, "set": 6, "time": 7}
 JMP_COND = {"": 0, "!x": 1, "x--": 2, "!y": 3, "y--": 4, "x!=y": 5, "pin": 6, "!osre": 7}
-IN_SRC = {"pins": 0, "x": 1, "y": 2, "null": 3, "isr": 4, "osr": 5, "sw": 6}
+IN_SRC = {"pins": 0, "x": 1, "y": 2, "null": 3, "isr": 4, "osr": 5, "sw": 6, "crc": 7}
 OUT_DST = {"pins": 0, "x": 1, "y": 2, "null": 3, "pindirs": 4, "pc": 5, "isr": 6}
-MOV_DST = {"pins": 0, "x": 1, "y": 2, "pc": 5, "isr": 6, "osr": 7}
+MOV_DST = {"pins": 0, "x": 1, "y": 2, "ser": 3, "pc": 5, "isr": 6, "osr": 7}
 MOV_SRC = {"pins": 0, "x": 1, "y": 2, "null": 3, "sw": 4, "status": 5, "isr": 6, "osr": 7}
 SET_DST = {"pins": 0, "x": 1, "y": 2, "pindirs": 4}
-TIME_ACT = {"start": 0, "stop": 1, "capture x": 2, "capture y": 3, "capture isr": 4}
+TIME_ACT = {"start": 0, "stop": 1, "capture x": 2, "capture y": 3, "capture isr": 4, "crc reset": 5}
+WAIT_SER = 24          # wait L, ser: WAIT index 24 = serialiser busy (engine 0)
 
 
 class AsmError(Exception):
@@ -141,8 +142,10 @@ def _args(op, args, labels):
         return (JMP_COND[cond] << 5) | (addr & 31)
     if op == "wait":
         level = _num(args[0])
-        kind, idx = args[1].split()
         timeout = 1 if len(args) > 2 and args[2].lower() == "timeout" else 0
+        if args[1].strip().lower() == "ser":
+            return (level << 7) | (timeout << 6) | WAIT_SER
+        kind, idx = args[1].split()
         rel = {"pin": 0, "rel": 1}[kind.lower()]
         return (level << 7) | (timeout << 6) | (rel << 5) | (_num(idx) & 31)
     if op == "in":

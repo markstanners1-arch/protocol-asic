@@ -19,7 +19,9 @@ module chip_c4 (
     always @(posedge clk) if (!rst_n) por <= por + 1'b1;
 
     wire [7:0] uo_out, uio_out, uio_oe;
-    protocol_chip #(.NENG(3)) chip (             // three engines: fits at 98 % with Quartus set to optimise for area (four do not)
+    // three engines: fits at 98 % with Quartus set to optimise for area (four do not); built without the serialiser and the
+    // CRC units (5 Nov 2026), as the MachXO3L kit, so the build is the one that fitted
+    protocol_chip #(.NENG(3), .SER0(0), .CRC(0), .TXDEPTH0(4)) chip (
         .ui_in({ui_hi, mosi, sck, cs_n}), .uo_out(uo_out),
         .uio_in(uio), .uio_out(uio_out), .uio_oe(uio_oe),
         .ena(1'b1), .clk(clk), .rst_n(rst_n));
