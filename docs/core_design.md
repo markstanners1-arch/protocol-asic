@@ -208,8 +208,8 @@ the preamble; the FCS comes from the CRC unit) is in the chip before its first b
 
 The FPGA wrappers take the parameters `SER0`, `CRC` and `TXDEPTH0` (`src/chip.v`). The MachXO3L kit and the Cyclone IV
 board build with `SER0 = 0, CRC = 0, TXDEPTH0 = 4`: the v0.2 engines (MOV ser and TIME 5 do nothing, IN source 7 and
-the new registers read 0). `KIT="NENG=1 SER0=1 CRC=1 TXDEPTH0=64" bash fpga/machxo3/build.sh` builds the kit with one
-engine carrying the serialiser.
+the new registers read 0). `bash fpga/machxo3/build.sh ser` builds the kit with one engine carrying the serialiser, the
+CRC unit and the 64-word TX FIFO.
 
 1. **Two engines or one?** Two lets, say, an SPI master and a UART run at once, or TX and RX separately. *Lean: two.*
 2. **16-bit registers or 32?** 16 is enough for UART/SPI/I2C and saves area; Ethernet would want 32. *Lean: 16.*

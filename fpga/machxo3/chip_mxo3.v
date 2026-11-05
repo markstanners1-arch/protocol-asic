@@ -21,7 +21,7 @@
 
 module chip_mxo3 #(
     // Default build (5 Nov 2026): two engines without the serialiser or the CRC units, 4-word TX FIFOs (the v0.2 engines).
-    // Two engines with them do not fit this board under -nolutram (fpga/machxo3/build.sh; README, 5 Nov 2026).
+    // Two engines with them do not fit this board under -nolutram. "build.sh ser" builds one engine with them (see build.sh).
     parameter NENG     = 2,
     parameter SER0     = 0,
     parameter CRC      = 0,

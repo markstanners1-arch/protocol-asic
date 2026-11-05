@@ -755,8 +755,10 @@ That's a driver change on the PC, so Mark does it himself. Then:
   test: FCS byte 0x53 for 0xAC; cosim: 8 of 1000 tests) and the end marker one half-bit short (whole-chip test: 1157 half-bits for
   1158; cosim: 18 of 1000 tests); all removed. Size (`./run.sh size`, generic cells): whole chip 17,351 before, 22,576 after;
   engine without the serialiser 5,968 to 6,108; serialiser 559, CRC unit 132. MachXO3L kit: two engines with the serialiser do
-  not fit (64-word FIFO 7,688 of 6,864 LUTs; 32 words 7,156; 16 words 6,937), so `fpga/machxo3/chip_mxo3.v` now builds with
-  `SER0=0 CRC=0 TXDEPTH0=4` (the v0.2 engines): 5,953 LUTs (86 %), 2,087 flip-flops, 28.74 MHz. `KIT="NENG=1 SER0=1 CRC=1
-  TXDEPTH0=64" bash fpga/machxo3/build.sh` builds one engine with the serialiser: 4,785 LUTs (69 %), 2,328 flip-flops,
-  29.63 MHz. `fpga/cyclone4/chip_c4.v` uses the same parameters as the kit (not rebuilt in Quartus). The Tiny Tapeout repo's
+  not fit (64-word FIFO 7,688 of 6,864 LUTs; 32 words 7,156; 16 words 6,937). The kit has two named builds (no board loaded):
+  `bash fpga/machxo3/build.sh` (default, `build/chip.bit`): two engines, ID 0x0022, no serialiser, no CRC units, 4-word TX
+  FIFOs (the v0.2 engines; `SER0=0 CRC=0 TXDEPTH0=4`): 5,953 LUTs (86 %), 2,087 flip-flops, fmax 28.74 MHz.
+  `bash fpga/machxo3/build.sh ser` (`build/chip_ser.bit`): one engine, ID 0x0021, with the serialiser, the CRC unit and the
+  64-word TX FIFO: 4,785 LUTs (69 %), 2,328 flip-flops, fmax 29.63 MHz. Both pass at the kit's 12 MHz; `load` after either
+  puts it in SRAM. `fpga/cyclone4/chip_c4.v` uses the default build's parameters (not rebuilt in Quartus). The Tiny Tapeout repo's
   `src/` copy has not been refreshed.
