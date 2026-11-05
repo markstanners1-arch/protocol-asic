@@ -1,5 +1,10 @@
 # Bench wiring sheet (3 Nov 2026, bench rebuilt from scratch)
 
+**5 Nov 2026: the MachXO3L kit is retired from the bench in favour of the Mojo v3 (section 14).** Sections 1 to 4 and 6 to 13
+describe the kit's wiring and stay for the record and for the kit's later use as a second board; the modules in sections 9
+and 11 to 13 move to the Mojo's engine pins when they are next run. The kit's SRAM is loaded, never its one-time memory, so
+`bash fpga/machxo3/build.sh load` brings it back whenever it is wanted.
+
 One wire per row: **FROM** one end **TO** the other, **AND** a third end where the wire has one (a pull-up, a second
 board). Kit pins are written **J4-n (ball)**: n is the numbered hole on header J4, the ball name (K12...) is the FPGA's
 own label printed beside it, the same connection under a second name, for checking by continuity. **Go by the hole number**: the ball letters H and M (H16 is hole 25, M16 is hole 10) are easy to misread on the silkscreen. **Engine pin**
