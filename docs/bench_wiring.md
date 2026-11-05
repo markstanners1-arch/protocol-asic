@@ -370,6 +370,34 @@ If it doesn't answer: `-Script lead_probe.py` (MISO and IRQ driven and steady wi
 running), then `TOP=pin_finder` build of `fpga/mojo/pin_finder.v` (touch a hole with a ground lead through 220 R - 1 k: the
 display shows P and the pin number).
 
+## 15. Scope setup for a 10 Mbit/s frame on the Mojo (5 Nov 2026, not yet captured)
+
+Chip side: load the 40 MHz serialiser build and send frames for twenty minutes (the sender reports its totals at the end):
+
+    python fpga/mojo/load.py COM15 fpga/mojo/build/chip_ser_40.bin
+    pwsh pico/run.ps1 -Script eth_tx.py -Seconds 1300 -Pre "MODE='full'; CHIP_HZ=40_000_000; FRAMES=120000"
+
+Probes: CH1 tip on hole 34 (right header, row 5 from the USB end, inner), CH2 tip on hole 35 (same row, outer), both
+ground clips on the GND hole (row 2, outer), ground leads short. Probe switches 10x. The two lines are mirror images, so
+swapped probes only turn the picture over.
+
+| Setting | Where | Value |
+|---|---|---|
+| Coupling, probe, bandwidth | CH1 MENU and CH2 MENU | DC, 10x, 20 MHz BW Limit Off (the little 20 beside the readout goes) |
+| Volts/div | VERTICAL SCALE knobs | 1.00V on both (readout at the bottom); CH1 in the top half, CH2 in the bottom |
+| Trigger | TRIG MENU | Edge, source CH2, rising, coupling DC, mode Normal |
+| Trigger level | LEVEL knob | 1.50V (readout beside CH2 at the bottom) |
+| Holdoff | TRIG MENU | 100 us, so the scope arms once per frame, not inside it |
+| Horizontal offset | push the HORIZONTAL POSITION knob | 0.000s (the number top-left); then turn it so the marker sits one division from the left |
+
+Timebases, saving a picture (SAVE/RECALL to the USB stick) at each: 10.0us shows the whole 58 us burst; 100ns at the
+trigger shows the preamble, 100 ns pulses one division wide, CH2 the mirror of CH1; 100ns with the position turned to
+about 6.5 us after the trigger shows the all-ones destination address, 50 ns pulses half a division wide, the 10 Mbit
+proof. In Normal mode the screen stays blank until a trigger comes: R top-centre and 0 Hz mean the CH2 tip is not on a
+driven hole. AUTO SET finds whatever is there; the chip's 50 MHz oscillator shows as a few hundred millivolts of ripple
+on an idle line. CH2 is the trigger because a frame's first edge is TD- rising; the 50 ns link pulse between frames is
+on TD+ only, which is what a CH1 trigger catches instead.
+
 ## If it doesn't answer: bench helpers (`esp32
 erun.ps1 -Cmd <letter>`)
 
