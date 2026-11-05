@@ -19,9 +19,9 @@
 # Not used: the shield's LEDs, display and buttons (driven by the wrapper or left alone), the AVR link (P39 P43-P48
 # P55 P59 P61 P62 P65 P70: left undriven, bitgen UnusedPin:PullNone).
 
-NET "clk" LOC = P56 | IOSTANDARD = LVTTL;
-NET "clk" TNM_NET = clk;
-TIMESPEC TS_clk = PERIOD "clk" 50 MHz HIGH 50%;
+NET "clk_in" LOC = P56 | IOSTANDARD = LVTTL;
+NET "clk_in" TNM_NET = clk_in;
+TIMESPEC TS_clk = PERIOD "clk_in" 50 MHz HIGH 50%;
 NET "rst_n" LOC = P38 | IOSTANDARD = LVTTL | PULLUP;
 
 # host port (pull-up on CS, pull-downs on SCK and MOSI, as on the MachXO3L kit)

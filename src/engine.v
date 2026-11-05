@@ -119,7 +119,9 @@ module engine #(
     reg [15:0] div;                 // clock divider
     wire       tick = (div == 16'd0);
 
-    localparam TAW = $clog2(TXDEPTH);   // TX FIFO address width
+    // TX FIFO address width = clog2(TXDEPTH), written out because Xilinx XST 14.7 rejects $clog2 in a localparam
+    localparam TAW = (TXDEPTH <= 2) ? 1 : (TXDEPTH <= 4) ? 2 : (TXDEPTH <= 8) ? 3 : (TXDEPTH <= 16) ? 4 :
+                     (TXDEPTH <= 32) ? 5 : (TXDEPTH <= 64) ? 6 : 7;
     reg [15:0] txm [0:TXDEPTH-1];   // TX FIFO: host -> engine (and the serialiser)
     reg [TAW-1:0] tx_rd, tx_wr;
     reg [TAW:0]   tx_cnt;

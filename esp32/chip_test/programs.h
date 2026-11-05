@@ -94,3 +94,5 @@ const int ETH_TX_POLL = 3;
 const int ETH_TX_NOFR = 7;
 const int ETH_TX_FRAME = 11;
 const int ETH_TX_GAP = 15;
+const uint16_t PROG_SER_TX[] = {0xC083, 0xC000, 0x80A0, 0xA067, 0x2018};
+const int PROG_SER_TX_LEN = 5, PROG_SER_TX_WRAP_BOTTOM = 2, PROG_SER_TX_WRAP_TOP = 4;

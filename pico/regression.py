@@ -1,5 +1,6 @@
 """Whole-chip regression from the Pico: the ESP32 sketch's 'r' (esp32/chip_test runAll) and 'x' (isolation) ported.
-Set CHIP_HZ for the board: 12e6 the MachXO3L kit (two engines), 50e6 the Mojo v3 / Cyclone (three engines, ID 0x0023).
+Set CHIP_HZ for the board: 12e6 the MachXO3L kit (two engines), 50e6 the Mojo v3 / Cyclone (three engines, ID 0x0023);
+ENGINES for a build with another count (the Mojo "ser" build: 2, ID 0x0022).
 
 Wiring, besides the host port of chip_host.py (CS GP17, SCK GP18, MOSI GP19, MISO GP16, IRQ GP20, GND):
     engine pin 0  -> Pico GP1 (board pin 2, UART0 RX): engine A's (and C's) UART out
@@ -21,11 +22,18 @@ from chip_host import (Chip, wrap_reg, ENG_A, ENG_B, ENG_C, R_CTRL, R_CLKDIV, R_
                        R_TX, R_RX, R_STATUS, R_FILTER)
 from programs import PROGRAMS
 
-CHIP_HZ = 50_000_000
-ENGINES = 3 if CHIP_HZ >= 50e6 else 2
-SPI_HZ = 4_000_000 if CHIP_HZ >= 50e6 else 1_000_000      # under clk/8 either way
+# CHIP_HZ and ENGINES may be set before this file runs (pico/run.ps1 -Pre "CHIP_HZ=40_000_000; ENGINES=2")
+try:
+    CHIP_HZ
+except NameError:
+    CHIP_HZ = 50_000_000
+try:
+    ENGINES
+except NameError:
+    ENGINES = 3 if CHIP_HZ >= 50e6 else 2
+SPI_HZ = 4_000_000 if CHIP_HZ >= 32e6 else 1_000_000      # under clk/8 either way
 CHIP_MHZ = CHIP_HZ / 1e6
-FILTER_P = 4 if CHIP_HZ >= 50e6 else 2                       # hold = 16 x 2^P clocks: about 5 us
+FILTER_P = 4 if CHIP_HZ >= 32e6 else 2                       # hold = 16 x 2^P clocks: 5.1 us at 50 MHz, 6.4 us at 40
 FILTER_ON = (FILTER_P << 4) | 0xF
 FILTER_HOLD_US = 16.0 * (1 << FILTER_P) / CHIP_MHZ
 PULSE_PIN = 15                                               # engine pin wired to GP2
