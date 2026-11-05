@@ -782,3 +782,38 @@ That's a driver change on the PC, so Mark does it himself. Then:
   64-word TX FIFO: 4,785 LUTs (69 %), 2,328 flip-flops, fmax 29.63 MHz. Both pass at the kit's 12 MHz; `load` after either
   puts it in SRAM. `fpga/cyclone4/chip_c4.v` uses the default build's parameters (not rebuilt in Quartus). The Tiny Tapeout repo's
   `src/` copy has not been refreshed.
+- 5 Nov 2026 (branch `serialiser-bench`): **serialiser on the Mojo v3, frames decoded from an analyser capture.**
+  `fpga/mojo/build.sh` options: default (three v0.2 engines, `NENG=3 SER0=0 CRC=0 TXDEPTH0=4`, ID 0x0023): 4,242 of 5,720
+  LUTs (74 %), 1,276 slices (89 %), 1,104 flip-flops, fmax 54.7 MHz. `ser` (`build/chip_ser.bin`, two engines, serialiser,
+  CRC units, 64-word TX FIFO on engine 0, `NENG=2 SER0=1 CRC=1 TXDEPTH0=64`, ID 0x0022): 3,815 LUTs (66 %), 1,191 slices
+  (83 %), 1,087 flip-flops, fmax 56.8 MHz, timing met at 50 MHz. `ser clk40` (`build/chip_ser_40.bin`): the same with the
+  chip clock at 40 MHz from a DCM_SP (50 x 4 / 5, chip held in reset until LOCKED; `chip_mojo.v` parameter `CLK40`):
+  3,834 LUTs, 1,184 slices, 1,090 flip-flops, derived 25 ns constraint met at 17.831 ns. `chip.ucf` clock net renamed
+  `clk_in`; no pin moved. `src/engine.v`: `$clog2` in the TX FIFO width written as a ternary (XST 14.7 rejects it): cosim
+  1000 x 400 at seed 1 and seed 4 `USE_SRAM=1` identical, `test/run_chip.sh` PASS at default, `NENG=2`, `LATE=1`.
+  TD+ = engine pin 1 (shield hole 34), TD- = engine pin 2 (hole 35), same row. New: `programs/ser_tx.asm` (5 words: pull
+  a count, `mov ser, osr`, wait; works MSB first, where `eth_tx.asm`'s FIFO poll `out x, 4` needs `out_right`);
+  `pico/eth_tx.py` (MODE eth / dali / full / leads; settings by `pico/run.ps1 -Pre`, new); `pico/regression.py` takes
+  `CHIP_HZ` and `ENGINES` from `-Pre`; `docs/bench/decode_manchester.py` (reads the .sr only: frame = the longest run with
+  either line high, bit clock from a line fit to the 56 preamble mid-bit edges or from the half-bit edge spacings,
+  Manchester by mid-bit edges, TD- against TD+ per sample, end marker length, `zlib.crc32` against the FCS). Decoder check
+  on a model-made capture (eth_tx.asm in `model/`, sampled at 24 MHz): PASS; planted bug (halves swapped): preamble
+  `aa..2a`, FCS fail. Bench (Mojo, Pico host, Binghe analyser CH1 hole 34, CH2 hole 35, GND row 1 outer):
+  ID 0x0022 x 5; regression `-Pre "CHIP_HZ=50_000_000; ENGINES=2"` PASS, 0 problems. Lead check (`MODE='leads'`, 24,000
+  samples a step): TD+ high / TD- low read CH1 24000 / CH2 0; reversed 0 / 24000; both low 0 / 0.
+  Ethernet, SERDIV 49 (half-bit 50 clocks = 1.000 us, 500 kbit/s), SERCFG 0x107F, CRCPOLY 0xEDB88320, CRCINIT
+  0xFFFFFFFF, out_right 1: 30 frames, SERSTAT 0 after each, chip CRC register 0x2BDA0853 each. Capture (trigger D1 rising,
+  2 M samples): frame 1158.1 us, bit 2.0000 us from the preamble, 576 bits, end marker 6.00 half-bits (6.00 us), TD- the
+  inverse of TD+ (11 of 27,795 samples equal, each beside an edge), bytes `55 x 7 d5`, destination ff:ff:ff:ff:ff:ff,
+  source 02:00:00:00:00:01, type 0x88b5, payload 30..5d (46 bytes) equal to the bytes sent, FCS on the wire `ac f7 25 d4`
+  = `zlib.crc32` 0xD425F7AC: **PASS**. Same capture, decoder with the halves swapped: FAIL (preamble, FCS, bytes).
+  DALI rate, `ser_tx.asm`, SERDIV 20832 (half-bit 20833 clocks = 416.66 us), SERCFG 0x000F (Manchester, differential,
+  end marker, no CRC), MSB first, word 0xFE51: capture half-bit 416.71 us, 16 bits `fe 51` equal to the word sent, end
+  marker 6.00 half-bits (2500.25 us), TD- the inverse of TD+: **PASS**. Saved: `docs/bench/serialiser_eth_500kbit_mojo.sr`,
+  `docs/bench/serialiser_dali_1200bit_mojo.sr`. 40 MHz (`ser clk40`): regression `CHIP_HZ=40_000_000` PASS, 0 problems
+  (B timed A's bits at 344, 696, 2080 clocks). 10 Mbit/s (`MODE='full'`, SERDIV 1, half-bit 50 ns): 96,100 frames, SERSTAT
+  0 and CRC register 0x2BDA0853 after every one. Analyser at 24 MHz: frame 57.9 us, bit 0.1000 us from the preamble;
+  decoding stops at bit 63 (50 ns half-bits are 1.2 samples): data and FCS at 10 Mbit/s not checked by the analyser.
+  Hantek, triggered on CH1: the 50 ns link pulse between frames (TD+ only); a scope view of the frame itself (trigger on
+  TD-, 100 ns bit period, TD- the mirror of TD+) is outstanding. Bench: the Mojo's USB cable and the 4-port hub gave
+  "Device Descriptor Request Failed"; the Mojo is on a front PC socket with another cable (COM15 there: `MOJO_PORT`).

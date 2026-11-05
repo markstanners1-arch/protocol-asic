@@ -352,6 +352,12 @@ Every engine pin, for anything new (hole label = FPGA pin):
 | 8-13 (out only) | 132 (outer), 131 (inner), 127 (outer), 126 (inner), 124 (outer), 123 (inner) | right header; the Mojo's LED2-LED7 light with them |
 | 15-19 (in only, pull-downs) | 57 (outer), 58 (inner), 66 (outer), 67 (inner), 74 (outer) | left header; DIP switches OFF to use a lead |
 
+**Serialiser build** (`build.sh ser`, two engines, ID 0x0022; `ser clk40` for 40 MHz): TD+ = engine pin 1, hole **34**
+(inner), TD- = engine pin 2, hole **35** (outer), both in the row after 40/41. Logic analyser: CH1 -> 34, CH2 -> 35, GND ->
+right header row 1 outer (GND). Tests: `-Script eth_tx.py -Pre "MODE='leads'"` (levels for checking the leads), then
+`MODE='eth'`, `MODE='dali'`, and with the 40 MHz build `MODE='full'; CHIP_HZ=40_000_000`; captures decoded with
+`python docs/bench/decode_manchester.py file.sr [--mode dali]`.
+
 Shield LEDs: one bank shows engine pins 0-7 as the pads read, one which of 0-7 an engine drives, the third pins 15-19, host
 CS active, reset held and a heartbeat (`fpga/mojo/chip_mojo.v`). Tests: `pwsh D:/ProtocolASIC/pico/run.ps1 -Script id_test.py`
 (0x0023 five times), then `-Script regression.py -Seconds 40` (CHIP_HZ = 50_000_000 at the top): PASS, 0 problems.
