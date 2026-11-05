@@ -253,5 +253,27 @@ s.append(Spacer(1, 4))
 s.append(Paragraph("Test: pico/run.ps1 -Script mcp4725.py -Seconds 40. Expect the address found; 0 V, 1.65 V, 3.30 V held 3 s each for the meter; a 64-step sawtooth 10 s and a triangle 10 s, every byte acked: PASS. "
                    "The ramp rate is host-limited (a round trip per byte): the script measures the ramps it made and prints the Hz the scope must show (the wire alone would allow 347 Hz at 400 kHz). "
                    "Scope: CH1 on OUT, 1 V/div, trigger on the sawtooth's falling flyback.", PB))
+s.append(PageBreak())
+s.append(Paragraph("14. Mojo v3 with the IO Shield stacked, Pico as host (5 Nov 2026; regression PASS)", H2))
+s.append(Paragraph("Three engines at 50 MHz (ID <b>0x0023</b>). Leads go into the IO Shield's stacking headers; <b>the number printed beside a hole is that hole's FPGA pin</b>. "
+                   "Right header: inner hole (towards the display) labelled on the inside (50, 40, 34 ...), outer hole on the board edge (51, 41, 35 ...); row 1 is inner RAW / outer GND, row 2 inner +V / outer GND. "
+                   "Left header: inner GND, GND, VSYS, 58, 67, 75 ...; outer RAW, +V, DONE, 57, 66, 74 ... <b>All 24 shield DIP switches OFF.</b> "
+                   "Load: python fpga/mojo/load.py COM14 fpga/mojo/build/chip.bin (FPGA RAM only). <b>After any power blip or reset press the Mojo runs its flash design</b> (LEDs fade, ID garbage): reload.", P))
+s.append(wires([
+    ["Pico GND (pin 23)", "right header row 1, OUTER hole, edge label GND", "", "common ground (the inner hole of that row is RAW)"],
+    ["Pico GP17 (pin 22)", "right header, inner hole 50", "", "CS"],
+    ["Pico GP18 (pin 24)", "right header, outer hole 51", "", "SCK"],
+    ["Pico GP19 (pin 25)", "right header, inner hole 40", "", "MOSI"],
+    ["Pico GP16 (pin 21)", "right header, outer hole 134 (4th row from the far end)", "", "MISO (also Mojo LED0)"],
+    ["Pico GP20 (pin 26)", "right header, inner hole 133 (same row)", "", "IRQ (also Mojo LED1)"],
+    ["Pico GP1 (pin 2)", "right header, outer hole 41", "", "engine pin 0: UART out into the Pico's UART0 RX"],
+    ["Pico GP2 (pin 4)", "left header, outer hole 57 (4th row)", "", "engine pin 15: test pulses from the Pico"],
+]))
+s.append(Spacer(1, 4))
+s.append(Paragraph("Engine pins (hole label = FPGA pin): 0-7 = 41, 34, 35, 32, 33, 29, 30, 27 (right header; I2C SCL/SDA 35/32; SPI SCK/MOSI/MISO/CS 33/29/30/27); "
+                   "8-13 = 132, 131, 127, 126, 124, 123 (right header, the Mojo's LED2-LED7 light with them); 15-19 = 57, 58, 66, 67, 74 (left header, DIP switches OFF).", P))
+s.append(Paragraph("Tests: pico/run.ps1 -Script id_test.py (0x0023 five times), then -Script regression.py -Seconds 40 (CHIP_HZ = 50_000_000): PASS, 0 problems. "
+                   "Nothing back: -Script lead_probe.py (MISO and IRQ driven and steady; toggling = the flash design is running), then the pin finder (TOP=pin_finder build: "
+                   "touch a hole with a ground lead through 220 R - 1 k, the display shows P and the pin number).", PB))
 doc.build(s)
 print("wrote", out)

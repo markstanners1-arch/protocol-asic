@@ -2,3 +2,4 @@
 *.jpg binary
 *.png binary
 *.sr binary
+fpga/mojo/*.sh text eol=lf
