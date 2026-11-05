@@ -811,9 +811,10 @@ That's a driver change on the PC, so Mark does it himself. Then:
   end marker, no CRC), MSB first, word 0xFE51: capture half-bit 416.71 us, 16 bits `fe 51` equal to the word sent, end
   marker 6.00 half-bits (2500.25 us), TD- the inverse of TD+: **PASS**. Saved: `docs/bench/serialiser_eth_500kbit_mojo.sr`,
   `docs/bench/serialiser_dali_1200bit_mojo.sr`. 40 MHz (`ser clk40`): regression `CHIP_HZ=40_000_000` PASS, 0 problems
-  (B timed A's bits at 344, 696, 2080 clocks). 10 Mbit/s (`MODE='full'`, SERDIV 1, half-bit 50 ns): 96,100 frames, SERSTAT
+  (B timed A's bits at 344, 696, 2080 clocks). 10 Mbit/s (`MODE='full'`, SERDIV 1, half-bit 50 ns): 336,100 frames, SERSTAT
   0 and CRC register 0x2BDA0853 after every one. Analyser at 24 MHz: frame 57.9 us, bit 0.1000 us from the preamble;
   decoding stops at bit 63 (50 ns half-bits are 1.2 samples): data and FCS at 10 Mbit/s not checked by the analyser.
-  Hantek, triggered on CH1: the 50 ns link pulse between frames (TD+ only); a scope view of the frame itself (trigger on
+  Hantek, triggered on CH1: the 50 ns link pulse between frames (TD+ only); Autoset (2 ns/div): TD+ idle at 0 V with
+  552 mV peak-to-peak at 48.3 MHz (the 50 MHz oscillator); a scope view of the frame itself (trigger on
   TD-, 100 ns bit period, TD- the mirror of TD+) is outstanding. Bench: the Mojo's USB cable and the 4-port hub gave
   "Device Descriptor Request Failed"; the Mojo is on a front PC socket with another cable (COM15 there: `MOJO_PORT`).
