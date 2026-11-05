@@ -817,3 +817,8 @@ That's a driver change on the PC, so Mark does it himself. Then:
   Hantek, triggered on CH1: the 50 ns link pulse between frames (TD+ only); a scope view of the frame itself (trigger on
   TD-, 100 ns bit period, TD- the mirror of TD+) is outstanding. Bench: the Mojo's USB cable and the 4-port hub gave
   "Device Descriptor Request Failed"; the Mojo is on a front PC socket with another cable (COM15 there: `MOJO_PORT`).
+- 5 Nov 2026 (midday): **ISA v0.3 merged into main** (e3167c1): the cluster hierarchy, the serialiser on engine 0 with the
+  64-word TX FIFO, the CRC unit on every engine, and the Mojo builds. Proofs re-run on main after the merge: model tests
+  PASS; cosim 1000 x 400 clocks on seeds 1 and 2 and seed 3 with the IHP SRAM model, every clock identical; whole-chip
+  test PASS at NENG=3, NENG=2 and LATE=1. The Tiny Tapeout repository's `sram-macro` branch carries this src with four
+  engines at 40 MHz; its main (the submission) is unchanged.
