@@ -11,7 +11,8 @@ on every system clock. Keep it plain and literal; speed doesn't matter, clarity 
   Host FIFO timing follows docs/isa.md: decided from the state at the start of the clock.
 
 Engine 0 (Config.ser = True) carries the bit-cell serialiser and a 64-word TX FIFO; every engine carries a
-32-bit CRC unit (docs/isa.md, "Serialiser" and "CRC unit").
+32-bit CRC unit (docs/isa.md, "Serialiser" and "CRC unit"). The 64-word TX FIFO is a one-port memory behind a head
+register (docs/isa.md, "Host and FIFO timing"): tx_hv says the head word, txf[0], is ready for PULL and the serialiser.
 """
 from collections import deque
 from dataclasses import dataclass
@@ -128,6 +129,8 @@ class Engine:
         self.out_val = 0
         self.out_dir = 0
         self.txf = deque()
+        self.tx_hv = False          # 64-word FIFO: the head register holds txf[0]
+        self._tx_ready0 = self._tx_popped = False
         self.rxf = deque()
         self.sync1 = self.sync2 = 0
         self.ticks = 0
@@ -153,7 +156,8 @@ class Engine:
         self._crc_in = None         # the IN bit for the CRC (IN mode)
         # coverage counters (for the random tests' report; not state)
         self.events = {"start": 0, "abort": 0, "done": 0, "underrun": 0, "crc_sent": 0, "end_sent": 0,
-                       "in_crc": 0, "time_crc": 0, "wait_ser": 0, "pull_busy": 0}
+                       "in_crc": 0, "time_crc": 0, "wait_ser": 0, "pull_busy": 0,
+                       "refill_blocked": 0, "pull_not_ready": 0, "under_not_ready": 0}
 
     # ---- host side ----
     def tx_put(self, word):
@@ -231,6 +235,9 @@ class Engine:
             pop, self._pop = True, False
         # host requests are judged on the state at the start of the clock
         tx0 = len(self.txf)
+        mem_fifo = self.cfg.tx_depth == SER_FIFO_DEPTH
+        hv0 = self.tx_hv if mem_fifo else tx0 > 0     # the head word is ready (PULL and the serialiser take it)
+        self._tx_ready0, self._tx_popped = hv0, False
         push_ok = push is not None and tx0 < self.cfg.tx_depth
         pop_ok = pop and len(self.rxf) > 0
         popped = self.rxf[0] if pop_ok else None
@@ -240,8 +247,15 @@ class Engine:
             self._tick()
         else:
             self.div -= 1
-        ser_bit = self._ser_clock(tx0)
+        ser_bit = self._ser_clock(tx0, hv0)
         self._crc_clock(ser_bit)
+        if mem_fifo:
+            # the one memory port: a push writes; else, if the head is empty or taken, the next unread word is read
+            unread = tx0 - int(hv0)
+            read = not push_ok and (not hv0 or self._tx_popped) and unread > 0
+            if push_ok and (not hv0 or self._tx_popped) and unread > 0:
+                self.events["refill_blocked"] += 1
+            self.tx_hv = True if read else (False if self._tx_popped else hv0)
         if push_ok:
             self.txf.append(push & M16)
         if pop_ok:
@@ -268,6 +282,7 @@ class Engine:
         """Pull the next word of the frame into the shift register and start its first bit. Returns the first bit."""
         c = self.cfg
         self.ser_sh = self.txf.popleft()
+        self._tx_popped = True
         self.ser_words -= 1
         self.ser_bit, self.ser_half, self.ser_div, self.ser_phase = 0, 0, c.serdiv, DATA
         self.ser_wskip = self.ser_skip > 0
@@ -275,7 +290,7 @@ class Engine:
             self.ser_skip -= 1
         return self.ser_sh & 1 if c.out_right else (self.ser_sh >> 15) & 1
 
-    def _ser_clock(self, tx0):
+    def _ser_clock(self, tx0, hv0):
         """Returns the data bit the serialiser started this clock (for the CRC), or None."""
         c = self.cfg
         if not (c.ser and c.ser_en):
@@ -293,7 +308,7 @@ class Engine:
         if not self.ser_busy:
             return None
         if self.ser_phase == FILL:                       # waiting for the whole frame to be in the FIFO
-            if tx0 >= self.ser_words or tx0 == c.tx_depth:
+            if (tx0 >= self.ser_words or tx0 == c.tx_depth) and hv0:
                 b = self._ser_load()
                 return None if self.ser_wskip else b
             return None
@@ -323,11 +338,13 @@ class Engine:
                     b = (self.ser_sh >> 15) & 1
                 return None if self.ser_wskip else b
             if self.ser_words > 0:                       # the word is done: the next one
-                if tx0 > 0:
+                if hv0:
                     b = self._ser_load()
                     return None if self.ser_wskip else b
                 self.ser_busy, self.ser_under = False, True
                 self.events["underrun"] += 1
+                if tx0:
+                    self.events["under_not_ready"] += 1  # words in the FIFO, none in the head yet
             elif c.crc_append:
                 self.ser_phase, self.ser_bit = CRC, 0
                 self.events["crc_sent"] += 1
@@ -459,13 +476,16 @@ class Engine:
                     self.events["pull_busy"] += 1
                 if cond and self.osr_count < 16:
                     pass
-                elif not self.txf or self.ser_busy:   # while the serialiser is busy the FIFO is its own: PULL finds it empty
+                elif not self._tx_ready0 or self.ser_busy:   # while the serialiser is busy the FIFO is its own: PULL finds it empty
+                    if self.txf and not self.ser_busy:
+                        self.events["pull_not_ready"] += 1
                     if block:
                         stall = True
                     else:
                         self.osr, self.osr_count = self.x, 0
                 else:
                     self.osr, self.osr_count = self.txf.popleft(), 0
+                    self._tx_popped = True
 
         elif op == 5:                                  # MOV
             dst, mop, src = a >> 5, (a >> 3) & 3, a & 7

@@ -24,7 +24,8 @@ CFG_FIELDS = ["clkdiv", "start", "wrap_bottom", "wrap_top", "out_base", "out_cou
               "side_base", "side_count", "side_opt", "side_dir", "in_base", "jmp_pin", "out_right", "in_right", "fault_addr",
               "kind", "sercfg", "serdiv", "crcpoly", "crcinit"]     # kind 0 = the serialiser engine (0), 1 = a plain one
 BOOLS = ("side_opt", "side_dir", "out_right", "in_right")
-EVENTS = ["start", "abort", "done", "underrun", "crc_sent", "end_sent", "in_crc", "time_crc", "wait_ser", "pull_busy"]
+EVENTS = ["start", "abort", "done", "underrun", "crc_sent", "end_sent", "in_crc", "time_crc", "wait_ser", "pull_busy",
+          "refill_blocked", "pull_not_ready", "under_not_ready"]
 OPNAMES = ["jmp", "wait", "in", "out", "push/pull", "mov", "set", "time"]
 
 
@@ -125,7 +126,8 @@ def run_verilog(tests):
     srcs = [os.environ.get("ENGINE_V", os.path.join(ROOT, "src", "engine.v")),
             os.environ.get("SER_V", os.path.join(ROOT, "src", "serialiser.v")),
             os.environ.get("CRC_V", os.path.join(ROOT, "src", "crc32.v")),
-            os.path.join(ROOT, "src", "prog_mem.v"), os.path.join(ROOT, "test", "tb_cosim.v")]
+            os.path.join(ROOT, "src", "prog_mem.v"), os.path.join(ROOT, "src", "fifo_mem.v"),
+            os.path.join(ROOT, "test", "tb_cosim.v")]
     flags = []
     if os.environ.get("USE_SRAM"):          # the real IHP SRAM block, with IHP's own simulation model
         flags = ["-DUSE_SRAM", "-DFUNCTIONAL"]

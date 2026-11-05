@@ -11,6 +11,7 @@ set_global_assignment -name VERILOG_FILE ../../src/engine.v
 set_global_assignment -name VERILOG_FILE ../../src/serialiser.v
 set_global_assignment -name VERILOG_FILE ../../src/crc32.v
 set_global_assignment -name VERILOG_FILE ../../src/prog_mem.v
+set_global_assignment -name VERILOG_FILE ../../src/fifo_mem.v
 set_global_assignment -name VERILOG_FILE ../../src/glitch_filter.v
 set_global_assignment -name VERILOG_FILE chip_c4.v
 set_global_assignment -name SDC_FILE chip_c4.sdc

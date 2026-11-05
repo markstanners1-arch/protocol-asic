@@ -14,6 +14,8 @@
 6. The CRC unit in IN mode: one bit per IN, in crc, time crc reset, checked against a Modbus CRC-16 reference; a multi-bit IN
    feeds its first bit only.
 7. An engine without the serialiser: mov ser does nothing, wait 0, ser passes, the FIFO is 4 deep, the CRC unit still works.
+8. Engine 0's TX FIFO head register: a word pushed into the empty FIFO is taken by PULL two clocks after the push clock
+   (one on a 4-deep FIFO), three when the host also pushes in the next clock; the level counts the word at once.
 Run:  python model/test_serialiser.py [quick]     (quick skips the 16.4 ms link-pulse wait)
 """
 import os, sys, zlib
@@ -240,9 +242,10 @@ def test_stream_and_underrun():
     check("every streamed word intact", words_le(got), words)
     # 66 words with 64 supplied: the 64 go out, then the line is released and the underrun flag set
     eng = Engine(prog, cfg)
-    eng.tx_put(66); eng.clock(0)
+    eng.tx_put(66); eng.clock(0); eng.clock(0)      # a clock without a push: the count reaches the head
     for w in words[:64]:
-        eng.tx_put(w); eng.clock(0)
+        check_push = eng.tx_put(w); eng.clock(0)
+        assert check_push, "a push was refused"
     levels = []
     for t in range(64 * 32 * 4 + 200):
         eng.clock(0)
@@ -325,6 +328,23 @@ def test_plain_engine():
           (eng.ser_busy, eng.pc, eng.osr, len(eng.txf), eng.pins_out), (False, 5, 0x1234, 0, 0))
 
 
+def test_fifo_head():
+    prog = assemble("pull block; halt: jmp halt".replace("; ", chr(10)))
+    for ser, pushes, want in ((True, [0x1111], 2), (False, [0x1111], 1), (True, [0x1111, 0x2222], 3)):
+        eng = Engine(prog, Config.for_program(prog, ser=ser))
+        took, levels = None, []
+        for t in range(6):
+            if t < len(pushes):
+                eng.tx_put(pushes[t])
+            eng.clock(0)
+            levels.append(len(eng.txf))
+            if took is None and eng.osr == 0x1111:
+                took = t
+        check(f"{'64' if ser else '4'}-word FIFO, {len(pushes)} push(es) from clock 0: PULL takes the first word in clock",
+              took, want)
+        check("... the level after clocks 0 and 1", levels[:2], [1, len(pushes)] if want > 1 else [1, 0])
+
+
 if __name__ == "__main__":
     test_ethernet(0)
     test_ethernet(1)
@@ -334,5 +354,6 @@ if __name__ == "__main__":
     test_abort()
     test_crc_in_mode()
     test_plain_engine()
+    test_fifo_head()
     print("PASS" if not fails else f"FAIL: {len(fails)} checks: {fails}")
     sys.exit(1 if fails else 0)

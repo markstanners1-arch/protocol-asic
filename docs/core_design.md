@@ -203,8 +203,16 @@ Engine 0 has a **bit-cell serialiser** (`src/serialiser.v`) and a 64-word TX FIF
 | CRC unit, per engine | 32-bit shift register with an XOR per bit under a gated polynomial (the reflected form), fed by IN or by the serialiser | 32 |
 | CRC settings, per engine | CRCPOLY and CRCINIT, 32 bits each | 64 |
 
-Engine 0's TX FIFO is 64 x 16 flip-flops (engines 1 and 2 keep 4 words), so a minimum Ethernet frame (34 words with
+Engine 0's TX FIFO is 64 x 16 (engines 1 and 2 keep 4 words of flip-flops), so a minimum Ethernet frame (34 words with
 the preamble; the FCS comes from the CRC unit) is in the chip before its first bit goes out.
+
+Engine 0's TX FIFO is a one-port memory (`src/fifo_mem.v`: 64 x 16 flip-flops by default, IHP's
+`RM_IHPSG13_1P_64x16_c2` with `+define+USE_SRAM`, both reading on the clock) behind an arbiter and a head register: a
+6-bit write pointer, a 6-bit read pointer, a 7-bit count and a head-valid flip-flop. A host push writes the memory and
+has the port; on a clock without a push, an empty or departing head is refilled from the memory. PULL and the
+serialiser take the head. The head word is captured into a 16-bit register on the clock after each read, so it does
+not depend on the memory output holding between reads. Exact timing: `docs/isa.md`, "Engine 0's TX FIFO". The FPGA
+builds use the flip-flop memory.
 
 The FPGA wrappers take the parameters `SER0`, `CRC` and `TXDEPTH0` (`src/chip.v`). The MachXO3L kit and the Cyclone IV
 board build with `SER0 = 0, CRC = 0, TXDEPTH0 = 4`: the v0.2 engines (MOV ser and TIME 5 do nothing, IN source 7 and
