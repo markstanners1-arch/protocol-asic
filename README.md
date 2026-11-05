@@ -715,3 +715,7 @@ That's a driver change on the PC, so Mark does it himself. Then:
   front of a DS3231 with a running clock, two AT24Cs and a DAC): every path runs and every check passes, which proves the scripts'
   logic and the register maps, not the bench. Wiring sheet sections 11-13 and the PDF, section 7 updated (holes 14-17 shared with
   the flash; 10 and 13 gain the two I2C modules); `whatis.py` guesses 0x57, 0x60-0x63 and 0x68 by name.
+- 5 Nov 2026 (morning): **Mojo v3 (Spartan-6 LX9) brought up as a fourth FPGA board.** Xilinx ISE 14.7 WebPACK installed under
+  WSL (Ubuntu); `fpga/mojo/load.py` loads a bitstream through the board's own ATmega32U4 over USB serial, into the FPGA
+  (volatile) or the flash with verify. A blink design built with xst/ngdbuild/map/par/bitgen (all constraints met at
+  50 MHz) and loaded into the FPGA: the eight LEDs count. The chip has not yet been built for it.
