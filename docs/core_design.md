@@ -93,7 +93,7 @@ Every instruction is 16 bits: `[15:13]` opcode, `[12:8]` delay / side-set, `[7:0
 | 6 | `SET dst, value` | put a 5-bit number into pins / pin directions / X / Y |
 | 7 | **`TIME`** (new) | stopwatch control: start, or capture the elapsed ticks into X or the ISR. Combined with `WAIT`, it measures how long a pin took to change |
 
-Ops 0-6 follow the RP2040 PIO closely, on purpose. It's a proven design, and the judges will know it.
+Ops 0-6 follow the RP2040 PIO closely, on purpose. It's a proven design.
 What's ours is op 7, the WAIT timeout, input conditioning on every pin, and the way we verify it.
 
 ## Two programs on paper

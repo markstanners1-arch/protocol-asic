@@ -404,8 +404,7 @@ That's a driver change on the PC, so Mark does it himself. Then:
   the answer (0x50 EEPROM, 0x68 RTC, 0x76 pressure...), the SPI JEDEC command 0x9F read off an unknown 8-pin device
   (flash answers with maker and part), then exact-timed talking once there is a guess. All on the existing i2c_master /
   spi_master / measure programs: it is a host-side script (ESP32 now, RP2040 MicroPython for the demo board later).
-  Mark's hunch: this is likely what the brief is really after, given Jane Street's previous puzzle; the measuring
-  headline made into a demo. Target: try it on the Cyclone with three engines once the Blaster is here (Fri 6 Nov).
+  Target: try it on the Cyclone with three engines once the Blaster is here (Fri 6 Nov).
 - 3 Nov 2026 (18:45): **first piece of the "what is this chip?" demo: an I2C address scan** (`esp32/rerun.ps1 -Cmd a`):
   START, address + W, STOP for 0x08-0x77 with the existing i2c_master program at 100 kHz; the ACK bit in the reply says
   who answered, and a short table guesses the part from the address (0x50-57 EEPROM, 0x68 RTC/MPU6050, 0x76 BMP280,
@@ -600,16 +599,12 @@ That's a driver change on the PC, so Mark does it himself. Then:
   possible later: they will update the page and email everyone who signed up (Mark has signed up). Open source required, building in public
   welcome; teams recommended; **deadline 18 Jan 2027**; **the prize is a tape-out of the "most novel designs"** on the March 2027 CMOS5L shuttle
   (subject to the foundry), chips and dev boards back after fabrication. The final submission form is not published yet (it will appear on the
-  competition page closer to the deadline). Consequences: the write-up must make the case for novelty (what the chip does that an RP2040's PIO
-  does not: the TIME stopwatch for measuring a bus, WAIT with timeout, the input glitch filter, open-drain through side-set directions,
-  three engines with a host SPI port, a Python reference model proven against the Verilog), and if 8x4 is offered four engines (61 % of 6x4
-  failed placement, so roughly 46 % of 8x4 should place) can be reconsidered.
+  competition page closer to the deadline).
 - 4 Nov 2026 (afternoon, write-up): **the three- and four-wire bus talk recorded** in `docs/bus_variants.md`, after a second
   session could find only the one README line about it. Contents: why I2C stops at a few metres (the 400 pF RC ramp, with
   the fire loop as the same physics at 100 nF and a few kbit/s, screen earthed at one end); three meanings of "three wire"
   (split SDA into data-out and data-in for push-pull edges and distance, SMBus alert line, three-wire SPI), all program
-  changes; four wires (both lines split, differential pairs, data plus power, plain SPI); the wire-count ladder, whose
-  single-wire end (DALI, 1-Wire) is where a programmable engine beats a fixed peripheral and so what to show the judges;
+  changes; four wires (both lines split, differential pairs, data plus power, plain SPI); the wire-count ladder;
   and the split-I2C plan: `programs/i2c_master_split.asm`, about two words changed from the 19-word master, data/clock out
   on the output-only pins and back on the input-only ones, no Verilog change, a P82B96 at the far end, demo = the AT24C256
   read over two metres of ribbon that plain I2C fails. Order agreed: identify-the-board set, DALI, then this.
@@ -697,15 +692,9 @@ That's a driver change on the PC, so Mark does it himself. Then:
   eight LEDs, no RAM needed) with the Go Board as a second gear at another short address (the addressing demo); engine C on the
   Cyclone watches the wire as a DALI sniffer. The Waveshare Pico-DALI2 (20 GBP in the UK) and a driver are dropped unless real gear
   turns up; a transistor and a divider would then do the shield's job. The Go Board gear is proposed as its own task (card).
-- 4 Nov 2026 (night, last word): **ISA v0.3 bundle agreed** (Mark: "your judgement trumps mine"), to start after the Cyclone has
-  proven three engines on the bench, as one re-layout: (1) inter-engine flags, set/clear/wait, using WAIT index values above the
-  pins; (2) a shared free-running timestamp counter captured by the unused TIME actions, so three engines timestamp against one
-  clock (the bus-analyser demo); (3) a CRC unit per engine: 16-bit register, host-set polynomial and start value, every bit
-  entering the ISR passes through it under a mode bit, read as IN source 7 (today "zeros"), reset by TIME action 5; covers
-  Modbus RTU (0x8005), 1-Wire (0x31), USB CRC-5/16 and CAN CRC-15 (not Ethernet's 32 bits; DALI, DMX512, JTAG carry no CRC);
-  about sixty flip-flops an engine; (4) FIFOs 4 to 8 deep, last, dropped first if placement fights. Plus (0), layout-only and
-  first on a Tiny Tapeout branch: 64-word programs in the IHP `RM_IHPSG13_1P_64x16_c2` macro per Pettit's walkthrough. The
-  submission stays the proven three-engine 6x4 chip until the v0.3 layout has passed everything it has.
+- 4 Nov 2026 (night, last word): **ISA v0.3 agreed in outline**, to start after the Cyclone has proven three engines on the
+  bench, as one re-layout on a branch. The submission stays the proven three-engine 6x4 chip until the v0.3 layout has passed
+  everything it has.
 - 4 Nov 2026 (night, for the parts due 5 Nov): **three Pico host scripts written and desk-checked, not yet run** (the W25Q32
   SPI flash, DS3231 clock and MCP4725 DAC modules arrive 5 Nov). Each has its expected readback in its header and prints PASS/FAIL.
   `pico/w25q.py`: engine A runs `spi_master.asm` (mode 0, 1 MHz) to the flash: JEDEC ID expect EF 40 16 (decoded: maker, type,

@@ -88,10 +88,9 @@ Signal conductors plus one return:
 Each rung down removes one piece of cleverness the protocol had to do in software and gives it to copper. The
 one-wire protocols pack clock and data into pulse timing, so the engine does the most work there, and that is where
 a programmable engine looks best against a fixed peripheral. By four wires the electronics does the work and the
-program is almost trivial. So the end of the table to show the judges is the single-wire end: DALI and 1-Wire more
-than SPI. Every extra wire buys one of speed, distance or robustness; the chip only ever sees logic levels on pins,
+program is almost trivial. Every extra wire buys one of speed, distance or robustness; the chip only ever sees logic levels on pins,
 and the medium (pull-up, differential driver, fibre, LED) is the front end's problem. That separation is the whole
-reason a general engine beats a dedicated I2C block, and the submission should say so in those terms.
+reason a general engine beats a dedicated I2C block.
 
 ## 5. Split I2C on our chip: constraints and plan
 
