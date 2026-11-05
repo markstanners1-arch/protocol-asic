@@ -9,3 +9,5 @@ fpga/*/incremental_db/
 *.msi
 *.rar
 CLAUDE.local.md
+private/
+__pycache__/
