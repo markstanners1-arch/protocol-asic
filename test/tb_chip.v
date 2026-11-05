@@ -3,10 +3,15 @@
 // Engine B: measures the bit time of the first 'U' on the same pin, pushes it to its RX FIFO.
 // Then: FIFO reads, pin conflicts, the glitch filter, I2C (A master, B watching, a bench slave that ACKs), and the
 // multi-engine additions of 3 Nov 2026 (any NENG): the ID register, the last engine alone, the priority chain, numbers past the last.
+// Then the serialiser (ISA v0.3, 5 Nov 2026): engine A sends a minimum Ethernet frame on uo_out[2]/[3] (engine pins 8, 9) from a
+// count and 34 words pushed through the port; the bench decodes the Manchester pair and checks every byte and the FCS.
 `timescale 1ns/1ps
 `default_nettype none
 module tb_chip;
     parameter NENG = 3;                // engines in the chip under test (3 = ASIC and Cyclone; 2 = the kit): -P tb_chip.NENG=2
+    parameter SER0 = 1;                // engine 0 has the serialiser (0 = the kit's default build: the serialiser checks
+    parameter CRC  = 1;                //   become "its registers read 0"); CRC units present
+    parameter TXDEPTH0 = 64;           // engine 0's TX FIFO depth
     reg clk = 0; always #5 clk = ~clk;
     reg rst_n = 0;
     reg cs_n = 1, sck = 0, mosi = 0;
@@ -16,7 +21,7 @@ module tb_chip;
     reg sda_slave_low = 0;             // the bench's I2C slave pulling SDA (uio[1]) low for an ACK
     reg scl_slave_low = 0;             // ... and stretching the clock (holding SCL, uio[0], low)
     wire [7:0] uio_in = ((uio_out & uio_oe) | ~uio_oe) & ~{6'd0, sda_slave_low, scl_slave_low};
-    protocol_chip #(.NENG(NENG)) dut (.ui_in({ui_hi, mosi, sck, cs_n}), .uo_out(uo_out), .uio_in(uio_in),
+    protocol_chip #(.NENG(NENG), .SER0(SER0), .CRC(CRC), .TXDEPTH0(TXDEPTH0)) dut (.ui_in({ui_hi, mosi, sck, cs_n}), .uo_out(uo_out), .uio_in(uio_in),
                        .uio_out(uio_out), .uio_oe(uio_oe), .ena(1'b1), .clk(clk), .rst_n(rst_n));
     wire miso = uo_out[0];
     wire irq  = uo_out[1];
@@ -24,7 +29,7 @@ module tb_chip;
     localparam HALF = 8;               // SCK half period in chip clocks: SCK = clk/16
     integer LATE = 0;                  // +late=1: sample MISO at the falling edge, like the ESP32
     integer errors = 0;
-    reg [15:0] init [0:265];
+    reg [15:0] init [0:298];
 
     // ---- a minimal I2C slave on uio[0] (SCL) / uio[1] (SDA): after a START it ACKs every byte, until STOP,
     //      and stretches the clock (holds SCL low 90 clocks) after the 4th bit and after each ACK, as a slow slave might
@@ -89,6 +94,13 @@ module tb_chip;
             else $display("ok:   %0s = %0d", what, got);
         end
     endtask
+
+    // ---- record TD+ (uo_out[2]) on every clock the serialiser drives the pair (TD+ and TD- differ): at SERDIV 0 one sample
+    //      is one half-bit. Stops when the pair goes idle again.
+    reg        eth_rec = 0;  integer nrec = 0;  reg td_hist [0:2047];
+    always @(posedge clk) begin
+        if (eth_rec && uo_out[2] != uo_out[3] && nrec < 2048) begin td_hist[nrec] <= uo_out[2]; nrec <= nrec + 1; end
+    end
 
     // ---- watch the UART line on uio[0] like a terminal would (40 clocks per bit)
     reg [8*16-1:0] text = 0; integer nchars = 0; integer b; reg [7:0] c; reg uart_watch = 1;   // off once the pin is reused
@@ -349,6 +361,101 @@ module tb_chip;
                 read_reg(L[2:0], 6'h28, st); check("last engine still running", st[8], 1'b1);
             end
             for (j = 0; j < NENG; j = j + 1) write_reg(j[2:0], 6'h20, 0);
+        end
+
+        // cluster field, command bits [11:6] (5 Nov 2026): cluster 0 is the chip; any other number reads 0 and ignores writes
+        begin : clusters
+            reg [15:0] d;
+            write_reg(0, 6'h21, 16'h1234);
+            spi_begin({1'b0, 3'd0, 6'd1, 6'h21}); spi_word(16'h5555, d); spi_end;      // write CLKDIV via cluster 1
+            read_reg(0, 6'h21, w); check("cluster 1 write ignored: A CLKDIV unchanged", w, 16'h1234);
+            spi_begin({1'b1, 3'd0, 6'd1, 6'h21}); spi_word(16'd0, w); spi_end;         // read CLKDIV via cluster 1
+            check("cluster 1 reads 0 (CLKDIV)", w, 0);
+            spi_begin({1'b1, 3'd0, 6'd63, 6'h2A}); spi_word(16'd0, w); spi_end;        // read ID via cluster 63
+            check("cluster 63 reads 0 (ID)", w, 0);
+            spi_begin({1'b0, 3'd0, 6'd2, 6'h29}); spi_word(16'h00FF, d); spi_end;      // write FILTER via cluster 2
+            read_reg(0, 6'h29, w); check("cluster 2 write ignored: FILTER unchanged", w, 0);
+            read_reg(0, 6'h2A, w); check("cluster 0 still answers (ID)", w, 16'h0020 | NENG);
+            write_reg(0, 6'h21, 0);
+        end
+
+        // serialiser (5 Nov 2026): engine A runs eth_tx.asm, TD+ = engine pin 8 (uo_out[2]), TD- = pin 9 (uo_out[3]).
+        if (!SER0 || !CRC || TXDEPTH0 < 64) begin : no_ser       // a build without the serialiser or CRC units
+            write_reg(0, 6'h2B, 16'h107F); write_reg(0, 6'h2C, 16'h1234); write_reg(0, 6'h2D, 16'hA001);
+            read_reg(0, 6'h2B, w); check("A SERCFG (built without the serialiser: reads 0)", w, SER0 ? 16'h107F : 16'd0);
+            read_reg(0, 6'h2D, w); check("A CRCPOLY lo (reads 0 without CRC units)", w, CRC ? 16'hA001 : 16'd0);
+            read_reg(0, 6'h28, st); check("A STATUS serialiser bits 0", st[15:14], 2'b00);
+        end else begin : ethernet
+            integer j, k, nbits; reg [15:0] d; reg [7:0] gotb; reg bad;
+            reg [15:0] fw [0:33];           // the frame as words: preamble + SFD, then 60 bytes, low byte first
+            reg [7:0]  want [0:71];         // what must appear on the wire: 68 bytes then the FCS acf725d4 (zlib.crc32)
+            fw[0] = 16'h5555; fw[1] = 16'h5555; fw[2] = 16'h5555; fw[3] = 16'hd555;
+            fw[4] = 16'hffff; fw[5] = 16'hffff; fw[6] = 16'hffff; fw[7] = 16'h0002; fw[8] = 16'h0000; fw[9] = 16'h0100; fw[10] = 16'hb588;
+            for (j = 0; j < 23; j = j + 1) begin gotb = 8'h30 + 2 * j[7:0]; fw[11 + j] = {gotb + 8'd1, gotb}; end   // payload 0x30 .. 0x5d
+            for (j = 0; j < 34; j = j + 1) begin want[2 * j] = fw[j][7:0]; want[2 * j + 1] = fw[j][15:8]; end
+            want[68] = 8'hac; want[69] = 8'hf7; want[70] = 8'h25; want[71] = 8'hd4;
+            for (j = 0; j < NENG; j = j + 1) write_reg(j[2:0], 6'h20, 0);
+            spi_begin({1'b0, 3'd0, 6'd0, 6'h00});
+            for (j = 0; j < 32; j = j + 1) spi_word(init[266 + j], d);
+            spi_end;
+            spi_begin({1'b0, 3'd0, 6'd0, 6'h21});                      // clkdiv 0, wrap, out_base 8 count 2 set_base 8, set_count 2 + out_right, incfg 0
+            spi_word(16'd0, d); spi_word(init[298], d); spi_word(16'd8 | (16'd2 << 5) | (16'd8 << 10), d); spi_word(16'd2 | (16'd1 << 11), d); spi_word(16'd0, d);
+            spi_end;
+            spi_begin({1'b0, 3'd0, 6'd0, 6'h2B});                      // SERCFG, SERDIV, CRCPOLY lo/hi, CRCINIT lo/hi in one burst
+            spi_word(16'h107F, d); spi_word(16'd0, d); spi_word(16'h8320, d); spi_word(16'hEDB8, d); spi_word(16'hFFFF, d); spi_word(16'hFFFF, d);
+            spi_end;
+            read_reg(0, 6'h2B, w); check("A SERCFG read back", w, 16'h107F);
+            read_reg(0, 6'h2E, w); check("A CRCPOLY hi read back", w, 16'hEDB8);
+            write_reg(1, 6'h2B, 16'h107F); write_reg(1, 6'h2C, 16'h1234); write_reg(1, 6'h2D, 16'hA001);
+            read_reg(1, 6'h2B, w); check("B SERCFG reads 0 (no serialiser)", w, 0);
+            read_reg(1, 6'h2C, w); check("B SERDIV reads 0", w, 0);
+            read_reg(1, 6'h2D, w); check("B CRCPOLY lo read back (every engine has a CRC unit)", w, 16'hA001);
+            read_reg(0, 6'h2B, w); check("A SERCFG untouched by B's write", w, 16'h107F);
+            write_reg(0, 6'h20, 1); repeat (100) @(posedge clk);
+            check("pair idle: TD+ and TD- driven low", {14'd0, uo_out[3:2]}, 0);
+            read_reg(0, 6'h28, st); check("A STATUS: running, not busy, no underrun", {st[15:14], st[8]}, 3'b001);
+            read_reg(0, 6'h33, w);  check("A SERSTAT: TX level 0", w, 0);
+            nrec = 0; eth_rec = 1;
+            spi_begin({1'b0, 3'd0, 6'd0, 6'h26});                      // the frame: count, then 34 words, one burst
+            spi_word(16'd34, d);
+            for (j = 0; j < 34; j = j + 1) spi_word(fw[j], d);
+            spi_end;
+            read_reg(0, 6'h28, st); check("A STATUS busy while the frame goes out", st[14], 1'b1);
+            repeat (2000) @(posedge clk);
+            eth_rec = 0;
+            read_reg(0, 6'h28, st); check("A STATUS after the frame: not busy, no underrun, running", {st[15:14], st[8]}, 3'b001);
+            read_reg(0, 6'h31, w);  check("A CRC lo after the frame (the FCS before complementing)", w, 16'h0853);
+            read_reg(0, 6'h32, w);  check("A CRC hi", w, 16'h2BDA);
+            nbits = 34 * 16 + 32;
+            check("half-bits on the wire: 2 per bit + 6 of TP_IDL", nrec, 2 * nbits + 6);
+            bad = 0;
+            for (j = 0; j < nbits && !bad; j = j + 1) begin
+                if (td_hist[2 * j] == td_hist[2 * j + 1]) begin
+                    $display("FAIL: bit %0d: both half-bits %0d (not Manchester)", j, td_hist[2 * j]); errors = errors + 1; bad = 1;
+                end
+            end
+            for (j = 0; j < 72 && !bad; j = j + 1) begin
+                for (k = 0; k < 8; k = k + 1) gotb[k] = td_hist[2 * (8 * j + k) + 1];
+                if (gotb !== want[j]) begin
+                    $display("FAIL: byte %0d on the wire = %h, expected %h", j, gotb, want[j]); errors = errors + 1; bad = 1;
+                end
+            end
+            if (!bad) $display("ok:   all 72 bytes decoded from the pair: preamble, SFD, header, payload, FCS");
+            for (j = 0; j < 6; j = j + 1) if (td_hist[2 * nbits + j] !== 1'b1) bad = 1;
+            check("TP_IDL: the last 6 half-bits high", {15'd0, bad}, 0);
+            // underrun: a count of 65 with 64 words supplied; the serialiser starts when the FIFO is full and runs dry
+            spi_begin({1'b0, 3'd0, 6'd0, 6'h26});
+            spi_word(16'd65, d);
+            for (j = 0; j < 64; j = j + 1) spi_word(fw[j % 34], d);
+            spi_end;
+            repeat (64 * 32 + 200) @(posedge clk);
+            read_reg(0, 6'h28, st); check("A STATUS after 64 of 65 words: underrun, not busy", st[15:14], 2'b10);
+            read_reg(0, 6'h33, w);  check("A SERSTAT: underrun bit, FIFO empty", w, 16'h0200);
+            check("pair released after the underrun", {14'd0, uo_out[3:2]}, 0);
+            spi_begin({1'b0, 3'd0, 6'd0, 6'h26}); spi_word(16'd1, d); spi_word(16'haaaa, d); spi_end;   // a one-word frame clears it
+            repeat (200) @(posedge clk);
+            read_reg(0, 6'h28, st); check("A STATUS after the next frame: flag cleared", st[15:14], 2'b00);
+            write_reg(0, 6'h20, 0);
         end
 
         if (errors == 0) $display("PASS: whole chip, end to end through the SPI host port");

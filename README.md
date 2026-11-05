@@ -27,6 +27,7 @@ Tools: OSS CAD Suite 2026-11-02, unpacked at `D:\Tools\oss-cad-suite`
     ./run.sh size     # rough cell count per module
     python model/compare_uart.py   # model running programs/uart_tx.asm vs uart_tx.v, every clock
     python model/test_measure.py   # TIME stopwatch measuring a UART bit time
+    python model/test_serialiser.py   # serialiser + CRC unit on the model, Manchester decoded back, FCS against zlib
     python model/cosim.py 1000 400 11   # Verilog engine vs model: 1000 random programs x 400 clocks, every clock
     USE_SRAM=1 python model/cosim.py    # same, with IHP's SRAM block as program memory
     bash test/run_chip.sh               # whole chip, end to end, driven only through the SPI host port
@@ -735,3 +736,84 @@ That's a driver change on the PC, so Mark does it himself. Then:
   4 problems. On the way: the first ID reads were garbage (0x39BC, 0x9CCE ...) because the Mojo had restarted into its
   flash design (LED PWM on the MISO and IRQ pins, seen by `pico/lead_probe.py`); reloaded, both lines steady, then PASS.
   `fpga/mojo/pin_finder.v`: a bench tool that shows on the shield display the FPGA pin a grounded lead touches.
+- 5 Nov 2026 (branch `cluster`): **engine / cluster / chip hierarchy made explicit, no behaviour change.** New `src/cluster.v`
+  (`NENG` engines populated of `NSLOT = 4` slots, `NPIN = 32` pin numbers): the per-engine setting registers, the engines, the pin
+  mux with "lowest engine wins" and the IRQ OR moved there from `src/chip.v`, which keeps the SPI host port, the synchronisers and
+  glitch filter, FILTER and ID, and instantiates `NCLUSTER = 1` clusters. Host command bits `[11:6]` now decode as the cluster
+  number (`src/host_spi.v` latches them): cluster 0 is the chip; 1-63 read 0 for every register and ignore writes. Reads use the
+  compare directly; write and pop strobes use a copy registered one clock later (a strobe follows the command by at least 128
+  clocks), because the direct form put the 6-bit compare into every program-word enable and cost about 245 LUTs on the kit. The
+  register map, ID value, timing and pin assignment are unchanged; `test/tb_chip.v` gains five checks on cluster numbers 1, 2 and 63.
+  Tests: cosim 1000 x 400 clocks at seeds 1, 2, 3 and seed 4 with `USE_SRAM=1`, every clock identical; `test/run_chip.sh` PASS at
+  `NENG=3`, `NENG=2` and `LATE=1`; `./run.sh test` PASS. Planted in a copy of `cluster.v` (`CHIP_SRC_OVERRIDE`): engine 1's pin
+  bank rotated by 8 (B's bit-time measurement read 0, IRQ 0: caught at the first check) and CLKDIV taken from the mirrored slot
+  (UART garbled, B measured 8 not 40: caught); both removed. Size (`./run.sh size`, which now reads every source and takes the
+  module name from the file, since it stopped at `chip.v` before): whole chip 17,428 cells on main, 17,351 after (host_spi 179 to
+  185); `cluster` alone 19,926 because all 32 pin numbers are live outside the chip. MachXO3L kit (`fpga/machxo3/build.sh`, two
+  engines, no load): 5,922 of 6,864 LUTs (86 %) and 2,079 flip-flops on main, 5,982 (87 %) and 2,087 after; fmax at the default
+  seed 30.14 MHz before, 27.02 after; seeds 1-4 gave 28.96-30.81 MHz before and 26.47-29.49 after, all PASS at 12 MHz, critical
+  path inside engine 0 (INCFG to the stopwatch carry chain) in both. `fpga/cyclone4/chip_c4.qsf` lists the new file; the Tiny
+  Tapeout repo's `src/` copy has not been refreshed.
+- 5 Nov 2026 (branch `serialiser`): **ISA v0.3 part: bit-cell serialiser and 64-word TX FIFO on engine 0, a 32-bit CRC unit on
+  every engine.** New `src/serialiser.v` (16-bit shift register fed from the TX FIFO, half-bit divider SERDIV + 1 clocks, NRZ or
+  Manchester, differential option on `out_base + 1`, CRC append optionally complemented, end marker 6 half-bits high, bit order
+  from `out_right`) and `src/crc32.v` (reflected form, host-set polynomial and start value). Engine encodings: `MOV` destination 3
+  (`mov ser, src`: start a frame of `src` words, 0 stops), `WAIT` number 24 (serialiser busy, `wait 0, ser`), `IN` source 7 (CRC
+  low 16 bits), `TIME` action 5 (`time crc reset`); `MOV status` bits 8-9 busy and underrun. Host registers 0x2B SERCFG ([12:10]
+  CRC skip words, so the FCS leaves out the preamble), 0x2C SERDIV, 0x2D-0x30 CRCPOLY and CRCINIT, 0x31-0x32 CRC, 0x33 SERSTAT
+  (full TX level); STATUS bits 14 busy and 15 underrun, its TX field saturating at 7; ID unchanged. Corner rules in
+  `docs/isa.md`. `programs/eth_tx.asm` (16 words): a frame from a count and its words, then a 100 ns link pulse every 16.4 ms.
+  Tests: `model/test_serialiser.py` PASS (Ethernet minimum frame at SERDIV 0 and 1 decoded from the pair, FCS equal to
+  `zlib.crc32`, TP_IDL, link pulse at 16.39 ms; NRZ with CRC-16/MODBUS appended; MSB-first Manchester at SERDIV 4999; 70 words
+  streamed through 64; underrun at word 65; abort; CRC IN mode against CRC-16/MODBUS; an engine without the serialiser); every
+  earlier model test PASS. Cosim now runs two engines (with and without the serialiser) and randomises SERCFG, SERDIV, CRCPOLY,
+  CRCINIT: 1000 x 400 clocks at seeds 1, 2, 3 and seed 4 with `USE_SRAM=1`, plus 100 x 6000 clocks at seed 5, every clock
+  identical (pins, FIFOs, CRC, busy and underrun compared). `test/run_chip.sh` PASS at `NENG=3`, `NENG=2`, `LATE=1`, with a
+  whole-chip Ethernet transmit (count and 34 words in one SPI burst, all 72 bytes and the FCS decoded at uo_out[2]/[3], TP_IDL,
+  CRC registers, an underrun and its clearing) and the kit's build (`SER0=0 CRC=0 TXDEPTH0=4 NENG=2`). Planted bugs: Manchester
+  halves swapped in the model (8 checks of `test_serialiser.py` failed); in `serialiser.v`, the CRC not complemented (whole-chip
+  test: FCS byte 0x53 for 0xAC; cosim: 8 of 1000 tests) and the end marker one half-bit short (whole-chip test: 1157 half-bits for
+  1158; cosim: 18 of 1000 tests); all removed. Size (`./run.sh size`, generic cells): whole chip 17,351 before, 22,576 after;
+  engine without the serialiser 5,968 to 6,108; serialiser 559, CRC unit 132. MachXO3L kit: two engines with the serialiser do
+  not fit (64-word FIFO 7,688 of 6,864 LUTs; 32 words 7,156; 16 words 6,937). The kit has two named builds (no board loaded):
+  `bash fpga/machxo3/build.sh` (default, `build/chip.bit`): two engines, ID 0x0022, no serialiser, no CRC units, 4-word TX
+  FIFOs (the v0.2 engines; `SER0=0 CRC=0 TXDEPTH0=4`): 5,953 LUTs (86 %), 2,087 flip-flops, fmax 28.74 MHz.
+  `bash fpga/machxo3/build.sh ser` (`build/chip_ser.bit`): one engine, ID 0x0021, with the serialiser, the CRC unit and the
+  64-word TX FIFO: 4,785 LUTs (69 %), 2,328 flip-flops, fmax 29.63 MHz. Both pass at the kit's 12 MHz; `load` after either
+  puts it in SRAM. `fpga/cyclone4/chip_c4.v` uses the default build's parameters (not rebuilt in Quartus). The Tiny Tapeout repo's
+  `src/` copy has not been refreshed.
+- 5 Nov 2026 (branch `serialiser-bench`): **serialiser on the Mojo v3, frames decoded from an analyser capture.**
+  `fpga/mojo/build.sh` options: default (three v0.2 engines, `NENG=3 SER0=0 CRC=0 TXDEPTH0=4`, ID 0x0023): 4,242 of 5,720
+  LUTs (74 %), 1,276 slices (89 %), 1,104 flip-flops, fmax 54.7 MHz. `ser` (`build/chip_ser.bin`, two engines, serialiser,
+  CRC units, 64-word TX FIFO on engine 0, `NENG=2 SER0=1 CRC=1 TXDEPTH0=64`, ID 0x0022): 3,815 LUTs (66 %), 1,191 slices
+  (83 %), 1,087 flip-flops, fmax 56.8 MHz, timing met at 50 MHz. `ser clk40` (`build/chip_ser_40.bin`): the same with the
+  chip clock at 40 MHz from a DCM_SP (50 x 4 / 5, chip held in reset until LOCKED; `chip_mojo.v` parameter `CLK40`):
+  3,834 LUTs, 1,184 slices, 1,090 flip-flops, derived 25 ns constraint met at 17.831 ns. `chip.ucf` clock net renamed
+  `clk_in`; no pin moved. `src/engine.v`: `$clog2` in the TX FIFO width written as a ternary (XST 14.7 rejects it): cosim
+  1000 x 400 at seed 1 and seed 4 `USE_SRAM=1` identical, `test/run_chip.sh` PASS at default, `NENG=2`, `LATE=1`.
+  TD+ = engine pin 1 (shield hole 34), TD- = engine pin 2 (hole 35), same row. New: `programs/ser_tx.asm` (5 words: pull
+  a count, `mov ser, osr`, wait; works MSB first, where `eth_tx.asm`'s FIFO poll `out x, 4` needs `out_right`);
+  `pico/eth_tx.py` (MODE eth / dali / full / leads; settings by `pico/run.ps1 -Pre`, new); `pico/regression.py` takes
+  `CHIP_HZ` and `ENGINES` from `-Pre`; `docs/bench/decode_manchester.py` (reads the .sr only: frame = the longest run with
+  either line high, bit clock from a line fit to the 56 preamble mid-bit edges or from the half-bit edge spacings,
+  Manchester by mid-bit edges, TD- against TD+ per sample, end marker length, `zlib.crc32` against the FCS). Decoder check
+  on a model-made capture (eth_tx.asm in `model/`, sampled at 24 MHz): PASS; planted bug (halves swapped): preamble
+  `aa..2a`, FCS fail. Bench (Mojo, Pico host, Binghe analyser CH1 hole 34, CH2 hole 35, GND row 1 outer):
+  ID 0x0022 x 5; regression `-Pre "CHIP_HZ=50_000_000; ENGINES=2"` PASS, 0 problems. Lead check (`MODE='leads'`, 24,000
+  samples a step): TD+ high / TD- low read CH1 24000 / CH2 0; reversed 0 / 24000; both low 0 / 0.
+  Ethernet, SERDIV 49 (half-bit 50 clocks = 1.000 us, 500 kbit/s), SERCFG 0x107F, CRCPOLY 0xEDB88320, CRCINIT
+  0xFFFFFFFF, out_right 1: 30 frames, SERSTAT 0 after each, chip CRC register 0x2BDA0853 each. Capture (trigger D1 rising,
+  2 M samples): frame 1158.1 us, bit 2.0000 us from the preamble, 576 bits, end marker 6.00 half-bits (6.00 us), TD- the
+  inverse of TD+ (11 of 27,795 samples equal, each beside an edge), bytes `55 x 7 d5`, destination ff:ff:ff:ff:ff:ff,
+  source 02:00:00:00:00:01, type 0x88b5, payload 30..5d (46 bytes) equal to the bytes sent, FCS on the wire `ac f7 25 d4`
+  = `zlib.crc32` 0xD425F7AC: **PASS**. Same capture, decoder with the halves swapped: FAIL (preamble, FCS, bytes).
+  DALI rate, `ser_tx.asm`, SERDIV 20832 (half-bit 20833 clocks = 416.66 us), SERCFG 0x000F (Manchester, differential,
+  end marker, no CRC), MSB first, word 0xFE51: capture half-bit 416.71 us, 16 bits `fe 51` equal to the word sent, end
+  marker 6.00 half-bits (2500.25 us), TD- the inverse of TD+: **PASS**. Saved: `docs/bench/serialiser_eth_500kbit_mojo.sr`,
+  `docs/bench/serialiser_dali_1200bit_mojo.sr`. 40 MHz (`ser clk40`): regression `CHIP_HZ=40_000_000` PASS, 0 problems
+  (B timed A's bits at 344, 696, 2080 clocks). 10 Mbit/s (`MODE='full'`, SERDIV 1, half-bit 50 ns): 96,100 frames, SERSTAT
+  0 and CRC register 0x2BDA0853 after every one. Analyser at 24 MHz: frame 57.9 us, bit 0.1000 us from the preamble;
+  decoding stops at bit 63 (50 ns half-bits are 1.2 samples): data and FCS at 10 Mbit/s not checked by the analyser.
+  Hantek, triggered on CH1: the 50 ns link pulse between frames (TD+ only); a scope view of the frame itself (trigger on
+  TD-, 100 ns bit period, TD- the mirror of TD+) is outstanding. Bench: the Mojo's USB cable and the 4-port hub gave
+  "Device Descriptor Request Failed"; the Mojo is on a front PC socket with another cable (COM15 there: `MOJO_PORT`).

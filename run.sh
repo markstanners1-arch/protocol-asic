@@ -19,9 +19,9 @@ case "${1:-test}" in
     ;;
   size)
     for f in src/*.v; do
-      top=$(basename "$f" .v)
-      echo "== $top"
-      yosys -q -p "read_verilog $f; synth -top $top -flatten; abc -g AND,NAND,OR,NOR,XOR,XNOR,MUX; tee -q -o build/stat_$top.txt stat" >/dev/null
+      top=$(grep -m1 -oE "^module +[A-Za-z0-9_]+" "$f" | awk '{print $2}')   # the module in the file (chip.v holds protocol_chip)
+      echo "== $top ($f)"
+      yosys -q -p "read_verilog $(echo src/*.v); synth -top $top -flatten; abc -g AND,NAND,OR,NOR,XOR,XNOR,MUX; tee -q -o build/stat_$top.txt stat" >/dev/null
       grep -E "^ +[0-9]+ +(cells|  \\$)" "build/stat_$top.txt"
       echo "   (budget: about 24,000 cells for 6x4 tiles)"
     done

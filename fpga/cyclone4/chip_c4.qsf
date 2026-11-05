@@ -5,8 +5,11 @@ set_global_assignment -name DEVICE EP4CE6E22C8
 set_global_assignment -name TOP_LEVEL_ENTITY chip_c4
 set_global_assignment -name PROJECT_OUTPUT_DIRECTORY build
 set_global_assignment -name VERILOG_FILE ../../src/chip.v
+set_global_assignment -name VERILOG_FILE ../../src/cluster.v
 set_global_assignment -name VERILOG_FILE ../../src/host_spi.v
 set_global_assignment -name VERILOG_FILE ../../src/engine.v
+set_global_assignment -name VERILOG_FILE ../../src/serialiser.v
+set_global_assignment -name VERILOG_FILE ../../src/crc32.v
 set_global_assignment -name VERILOG_FILE ../../src/prog_mem.v
 set_global_assignment -name VERILOG_FILE ../../src/glitch_filter.v
 set_global_assignment -name VERILOG_FILE chip_c4.v

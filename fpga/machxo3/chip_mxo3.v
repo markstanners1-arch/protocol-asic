@@ -19,7 +19,14 @@
 
 `default_nettype none
 
-module chip_mxo3 (
+module chip_mxo3 #(
+    // Default build (5 Nov 2026): two engines without the serialiser or the CRC units, 4-word TX FIFOs (the v0.2 engines).
+    // Two engines with them do not fit this board under -nolutram. "build.sh ser" builds one engine with them (see build.sh).
+    parameter NENG     = 2,
+    parameter SER0     = 0,
+    parameter CRC      = 0,
+    parameter TXDEPTH0 = 4
+) (
     input  wire       clk,          // 12 MHz
     input  wire       cs_n, sck, mosi,
     output wire       miso, irq,
@@ -33,7 +40,7 @@ module chip_mxo3 (
     always @(posedge clk) if (!rst_n) por <= por + 1'b1;
 
     wire [7:0] uo_out, uio_out, uio_oe;
-    protocol_chip #(.NENG(2)) chip (             // two engines: four do not fit this board
+    protocol_chip #(.NENG(NENG), .SER0(SER0), .CRC(CRC), .TXDEPTH0(TXDEPTH0)) chip (   // two engines: four do not fit this board
         .ui_in({ui_hi, mosi, sck, cs_n}), .uo_out(uo_out),
         .uio_in(uio), .uio_out(uio_out), .uio_oe(uio_oe),
         .ena(1'b1), .clk(clk), .rst_n(rst_n));
