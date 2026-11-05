@@ -715,3 +715,21 @@ That's a driver change on the PC, so Mark does it himself. Then:
   front of a DS3231 with a running clock, two AT24Cs and a DAC): every path runs and every check passes, which proves the scripts'
   logic and the register maps, not the bench. Wiring sheet sections 11-13 and the PDF, section 7 updated (holes 14-17 shared with
   the flash; 10 and 13 gain the two I2C modules); `whatis.py` guesses 0x57, 0x60-0x63 and 0x68 by name.
+- 5 Nov 2026 (branch `cluster`): **engine / cluster / chip hierarchy made explicit, no behaviour change.** New `src/cluster.v`
+  (`NENG` engines populated of `NSLOT = 4` slots, `NPIN = 32` pin numbers): the per-engine setting registers, the engines, the pin
+  mux with "lowest engine wins" and the IRQ OR moved there from `src/chip.v`, which keeps the SPI host port, the synchronisers and
+  glitch filter, FILTER and ID, and instantiates `NCLUSTER = 1` clusters. Host command bits `[11:6]` now decode as the cluster
+  number (`src/host_spi.v` latches them): cluster 0 is the chip; 1-63 read 0 for every register and ignore writes. Reads use the
+  compare directly; write and pop strobes use a copy registered one clock later (a strobe follows the command by at least 128
+  clocks), because the direct form put the 6-bit compare into every program-word enable and cost about 245 LUTs on the kit. The
+  register map, ID value, timing and pin assignment are unchanged; `test/tb_chip.v` gains five checks on cluster numbers 1, 2 and 63.
+  Tests: cosim 1000 x 400 clocks at seeds 1, 2, 3 and seed 4 with `USE_SRAM=1`, every clock identical; `test/run_chip.sh` PASS at
+  `NENG=3`, `NENG=2` and `LATE=1`; `./run.sh test` PASS. Planted in a copy of `cluster.v` (`CHIP_SRC_OVERRIDE`): engine 1's pin
+  bank rotated by 8 (B's bit-time measurement read 0, IRQ 0: caught at the first check) and CLKDIV taken from the mirrored slot
+  (UART garbled, B measured 8 not 40: caught); both removed. Size (`./run.sh size`, which now reads every source and takes the
+  module name from the file, since it stopped at `chip.v` before): whole chip 17,428 cells on main, 17,351 after (host_spi 179 to
+  185); `cluster` alone 19,926 because all 32 pin numbers are live outside the chip. MachXO3L kit (`fpga/machxo3/build.sh`, two
+  engines, no load): 5,922 of 6,864 LUTs (86 %) and 2,079 flip-flops on main, 5,982 (87 %) and 2,087 after; fmax at the default
+  seed 30.14 MHz before, 27.02 after; seeds 1-4 gave 28.96-30.81 MHz before and 26.47-29.49 after, all PASS at 12 MHz, critical
+  path inside engine 0 (INCFG to the stopwatch carry chain) in both. `fpga/cyclone4/chip_c4.qsf` lists the new file; the Tiny
+  Tapeout repo's `src/` copy has not been refreshed.

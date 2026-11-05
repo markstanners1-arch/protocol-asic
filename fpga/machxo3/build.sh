@@ -8,7 +8,7 @@ set -e
 cd "$(dirname "$0")"
 export PATH="/d/Tools/oss-cad-suite/bin:/d/Tools/oss-cad-suite/lib:$PATH"
 mkdir -p build
-S="../../src/chip.v ../../src/host_spi.v ../../src/engine.v ../../src/prog_mem.v ../../src/glitch_filter.v chip_mxo3.v"
+S="../../src/chip.v ../../src/cluster.v ../../src/host_spi.v ../../src/engine.v ../../src/prog_mem.v ../../src/glitch_filter.v chip_mxo3.v"
 yosys -q -p "read_verilog $S; synth_lattice -family xo3 -nolutram -nobram -top chip_mxo3 -json build/chip.json"
 nextpnr-machxo2 --device LCMXO3L-6900C-5BG256C --json build/chip.json --lpf chip_mxo3.lpf --textcfg build/chip.config --freq 12 -q -l build/chip_pnr.log
 ecppack build/chip.config --bit build/chip.bit

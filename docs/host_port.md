@@ -26,10 +26,15 @@ The chip samples SCK with its own clock, so **SCK must be at most 1/8 of the chi
 CS low | 16-bit command | 16-bit word | 16-bit word | ... | CS high
 ```
 
-Command: `[15] 1 = read, 0 = write`  `[14:12] engine (0 = A, 1 = B, 2 = C)`  `[11:6] 0`  `[5:0] register`.
+Command: `[15] 1 = read, 0 = write`  `[14:12] engine (0 = A, 1 = B, 2 = C)`  `[11:6] cluster (0)`  `[5:0] register`.
 So the first byte is `read << 7 | engine << 4` and the second is the register. (v0.1 had a one-byte command with a
 one-bit engine field; it grew on 3 Nov 2026 when the chip went from two engines to three.) An engine number past the
 last one is harmless: its writes are ignored and its reads return 0.
+
+Bits `[11:6]` are the **cluster number** (5 Nov 2026; `docs/core_design.md`, Hierarchy). This chip has one cluster,
+number 0, which holds all its engines and the chip-wide registers. A cluster number that does not exist (1 to 63 here)
+reads 0 for every register, FILTER and ID included, and its writes are ignored. Hosts that send 0 in these bits, as
+every program so far does, see no difference.
 
 Each 16-bit word is written to, or read from, the register; then the register number **moves on by one**,
 except for the two FIFO registers, which stay put (so a burst of words goes through the same FIFO).

@@ -351,6 +351,22 @@ module tb_chip;
             for (j = 0; j < NENG; j = j + 1) write_reg(j[2:0], 6'h20, 0);
         end
 
+        // cluster field, command bits [11:6] (5 Nov 2026): cluster 0 is the chip; any other number reads 0 and ignores writes
+        begin : clusters
+            reg [15:0] d;
+            write_reg(0, 6'h21, 16'h1234);
+            spi_begin({1'b0, 3'd0, 6'd1, 6'h21}); spi_word(16'h5555, d); spi_end;      // write CLKDIV via cluster 1
+            read_reg(0, 6'h21, w); check("cluster 1 write ignored: A CLKDIV unchanged", w, 16'h1234);
+            spi_begin({1'b1, 3'd0, 6'd1, 6'h21}); spi_word(16'd0, w); spi_end;         // read CLKDIV via cluster 1
+            check("cluster 1 reads 0 (CLKDIV)", w, 0);
+            spi_begin({1'b1, 3'd0, 6'd63, 6'h2A}); spi_word(16'd0, w); spi_end;        // read ID via cluster 63
+            check("cluster 63 reads 0 (ID)", w, 0);
+            spi_begin({1'b0, 3'd0, 6'd2, 6'h29}); spi_word(16'h00FF, d); spi_end;      // write FILTER via cluster 2
+            read_reg(0, 6'h29, w); check("cluster 2 write ignored: FILTER unchanged", w, 0);
+            read_reg(0, 6'h2A, w); check("cluster 0 still answers (ID)", w, 16'h0020 | NENG);
+            write_reg(0, 6'h21, 0);
+        end
+
         if (errors == 0) $display("PASS: whole chip, end to end through the SPI host port");
         else $display("FAIL: %0d errors", errors);
         $finish;

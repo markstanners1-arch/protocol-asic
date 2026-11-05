@@ -152,7 +152,37 @@ the core) failed detailed placement twice, three (49.5 %) laid out cleanly with 
 host how many engines there are (`docs/host_port.md` v0.2). The lowest-numbered engine driving a pin wins.
 The 20 protocol pins are shared: a UART, an I2C and an SPI at once, with pins to spare.
 
-## Open questions (as first asked)
+## Hierarchy (5 Nov 2026): engine, cluster, chip
+
+The Verilog is three levels, each a module with its own parameters. Behaviour is that of the 3 Nov chip; only the
+module boundaries are new.
+
+```
+protocol_chip  (src/chip.v)        NENG = 3 (engines per cluster, 1-4), NCLUSTER = 1 (clusters, 1-64)
+  host_spi                         SPI slave; command = [15] read, [14:12] engine, [11:6] cluster, [5:0] register
+  synchronisers + glitch_filter    the 13 real inputs, one chip-wide FILTER setting (register 0x29)
+  ID register (0x2A)               chip-wide, unchanged: [7:4] spec version 2, [3:0] engines
+  cluster[0..NCLUSTER-1]  (src/cluster.v)    NENG, NSLOT = 4, NPIN = 32
+    setting registers              one set per populated engine (0x20-0x25, 0x27, 0x28); a slot past NENG-1 is absent
+    engine[0..NENG-1]  (src/engine.v)        the cell: program store, x/y, ISR/OSR, FIFOs, stopwatch, WAIT, side-set
+    pin bank                       NPIN pin numbers seen by every engine; mux and "lowest engine wins" arbitration
+    irq                            OR of the engines' RX-FIFO-not-empty
+  pins                             cluster 0's bank to the package: 0-7 uio, 8-13 uo_out[7:2], 15-19 ui_in[7:3]
+```
+
+- `NSLOT` is the number of engine slots the cluster's decode and arbitration are laid out for; `NENG` is how many are
+  populated. The host's 3-bit engine field addresses slots; a slot from `NENG` to 7 ignores writes and reads 0 (as an
+  engine number past the last did before).
+- The cluster number is the command's bits `[11:6]`, which every host program so far sends as 0. Cluster 0 is the
+  chip; a number from `NCLUSTER` to 63 reads 0 for every register, chip-wide ones included, and its writes are
+  ignored. Reads decode the number directly; writes and FIFO pops use a copy registered one clock later, which is
+  settled long before any strobe (a strobe follows the command word by at least 16 SCK edges).
+- The package has one pin bank, so with `NCLUSTER` above 1 only cluster 0 reaches the pins; the others are reachable
+  through the host port only.
+- Proof of no behaviour change (branch `cluster`, 5 Nov 2026): cosim 400,000 clocks for three seeds and once with the
+  IHP SRAM store, every clock identical; whole-chip test PASS at `NENG=3`, `NENG=2` and `LATE=1`, plus five new checks
+  on cluster numbers 1, 2 and 63; two planted bugs in `cluster.v` (engine 1's pin bank rotated by 8; CLKDIV taken from
+  the mirrored slot) each failed the whole-chip test at its first measurement.
 
 1. **Two engines or one?** Two lets, say, an SPI master and a UART run at once, or TX and RX separately. *Lean: two.*
 2. **16-bit registers or 32?** 16 is enough for UART/SPI/I2C and saves area; Ethernet would want 32. *Lean: 16.*
