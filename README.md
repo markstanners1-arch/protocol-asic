@@ -716,6 +716,26 @@ That's a driver change on the PC, so Mark does it himself. Then:
   front of a DS3231 with a running clock, two AT24Cs and a DAC): every path runs and every check passes, which proves the scripts'
   logic and the register maps, not the bench. Wiring sheet sections 11-13 and the PDF, section 7 updated (holes 14-17 shared with
   the flash; 10 and 13 gain the two I2C modules); `whatis.py` guesses 0x57, 0x60-0x63 and 0x68 by name.
+- 5 Nov 2026 (morning): **Mojo v3 (Spartan-6 LX9) brought up as a fourth FPGA board.** Xilinx ISE 14.7 WebPACK installed under
+  WSL (Ubuntu); `fpga/mojo/load.py` loads a bitstream through the board's own ATmega32U4 over USB serial, into the FPGA
+  (volatile) or the flash with verify. A blink design built with xst/ngdbuild/map/par/bitgen (all constraints met at
+  50 MHz) and loaded into the FPGA: the eight LEDs count. The chip has not yet been built for it.
+- 5 Nov 2026 (late morning): **the three-engine chip on the Mojo v3 at 50 MHz, regression PASS from the Pico.** `src/`
+  unchanged; `fpga/mojo/chip_mojo.v` (wrapper, reset from the Mojo's button, synchronised), `fpga/mojo/chip.ucf`,
+  `fpga/mojo/build.sh` (ISE 14.7 under WSL: xst, ngdbuild, map, par, trce, bitgen; `load` puts it in the FPGA's RAM).
+  XC6SLX9-2TQG144: 4,247 of 5,720 slice LUTs (74 %, 104 as LUT RAM), 1,098 of 11,440 flip-flops (9 %), 1,301 of 1,430
+  slices (90 %), no block RAM; all constraints met at 50 MHz, minimum period 16.743 ns (59.7 MHz). Pins: the IO Shield
+  stays stacked; its devices use 65 of the 84 header pins, so host CS/SCK/MOSI and engine pins 0-7 take the 11 free pins,
+  MISO, IRQ and engine pins 8-13 the Mojo's eight LED pins, engine pins 15-19 shield DIP switch pins (switches off); the
+  shield prints each hole's FPGA pin beside it (inner and outer rows). Wiring sheet section 14 and the PDF.
+  `pico/regression.py`: the ESP32 sketch's `r` and `x` ported to the Pico (UART0 RX on GP1 from engine pin 0, PIO pulses
+  on GP2 to engine pin 15). Bench: ID 0x0023 five times; regression **PASS, 0 problems**: UART out at 115200, 57600 and
+  19200 received exactly with engine B's bit times 432, 872 and 2608 clocks, IRQ up and down, pin 15 low and high, glitch
+  filter (2 us seen 100 clocks and 20 us 1000 clocks with it off; with it on, hold 5.1 us, 2 us blocked and 20 us seen),
+  isolation with engine C sending "C!" while A hung. Planted fault (the pulse lead looked for on engine pin 16): FAIL,
+  4 problems. On the way: the first ID reads were garbage (0x39BC, 0x9CCE ...) because the Mojo had restarted into its
+  flash design (LED PWM on the MISO and IRQ pins, seen by `pico/lead_probe.py`); reloaded, both lines steady, then PASS.
+  `fpga/mojo/pin_finder.v`: a bench tool that shows on the shield display the FPGA pin a grounded lead touches.
 - 5 Nov 2026 (branch `cluster`): **engine / cluster / chip hierarchy made explicit, no behaviour change.** New `src/cluster.v`
   (`NENG` engines populated of `NSLOT = 4` slots, `NPIN = 32` pin numbers): the per-engine setting registers, the engines, the pin
   mux with "lowest engine wins" and the IRQ OR moved there from `src/chip.v`, which keeps the SPI host port, the synchronisers and

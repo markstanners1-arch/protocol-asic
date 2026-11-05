@@ -5,7 +5,7 @@ board). Kit pins are written **J4-n (ball)**: n is the numbered hole on header J
 own label printed beside it, the same connection under a second name, for checking by continuity. **Go by the hole number**: the ball letters H and M (H16 is hole 25, M16 is hole 10) are easy to misread on the silkscreen. **Engine pin**
 numbers (0-19) are what the chip's programs call that pin. Everything is **3.3 V logic** (FPGA and ESP32 pins are not
 5 V tolerant); one common ground between every board. `programs/read_pins.asm` shows what the chip sees on every pin.
-Section 6 (4 Nov) adds the keypad, IR receiver and ultrasonic; section 10 the DALI shield (planned, not yet wired); sections 11-13 the W25Q32 flash, DS3231 clock and MCP4725 DAC modules (due 5 Nov, scripts written, not yet run). The same sheet as a landscape PDF for the monitor: `docs/bench_wiring.pdf` (`python docs/make_bench_wiring_pdf.py`).
+Section 6 (4 Nov) adds the keypad, IR receiver and ultrasonic; section 10 the DALI shield (planned, not yet wired); sections 11-13 the W25Q32 flash, DS3231 clock and MCP4725 DAC modules (due 5 Nov, scripts written, not yet run); section 14 the Mojo v3 with the IO Shield, Pico as host (5 Nov). The same sheet as a landscape PDF for the monitor: `docs/bench_wiring.pdf` (`python docs/make_bench_wiring_pdf.py`).
 
 ## 1. Core: kit to ESP32 host
 
@@ -320,6 +320,44 @@ Test: `pwsh D:/ProtocolASIC/pico/run.ps1 -Script mcp4725.py -Seconds 40`. Expect
 3 s each for the meter; a 64-step sawtooth for 10 s and a triangle for 10 s with every byte acked: PASS. The ramp frequency is
 host-limited (each byte is a host round trip), so the script measures the ramps it made and prints the Hz the scope must show;
 the wire itself would allow 18 bits a step = 347 Hz at 400 kHz. Scope: CH1 on OUT, 1 V/div, trigger on the sawtooth's falling flyback.
+
+## 14. Mojo v3 with the IO Shield stacked, Pico as host (5 Nov 2026; regression PASS)
+
+Three engines at 50 MHz (ID **0x0023**). Leads go into the IO Shield's stacking headers. Each header row has two holes and
+**the number printed beside a hole is that hole's FPGA pin**: on the right header the inner hole (towards the display) is
+labelled on the inside (50, 40, 34 ...) and the outer hole on the board edge (51, 41, 35 ...); on the left header the inner
+hole is the higher number (58) and the outer the lower (57). Right header, from the USB end: row 1 inner RAW / outer GND,
+row 2 inner +V / outer GND, then 50/51, 40/41, 34/35, 32/33, 29/30, 26/27 ... 133/134, 131/132, 126/127, 123/124. Left
+header, from the USB end: inner GND, GND, VSYS, 58, 67, 75 ...; outer RAW, +V, DONE, 57, 66, 74 ... **All 24 shield DIP
+switches OFF** (engine pins 15-19 are DIP switch pins). Load: `wsl -d Ubuntu -- bash /mnt/d/ProtocolASIC/fpga/mojo/build.sh load`
+or `python fpga/mojo/load.py COM14 fpga/mojo/build/chip.bin` (FPGA RAM only). **The Mojo boots its flash design after any
+power blip or reset button press**: the LEDs then fade and the ID reads garbage; reload.
+
+| FROM (Pico) | TO (Mojo shield hole) | What it is |
+|---|---|---|
+| GND (pin 23) | right header row 1, **outer** hole, edge label GND (the inner hole is RAW) | common ground |
+| GP17 (pin 22) | right header, inner hole **50** | CS |
+| GP18 (pin 24) | right header, outer hole **51** | SCK |
+| GP19 (pin 25) | right header, inner hole **40** | MOSI |
+| GP16 (pin 21) | right header, outer hole **134** (4th row from the far end) | MISO (also the Mojo's LED0) |
+| GP20 (pin 26) | right header, inner hole **133** (same row) | IRQ (also the Mojo's LED1) |
+| GP1 (pin 2) | right header, outer hole **41** | engine pin 0: engine A's UART out into the Pico's UART0 RX |
+| GP2 (pin 4) | left header, outer hole **57** (4th row) | engine pin 15: test pulses and levels from the Pico |
+
+Every engine pin, for anything new (hole label = FPGA pin):
+
+| Engine pins | Holes | Notes |
+|---|---|---|
+| 0-7 (two-way, pull-ups) | 41 (outer), 34 (inner), 35 (outer), 32 (inner), 33 (outer), 29 (inner), 30 (outer), 27 (outer) | right header; I2C SCL/SDA = 35/32; SPI SCK/MOSI/MISO/CS = 33/29/30/27 |
+| 8-13 (out only) | 132 (outer), 131 (inner), 127 (outer), 126 (inner), 124 (outer), 123 (inner) | right header; the Mojo's LED2-LED7 light with them |
+| 15-19 (in only, pull-downs) | 57 (outer), 58 (inner), 66 (outer), 67 (inner), 74 (outer) | left header; DIP switches OFF to use a lead |
+
+Shield LEDs: one bank shows engine pins 0-7 as the pads read, one which of 0-7 an engine drives, the third pins 15-19, host
+CS active, reset held and a heartbeat (`fpga/mojo/chip_mojo.v`). Tests: `pwsh D:/ProtocolASIC/pico/run.ps1 -Script id_test.py`
+(0x0023 five times), then `-Script regression.py -Seconds 40` (CHIP_HZ = 50_000_000 at the top): PASS, 0 problems.
+If it doesn't answer: `-Script lead_probe.py` (MISO and IRQ driven and steady with CS idle; toggling = the flash design is
+running), then `TOP=pin_finder` build of `fpga/mojo/pin_finder.v` (touch a hole with a ground lead through 220 R - 1 k: the
+display shows P and the pin number).
 
 ## If it doesn't answer: bench helpers (`esp32
 erun.ps1 -Cmd <letter>`)
