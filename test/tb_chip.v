@@ -29,6 +29,18 @@ module tb_chip;
     localparam HALF = 8;               // SCK half period in chip clocks: SCK = clk/16
     integer LATE = 0;                  // +late=1: sample MISO at the falling edge, like the ESP32
     integer errors = 0;
+    integer se; reg [5:0] sa; reg [15:0] sw_want;
+    function [15:0] sweep_val(input integer e, input [5:0] a);
+        sweep_val = 16'hA5C3 ^ (e * 16'h1357) ^ ({10'd0, a} * 16'h0B21);
+    endfunction
+    function [15:0] sweep_mask(input [5:0] a);
+        case (a)
+            6'h22, 6'h23, 6'h25: sweep_mask = 16'h7FFF;
+            6'h24:               sweep_mask = 16'h3FFF;
+            6'h2B:               sweep_mask = 16'h1FFF;
+            default:             sweep_mask = 16'hFFFF;
+        endcase
+    endfunction
     reg [15:0] init [0:298];
 
     // ---- a minimal I2C slave on uio[0] (SCL) / uio[1] (SDA): after a START it ACKs every byte, until STOP,
@@ -457,6 +469,27 @@ module tb_chip;
             read_reg(0, 6'h28, st); check("A STATUS after the next frame: flag cleared", st[15:14], 2'b00);
             write_reg(0, 6'h20, 0);
         end
+
+        // Register sweep: a different value in every setting register of every engine (and one slot past the
+        // last), then every one read back, so a register crossed between engines or addresses shows up.
+        for (se = 0; se <= NENG && se < 8; se = se + 1) write_reg(se, 6'h20, 0);
+        for (se = 0; se <= NENG && se < 8; se = se + 1)
+            for (sa = 6'h21; sa <= 6'h30; sa = sa + 1)
+                if (sa <= 6'h25 || sa >= 6'h2B) write_reg(se, sa, sweep_val(se, sa));
+        for (se = 0; se <= NENG && se < 8; se = se + 1)
+            for (sa = 6'h21; sa <= 6'h30; sa = sa + 1)
+                if (sa <= 6'h25 || sa >= 6'h2B) begin
+                    read_reg(se, sa, w);
+                    if (se >= NENG)                                   sw_want = 0;    // no engine in this slot
+                    else if ((sa == 6'h2B || sa == 6'h2C) && (se != 0 || !SER0)) sw_want = 0;   // engine 0 only
+                    else if (sa >= 6'h2D && !CRC)                     sw_want = 0;
+                    else sw_want = sweep_val(se, sa) & sweep_mask(sa);
+                    if (w !== sw_want) begin
+                        $display("FAIL: sweep engine %0d register 0x%h = 0x%h, expected 0x%h", se, sa, w, sw_want);
+                        errors = errors + 1;
+                    end
+                end
+        $display("ok:   register sweep, %0d slots", (NENG < 8) ? NENG + 1 : 8);
 
         if (errors == 0) $display("PASS: whole chip, end to end through the SPI host port");
         else $display("FAIL: %0d errors", errors);

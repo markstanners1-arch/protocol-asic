@@ -163,8 +163,9 @@ protocol_chip  (src/chip.v)        NENG = 3 (engines per cluster, 1-4), NCLUSTER
   synchronisers + glitch_filter    the 13 real inputs, one chip-wide FILTER setting (register 0x29)
   ID register (0x2A)               chip-wide, unchanged: [7:4] spec version 2, [3:0] engines
   cluster[0..NCLUSTER-1]  (src/cluster.v)    NENG, NSLOT = 4, NPIN = 32
-    setting registers              one set per populated engine (0x20-0x25, 0x27, 0x28); a slot past NENG-1 is absent
-    engine[0..NENG-1]  (src/engine.v)        the cell: program store, x/y, ISR/OSR, FIFOs, stopwatch, WAIT, side-set
+    eng_slot[0..NENG-1]            one per populated engine; a slot past NENG-1 is absent
+      setting registers + read mux the engine's own registers (0x20-0x25, 0x2B-0x30) and its read-back word
+      engine  (src/engine.v)       the cell: program store, x/y, ISR/OSR, FIFOs, stopwatch, WAIT, side-set
     pin bank                       NPIN pin numbers seen by every engine; mux and "lowest engine wins" arbitration
     irq                            OR of the engines' RX-FIFO-not-empty
   pins                             cluster 0's bank to the package: 0-7 uio, 8-13 uo_out[7:2], 15-19 ui_in[7:3]
@@ -183,6 +184,14 @@ protocol_chip  (src/chip.v)        NENG = 3 (engines per cluster, 1-4), NCLUSTER
   IHP SRAM store, every clock identical; whole-chip test PASS at `NENG=3`, `NENG=2` and `LATE=1`, plus five new checks
   on cluster numbers 1, 2 and 63; two planted bugs in `cluster.v` (engine 1's pin bank rotated by 8; CLKDIV taken from
   the mirrored slot) each failed the whole-chip test at its first measurement.
+
+- Registers per slot (branch `engine-regs`, 6 Nov 2026): each `eng_slot` holds its engine's setting registers and
+  picks its own read-back word by address; the cluster then picks one 16-bit word by engine number. Signals shared
+  between slots: write and pop strobes, engine number, address, write data, the pin bank, and per slot one read word
+  and the RX-not-empty flag. Proof of no behaviour change: cosim 400,000 clocks with each memory, every clock
+  identical; whole-chip test PASS at `NENG=4`, `3`, `2`, `LATE=1` and the kit build; a new register sweep (a different
+  value in every setting register of every slot and one past the last, all read back) passes on the old and new
+  cluster; five planted bugs in `cluster.v` each fail the whole-chip test.
 
 ## Serialiser and CRC unit (5 Nov 2026, ISA v0.3)
 
