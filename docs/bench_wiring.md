@@ -285,6 +285,8 @@ polled (under 3 ms), read back equal, WEL cleared; address 0 unchanged: PASS. Ea
 part, so only when the regions run out. All 00 or all FF for the ID = a lead: CS and CLK (J4-17, 14), DO to J4-16, then power.
 
 ## 12. DS3231 clock module on the I2C bus (parts due 5 Nov 2026, NOT YET RUN; `pico/ds3231.py`)
+**Module as received 6 Nov 2026: a CR2032 (non-rechargeable) cell is fitted and the board has the trickle-charge diode and resistor.** At 3.3 V the charge path cannot push current into the cell (about 2.6 V after the diode, below the cell's 3 V), so it is safe on this bench. Never feed this module 5 V with the CR2032 in it.
+
 
 The ZS-042-type module: a DS3231 at **0x68** and an AT24C32 EEPROM (4 KB, 2 address bytes, 32-byte pages) at **0x57** (its A0-A2
 pads are pulled high), 4.7 k pull-ups to VCC on board, so **3.3 V only**. It joins the AT24C256 (0x50) on the same two wires: no
