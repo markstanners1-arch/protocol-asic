@@ -5,6 +5,9 @@ runs them through both, and compares the complete engine state after every syste
 The first disagreement is reported with the program listing and the clocks around it.
 
     python model/cosim.py [tests] [cycles] [seed]      (defaults 500 300 1)
+
+Environment: USE_SRAM=1 uses IHP's SRAM block model for the memories; CRC=0 builds both engines without the CRC
+unit (the ASIC build, 7 Nov 2026) and the model to match.
 """
 import os
 import random
@@ -19,6 +22,7 @@ from engine import Engine, Config  # noqa: E402
 
 SUITE = r"D:\Tools\oss-cad-suite"
 BUILD = os.path.join(ROOT, "test", "build")
+CRC_UNIT = os.environ.get("CRC", "1") != "0"
 ENV = dict(os.environ, PATH=os.pathsep.join([os.path.join(SUITE, "bin"), os.path.join(SUITE, "lib"), os.environ["PATH"]]))
 CFG_FIELDS = ["clkdiv", "start", "wrap_bottom", "wrap_top", "out_base", "out_count", "set_base", "set_count",
               "side_base", "side_count", "side_opt", "side_dir", "in_base", "jmp_pin", "out_right", "in_right", "fault_addr",
@@ -97,6 +101,7 @@ def random_test(rnd, ncycles):
 def run_model(prog, cfg, stim, events=None):
     c = Config(**{k: (bool(v) if k in BOOLS else v) for k, v in cfg.items() if k not in ("kind", "sercfg")})
     c.ser = (cfg["kind"] == 0)
+    c.crc_unit = CRC_UNIT
     c.set_sercfg_word(cfg["sercfg"])
     eng = Engine(prog, c)
     lines = []
@@ -128,9 +133,9 @@ def run_verilog(tests):
             os.environ.get("CRC_V", os.path.join(ROOT, "src", "crc32.v")),
             os.path.join(ROOT, "src", "prog_mem.v"), os.path.join(ROOT, "src", "fifo_mem.v"),
             os.path.join(ROOT, "test", "tb_cosim.v")]
-    flags = []
+    flags = [] if CRC_UNIT else ["-Ptb_cosim.CRC=0"]
     if os.environ.get("USE_SRAM"):          # the real IHP SRAM block, with IHP's own simulation model
-        flags = ["-DUSE_SRAM", "-DFUNCTIONAL"]
+        flags += ["-DUSE_SRAM", "-DFUNCTIONAL"]
         srcs += [os.path.join(ROOT, "pdk", "RM_IHPSG13_1P_64x16_c2.v"),
                  os.path.join(ROOT, "pdk", "RM_IHPSG13_1P_core_behavioral.v")]
     subprocess.run([os.path.join(SUITE, "bin", "iverilog.exe"), "-g2012", *flags, "-o", vvp, *srcs],
@@ -187,7 +192,8 @@ def main():
     print(f"{ntests} random programs x {ncycles} clocks = {total:,} clocks compared "
           f"(Verilog {t1 - t0:.0f} s, model {time.time() - t1:.0f} s): "
           + ("PASS, every clock identical" if fails == 0 else f"FAIL in {fails} tests")
-          + ("  [IHP SRAM]" if os.environ.get("USE_SRAM") else "  [flip-flop memory]"))
+          + ("  [IHP SRAM]" if os.environ.get("USE_SRAM") else "  [flip-flop memory]")
+          + ("" if CRC_UNIT else "  [no CRC unit]"))
     return 1 if fails else 0
 
 

@@ -392,18 +392,23 @@ module tb_chip;
         end
 
         // serialiser (5 Nov 2026): engine A runs eth_tx.asm, TD+ = engine pin 8 (uo_out[2]), TD- = pin 9 (uo_out[3]).
-        if (!SER0 || !CRC || TXDEPTH0 < 64) begin : no_ser       // a build without the serialiser or CRC units
+        // Without CRC units (the ASIC build, 7 Nov 2026) the same frame goes out with the FCS sent by the host as the
+        // last two FIFO words and SERCFG's CRC append off; the wire must carry the same 72 bytes.
+        if (!SER0 || TXDEPTH0 < 64) begin : no_ser                // a build without the serialiser
             write_reg(0, 6'h2B, 16'h107F); write_reg(0, 6'h2C, 16'h1234); write_reg(0, 6'h2D, 16'hA001);
             read_reg(0, 6'h2B, w); check("A SERCFG (built without the serialiser: reads 0)", w, SER0 ? 16'h107F : 16'd0);
             read_reg(0, 6'h2D, w); check("A CRCPOLY lo (reads 0 without CRC units)", w, CRC ? 16'hA001 : 16'd0);
             read_reg(0, 6'h28, st); check("A STATUS serialiser bits 0", st[15:14], 2'b00);
         end else begin : ethernet
-            integer j, k, nbits; reg [15:0] d; reg [7:0] gotb; reg bad;
-            reg [15:0] fw [0:33];           // the frame as words: preamble + SFD, then 60 bytes, low byte first
+            integer j, k, nbits, nw; reg [15:0] d, sc; reg [7:0] gotb; reg bad;
+            reg [15:0] fw [0:35];           // the frame as words: preamble + SFD, 60 bytes, low byte first (+ FCS: no CRC)
             reg [7:0]  want [0:71];         // what must appear on the wire: 68 bytes then the FCS acf725d4 (zlib.crc32)
+            nw = CRC ? 34 : 36;             // words the host sends
+            sc = CRC ? 16'h107F : 16'h106F; // SERCFG: CRC append (bit 4) only with the CRC unit
             fw[0] = 16'h5555; fw[1] = 16'h5555; fw[2] = 16'h5555; fw[3] = 16'hd555;
             fw[4] = 16'hffff; fw[5] = 16'hffff; fw[6] = 16'hffff; fw[7] = 16'h0002; fw[8] = 16'h0000; fw[9] = 16'h0100; fw[10] = 16'hb588;
             for (j = 0; j < 23; j = j + 1) begin gotb = 8'h30 + 2 * j[7:0]; fw[11 + j] = {gotb + 8'd1, gotb}; end   // payload 0x30 .. 0x5d
+            fw[34] = 16'hf7ac; fw[35] = 16'hd425;                                 // the FCS as the host sends it
             for (j = 0; j < 34; j = j + 1) begin want[2 * j] = fw[j][7:0]; want[2 * j + 1] = fw[j][15:8]; end
             want[68] = 8'hac; want[69] = 8'hf7; want[70] = 8'h25; want[71] = 8'hd4;
             for (j = 0; j < NENG; j = j + 1) write_reg(j[2:0], 6'h20, 0);
@@ -414,31 +419,31 @@ module tb_chip;
             spi_word(16'd0, d); spi_word(init[298], d); spi_word(16'd8 | (16'd2 << 5) | (16'd8 << 10), d); spi_word(16'd2 | (16'd1 << 11), d); spi_word(16'd0, d);
             spi_end;
             spi_begin({1'b0, 3'd0, 6'd0, 6'h2B});                      // SERCFG, SERDIV, CRCPOLY lo/hi, CRCINIT lo/hi in one burst
-            spi_word(16'h107F, d); spi_word(16'd0, d); spi_word(16'h8320, d); spi_word(16'hEDB8, d); spi_word(16'hFFFF, d); spi_word(16'hFFFF, d);
+            spi_word(sc, d); spi_word(16'd0, d); spi_word(16'h8320, d); spi_word(16'hEDB8, d); spi_word(16'hFFFF, d); spi_word(16'hFFFF, d);
             spi_end;
-            read_reg(0, 6'h2B, w); check("A SERCFG read back", w, 16'h107F);
-            read_reg(0, 6'h2E, w); check("A CRCPOLY hi read back", w, 16'hEDB8);
+            read_reg(0, 6'h2B, w); check("A SERCFG read back", w, sc);
+            read_reg(0, 6'h2E, w); check("A CRCPOLY hi read back (0 without CRC units)", w, CRC ? 16'hEDB8 : 16'd0);
             write_reg(1, 6'h2B, 16'h107F); write_reg(1, 6'h2C, 16'h1234); write_reg(1, 6'h2D, 16'hA001);
             read_reg(1, 6'h2B, w); check("B SERCFG reads 0 (no serialiser)", w, 0);
             read_reg(1, 6'h2C, w); check("B SERDIV reads 0", w, 0);
-            read_reg(1, 6'h2D, w); check("B CRCPOLY lo read back (every engine has a CRC unit)", w, 16'hA001);
-            read_reg(0, 6'h2B, w); check("A SERCFG untouched by B's write", w, 16'h107F);
+            read_reg(1, 6'h2D, w); check("B CRCPOLY lo read back (0 without CRC units)", w, CRC ? 16'hA001 : 16'd0);
+            read_reg(0, 6'h2B, w); check("A SERCFG untouched by B's write", w, sc);
             write_reg(0, 6'h20, 1); repeat (100) @(posedge clk);
             check("pair idle: TD+ and TD- driven low", {14'd0, uo_out[3:2]}, 0);
             read_reg(0, 6'h28, st); check("A STATUS: running, not busy, no underrun", {st[15:14], st[8]}, 3'b001);
             read_reg(0, 6'h33, w);  check("A SERSTAT: TX level 0", w, 0);
             nrec = 0; eth_rec = 1;
             spi_begin({1'b0, 3'd0, 6'd0, 6'h26});                      // the frame: count, then 34 words, one burst
-            spi_word(16'd34, d);
-            for (j = 0; j < 34; j = j + 1) spi_word(fw[j], d);
+            spi_word(nw[15:0], d);
+            for (j = 0; j < nw; j = j + 1) spi_word(fw[j], d);
             spi_end;
             read_reg(0, 6'h28, st); check("A STATUS busy while the frame goes out", st[14], 1'b1);
             repeat (2000) @(posedge clk);
             eth_rec = 0;
             read_reg(0, 6'h28, st); check("A STATUS after the frame: not busy, no underrun, running", {st[15:14], st[8]}, 3'b001);
-            read_reg(0, 6'h31, w);  check("A CRC lo after the frame (the FCS before complementing)", w, 16'h0853);
-            read_reg(0, 6'h32, w);  check("A CRC hi", w, 16'h2BDA);
-            nbits = 34 * 16 + 32;
+            read_reg(0, 6'h31, w);  check("A CRC lo after the frame (the FCS before complementing; 0 without CRC)", w, CRC ? 16'h0853 : 16'd0);
+            read_reg(0, 6'h32, w);  check("A CRC hi", w, CRC ? 16'h2BDA : 16'd0);
+            nbits = 36 * 16;            // 34 words + the 32-bit FCS, from the CRC unit or from the host
             check("half-bits on the wire: 2 per bit + 6 of TP_IDL", nrec, 2 * nbits + 6);
             bad = 0;
             for (j = 0; j < nbits && !bad; j = j + 1) begin

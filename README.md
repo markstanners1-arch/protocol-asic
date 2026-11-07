@@ -843,3 +843,15 @@ That's a driver change on the PC, so Mark does it himself. Then:
   1,876 flip-flops, 3 -> 4 SRAM blocks. Mojo `ser clk40`: 3,943 LUTs (68 %), 1,168 slices (81 %), 1,144 registers, 76 LUTs
   as memory, timing met at 40 MHz (minimum period 19.343 ns); not loaded. Source lists: `fifo_mem.v` added to
   `model/cosim.py`, `test/run_chip.sh`, `fpga/mojo/build.sh`, `fpga/machxo3/build.sh`, `fpga/cyclone4/chip_c4.qsf`.
+- 7 Nov 2026 (branch `engine-regs`): **ASIC build without CRC units.** Layout runs 8-11 (TT branch `sram-macro`) failed in
+  detailed routing: shorts inside the program-store macros, LVS and KLayout DRC errors. Local LibreLane (WSL Ubuntu,
+  LibreLane 3.1.0.dev4, tt-support-tools 9d13ff3) reproduced GitHub run 9 exactly (311 of 311 final metrics). Partial
+  runs to global routing, four engines with the macros in columns: Metal3 83.9 % used, 2,749 overflow; with `CRC = 0`
+  (the existing switch): 76.1 %, 42 overflow, utilisation 48.5 -> 42.8 %, flip-flops 2,222 -> 1,834. Metal3 is the only
+  horizontal signal layer (Metal2 and Metal4 vertical). Without the CRC unit, an Ethernet frame is sent with the FCS as the
+  last two FIFO words and SERCFG CRC append off (docs/isa.md, CRC unit). New: `crc_unit` in `model/engine.py`, `CRC=0`
+  in `model/cosim.py` and `tb_cosim.v`; `test/tb_chip.v` sends the frame with the host's FCS when `CRC = 0` and checks the
+  same 72 bytes on the pair. Proofs: model tests PASS; cosim 1000 x 400 with `CRC=0` at seeds 11, 12 and 13 (`USE_SRAM=1`),
+  and seed 14 with the CRC unit, every clock identical; `test/run_chip.sh` PASS at CRC=0 with NENG=4, NENG=4 LATE=1, NENG=3,
+  NENG=2; CRC=1 with NENG=4 and NENG=3 LATE=1; the kit build. Planted bugs: `crc` reading 1 without the unit (cosim FAIL
+  in 200 of 200 tests; chip test FAIL on the CRC read); the host's FCS one byte wrong (chip test FAIL at byte 70).

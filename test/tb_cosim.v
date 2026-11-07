@@ -15,6 +15,7 @@
 `default_nettype none
 
 module tb_cosim;
+    parameter CRC = 1;                  // 0: both engines built without the CRC unit (model/cosim.py, CRC=0)
     reg clk = 0;
     reg rst_n = 0;
 
@@ -48,7 +49,7 @@ module tb_cosim;
 
     genvar g;
     generate for (g = 0; g < 2; g = g + 1) begin : duts
-        engine #(.SER(g == 0 ? 1 : 0), .TXDEPTH(g == 0 ? 64 : 4)) dut (
+        engine #(.SER(g == 0 ? 1 : 0), .TXDEPTH(g == 0 ? 64 : 4), .CRC(CRC)) dut (
             .clk(clk), .rst_n(rst_n),
             .cfg_clkdiv(cfg_clkdiv), .cfg_start(cfg_start), .cfg_wrap_bottom(cfg_wrap_bottom), .cfg_wrap_top(cfg_wrap_top),
             .cfg_out_base(cfg_out_base), .cfg_out_count(cfg_out_count), .cfg_set_base(cfg_set_base), .cfg_set_count(cfg_set_count),

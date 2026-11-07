@@ -57,6 +57,7 @@ class Config:
     serdiv: int = 0              # half-bit period in clocks, minus 1
     crcpoly: int = 0             # reflected polynomial
     crcinit: int = 0             # start value
+    crc_unit: bool = True        # False: built without the CRC unit (engine.v CRC = 0): the register stays 0
 
     @classmethod
     def for_program(cls, prog, **kw):
@@ -138,7 +139,7 @@ class Engine:
         self._push = None
         self._pop = False
         # CRC unit
-        self.crc = c.crcinit & M32
+        self.crc = (c.crcinit & M32) if c.crc_unit else 0
         # serialiser
         self.ser_busy = False
         self.ser_under = False
@@ -369,6 +370,8 @@ class Engine:
     # ---- the CRC unit: one system clock (docs/isa.md, CRC unit) ----
     def _crc_clock(self, ser_bit):
         c = self.cfg
+        if not c.crc_unit:
+            return
         if self._crc_clr:
             self.crc = c.crcinit & M32
         elif c.ser and c.crc_ser:

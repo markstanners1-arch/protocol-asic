@@ -175,6 +175,11 @@ gives exactly the number of ticks from the `time start` to the capture.
 
 ## CRC unit (v0.3; every engine)
 
+**Built only where the build asks for it (`CRC = 1`).** The ASIC build has no CRC unit (7 Nov 2026): `crc` reads 0,
+CRCPOLY, CRCINIT and CRC read 0, `IN` source 7 shifts in zeros and `TIME 5` does nothing. SERCFG `[4]` (CRC append)
+then appends 32 zeros (ones if `[5]`), so an Ethernet frame is sent with the FCS computed by the host as the last two
+FIFO words and `[4]` off. The encodings are unchanged.
+
 A 32-bit register `crc`, right-shifting (reflected) form. One step with bit `b`:
 `crc = (crc >> 1) ^ (crcpoly if (crc & 1) ^ b else 0)`. A polynomial and start value with zero upper halves stay a
 16-bit CRC in the low half (Modbus RTU: `crcpoly = 0xA001`, `crcinit = 0xFFFF`; Ethernet: `0xEDB88320`, `0xFFFFFFFF`,
