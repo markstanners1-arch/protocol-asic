@@ -853,3 +853,16 @@ That's a driver change on the PC, so Mark does it himself. Then:
   6.4 us) 2 us rejected and 20 us at 20.4 us: **PASS (0 problems)**. Sketch fix found on the way: `chip_test` chose the
   larger filter prescale only from 50 MHz, so at 40 MHz its hold was 1.6 us and a 2.7 us pulse passed (the chip was
   right); now from 32 MHz, as `pico/regression.py`.
+- 8 Nov 2026 (15:30): **blind identification merged into main** (`claude/identify`, 3 commits). `pico/identify.py`
+  listens on every chip input (levels with `read_pins`, low and high pulses with `measure_pulse` and the new
+  `programs/measure_high.asm`, one engine per pin, a second pass at the chip clock for short pulses) and
+  `pico/identify_core.py` names what it finds: quiet high/low, UART with baud, Manchester (DALI), IR NEC, 1-Wire, clocks,
+  one-wire LED data, and pairs (I2C, SPI, matching LED lines); listen only unless `PROBE` (an open-drain I2C address scan
+  on quiet idle-high pairs). `model/test_identify.py`: 16 simulated targets through the real programs in the model, PASS;
+  planted bugs caught (measure_high measuring lows; a 2 % bit-time tolerance; the LED rule's wrong fingerprint). Bench,
+  Mojo 40 MHz serialiser build, Pico host: `SELFTEST` (Pico PWM 10 kHz and UART 115200) named both; an SP107E LED
+  controller (5 V logic through 3 kOhm series and 10 kOhm to ground: 2.88 V high on engine pins 17 and 18) named
+  "one-wire LED data, 800 kbit/s: bit 1.24 us, 0 = 0.35 us high, 1 = 0.88 us high" on both pins, found to carry matching
+  data; the Hantek read 1.205-1.247 us, 0.36 us and 0.885 us, and decoded red 0x70 0x00 0x00 per LED (WS2811, RGB order;
+  `docs/bench/sp107e_*.png`). With 5.1 kOhm instead of 10 kOhm the high was only 2.29 V (the IO Shield pulls engine pins
+  15-19 down at about 9 kOhm) and the chip read both widths about 30 ns short.
