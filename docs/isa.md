@@ -1,4 +1,7 @@
-# Engine instruction set, v0.3 (5 Nov 2026: v0.2 plus the serialiser, the CRC unit and a 64-word TX FIFO on engine 0)
+# Engine instruction set, v0.4
+
+v0.3 is v0.2 plus the serialiser, the CRC unit and a 64-word TX FIFO on engine 0; v0.4 adds receive, full duplex and
+the hardware preamble on engine 0.
 
 The exact rules. The Python model (`model/engine.py`) and the Verilog are both built from
 this page, so if they disagree, this page says which one is wrong. Change it here first.
@@ -17,7 +20,7 @@ this page, so if they disagree, this page says which one is wrong. Change it her
 | `out_val`, `out_dir` | 32 each | the engine's pin output levels and directions (1 = drive) |
 | TX FIFO, RX FIFO | 4 x 16 each | to and from the host; **engine 0's TX FIFO is 64 x 16** |
 | `crc` | 32 | the CRC unit's register (every engine) |
-| serialiser | | engine 0 only: `ser_busy`, `ser_under`, phase, word count, shift register, bit and half-bit counters, divider, skip counter (section "Serialiser") |
+| serialiser, receiver | | engine 0 only: `ser_busy`, `ser_under`, phase, word count, shift register, bit and half-bit counters, divider, skip counter (section "Serialiser"); the mode and the receiver (section "Receiver and full duplex") |
 
 Reset: everything 0, except `osr_count = 16` (empty), `pc = start` and `crc = crcinit`.
 
@@ -32,16 +35,16 @@ Reset: everything 0, except `osr_count = 16` (empty), `pc = start` and `crc = cr
 | `set_base`, `set_count` | 5, 0-5 | pins written by `SET pins` |
 | `side_base`, `side_count` | 5, 0-2 | side-set pins; `side_count` bits are taken from the top of the delay field |
 | `side_opt` | 1 | if 1, the top bit of the middle field is a side-set **enable**, so instructions without `side N` leave the side pins alone |
-| `side_dir` | 1 | if 1, side-set writes the side pins' **directions** instead of their levels (open-drain buses: a side value of 1 pulls the pin low, 0 lets it go). Added 2 Nov 2026 for I2C's SCL |
+| `side_dir` | 1 | if 1, side-set writes the side pins' **directions** instead of their levels (open-drain buses: a side value of 1 pulls the pin low, 0 lets it go). Used for I2C's SCL |
 | `in_base` | 5 | `IN pins` reads from here upwards; `WAIT` relative pins count from here |
 | `jmp_pin` | 5 | pin tested by `JMP PIN` |
 | `out_right`, `in_right` | 1, 1 | shift direction: 1 = right (LSB first, UART), 0 = left (MSB first, SPI/I2C) |
 | `fault_addr` | 5 | where a timed-out `WAIT` jumps to |
 | `crcpoly`, `crcinit` | 32, 32 | the CRC unit's polynomial (reflected form) and start value (host registers CRCPOLY, CRCINIT) |
-| SERCFG | 13 | engine 0 only: `[0]` enable, `[1]` Manchester, `[2]` differential, `[3]` end marker, `[4]` CRC append, `[5]` complement on append, `[6]` CRC watches SER, `[9:7]` reserved, `[12:10]` CRC skip words. Engines 1 and 2 have it fixed at 0 |
+| SERCFG | 13 | engine 0 only: `[0]` enable, `[1]` Manchester, `[2]` differential, `[3]` end marker, `[4]` CRC append, `[5]` complement on append, `[6]` CRC watches SER, `[8:7]` mode (read back: 00 transmit, 01 receive, 10 full duplex; written only with the key, section "Receiver and full duplex"), `[9]` hardware preamble, `[12:10]` CRC skip words. Engines 1-3 have it fixed at 0 |
 | `serdiv` | 16 | engine 0 only: the serialiser's half-bit period in system clocks, minus 1 |
 
-Pin numbers wrap modulo 32 (a 32-pin space; the chip uses 20 of them).
+Pin numbers wrap modulo 32 (a 32-pin space; the chip uses 19 of them: 0-13 and 15-19).
 
 ## Instruction word
 
@@ -68,7 +71,7 @@ side-set value, then the delay in whatever is left. E.g. `side_opt = 1, side_cou
   The synchroniser resets to 0, so for the first 2 clocks after reset every pin reads low.
   Programs that look for a falling edge should first `wait 1` for the idle level (found by `model/test_measure.py`).
 
-## Program memory (SRAM-ready, decided 2 Nov 2026)
+## Program memory
 
 The program memory behaves like IHP's SRAM block whichever cells build it: one port, reads on the clock.
 - Every clock, the engine presents the address of the instruction it will need next (the next `pc`);
@@ -83,7 +86,7 @@ The program memory behaves like IHP's SRAM block whichever cells build it: one p
 
 Within one system clock, everything is decided from the state at the **start** of that clock:
 - The host's push into the TX FIFO is accepted only if the FIFO was not full at the start of the clock.
-  On engines 1 and 2 the word becomes visible to the engine from the next clock; on engine 0, see below.
+  On engines 1-3 the word becomes visible to the engine from the next clock; on engine 0, see below.
 - The host's pop from the RX FIFO is accepted only if it was not empty at the start of the clock;
   the host gets the word that was at the head.
 - The engine's PULL / PUSH and `MOV status` see the FIFO levels at the start of the clock, and so does the serialiser.
@@ -101,7 +104,7 @@ Each clock, decided from the state at the start of the clock:
 - If there is no accepted host push, the head is empty or is taken this clock, and the memory holds a word not yet in
   the head, that word is read into the head. It is the head from the next clock.
 - So a word pushed in clock k into an empty FIFO is ready from clock k + 2 when clock k + 1 has no host push (one clock
-  later than on engines 1 and 2); each further clock with a host push delays it one clock more. After the head is taken
+  later than on engines 1-3); each further clock with a host push delays it one clock more. After the head is taken
   in a clock with a host push, the next word is ready one clock later than after one taken in a clock without.
 - While the head is empty, PULL and the serialiser see the FIFO as empty, whatever the level: a blocking PULL stalls,
   a non-blocking one loads `x`; the serialiser waits in FILL and underruns in DATA (see Serialiser).
@@ -115,8 +118,8 @@ Each clock, decided from the state at the start of the clock:
 `OUT` destinations 3 and 7 discard the data (the OSR still shifts).
 `MOV` destination 4 does nothing; `MOV` op 3 is a plain copy. `SET` destinations 3, 5, 6, 7 do nothing.
 `TIME` actions 6 and 7 do nothing. In `PUSH/PULL`, bits 4:0 are ignored. In `IN/OUT`, bit 4 of the count is ignored
-(only bits 3:0 count; 0 means 16). `WAIT` indices 16-23 read the pins of those numbers (reserved for later use).
-v0.3 took three former reserved encodings: `IN` source 7 (the CRC), `MOV` destination 3 (`ser`) and `TIME` action 5
+(only bits 3:0 count; 0 means 16). `WAIT` indices 16-23 read the pins of those numbers.
+v0.3 uses three formerly reserved encodings: `IN` source 7 (the CRC), `MOV` destination 3 (`ser`) and `TIME` action 5
 (CRC reset); `WAIT` index 24 reads the serialiser instead of pin 24 on engine 0.
 
 ## The eight instructions
@@ -128,7 +131,7 @@ Conditions: 0 always; 1 `!x` (x == 0); 2 `x--` (x != 0, then x -= 1 either way);
 **1 WAIT** `[7] level, [6] timeout, [5] rel, [4:0] index`.
 Stall until the pin is at `level`. Pin = `index` if `rel = 0`, else `in_base + index`.
 On engine 0, pin number 24 (whether from `index` or `in_base + index`, modulo 32) is the serialiser's busy flag
-instead of a pin: `wait 0, ser` stalls until the frame has gone out. On engines 1 and 2 number 24 is a pin as before
+instead of a pin: `wait 0, ser` stalls until the frame has gone out. On engines 1-3 number 24 is a pin
 (it reads 0 on the chip), so `wait 0, ser` passes at once there and `wait 1, ser` never does. The timeout works as
 for a pin. Likewise on engine 0 number 25 is the receiver's frame-ready flag (v0.4): `wait 1, 25` stalls until a
 received frame is in the buffer.
@@ -157,11 +160,11 @@ timing") **or the serialiser busy**: stall if block, else `osr = x`. Otherwise `
 
 **5 MOV** `[7:5] dst, [4:3] op, [2:0] src`.
 Destinations: 0 pins (from `out_base`); 1 x; 2 y; 3 ser (the serialiser: start a frame of that many words, 0 stops
-it; engines 1 and 2, and engine 0 with SERCFG enable 0, do nothing); 5 pc; 6 isr (`isr_count = 0`); 7 osr (`osr_count = 0`).
+it; engines 1-3, and engine 0 with SERCFG enable 0, do nothing); 5 pc; 6 isr (`isr_count = 0`); 7 osr (`osr_count = 0`).
 Ops: 0 copy; 1 invert (bitwise NOT); 2 bit-reverse (16 bits).
 Sources: 0 pins (16 from `in_base`); 1 x; 2 y; 3 zero; 4 stopwatch; 5 status; 6 isr; 7 osr.
 `status` = `[3:0]` TX FIFO level, saturating at 15; `[7:4]` RX FIFO level; `[8]` serialiser busy; `[9]` serialiser
-underrun; other bits 0. Bits 8 and 9 are 0 on engines 1 and 2.
+underrun; other bits 0. Bits 8 and 9 are 0 on engines 1-3.
 
 **6 SET** `[7:5] dst, [4:0] value`.
 Destinations: 0 pins (`set_count` from `set_base`); 1 x; 2 y; 4 pin directions (same pins).
@@ -176,7 +179,7 @@ gives exactly the number of ticks from the `time start` to the capture.
 
 ## CRC unit (v0.3; every engine)
 
-**Built only where the build asks for it (`CRC = 1`).** The ASIC build has no CRC unit (7 Nov 2026): `crc` reads 0,
+**Built only where the build asks for it (`CRC = 1`).** The Tiny Tapeout build has no CRC unit: `crc` reads 0,
 CRCPOLY, CRCINIT and CRC read 0, `IN` source 7 shifts in zeros and `TIME 5` does nothing. SERCFG `[4]` (CRC append)
 then appends 32 zeros (ones if `[5]`), so an Ethernet frame is sent with the FCS computed by the host as the last two
 FIFO words and `[4]` off. The encodings are unchanged.
@@ -187,7 +190,7 @@ A 32-bit register `crc`, right-shifting (reflected) form. One step with bit `b`:
 complemented on append). Reset: `crc = crcinit` when the engine starts, on `TIME 5`, and when the serialiser starts
 a frame. A reset and a step in the same clock: the reset wins and the bit is lost.
 
-Which bits it takes is SERCFG bit 6 (fixed at 0 on engines 1 and 2):
+Which bits it takes is SERCFG bit 6 (fixed at 0 on engines 1-3):
 - **0, IN mode**: one step per executed IN instruction, with the first bit that IN shifted in (`data` bit 0 with
   `in_right`, bit `n - 1` without). A receiver that wants every bit through the CRC shifts one bit per IN.
 - **1, SER mode**: one step per data bit the serialiser sends, in the clock that bit's first half starts, except the bits
@@ -206,7 +209,7 @@ Phases: FILL, DATA, CRC, END. State visible to programs: `ser_busy` (`WAIT` 24, 
 - **Start.** `MOV ser, src` with SERCFG enable 1 and `src != 0` (the value after the MOV op): `ser_busy = 1`,
   `ser_under = 0`, word count = `src`, skip count = SERCFG `[12:10]`, `crc = crcinit`, phase FILL. It restarts a frame
   already in progress. `src = 0`: `ser_busy = 0` (abort: the pins are released at once, words left in the FIFO stay).
-  With enable 0, or on engines 1 and 2, `MOV ser` does nothing.
+  With enable 0, or on engines 1-3, `MOV ser` does nothing.
 - **FILL.** The serialiser waits, busy but not driving the pins, until the TX FIFO holds at least the word count or is
   full (64), and its head word is ready (see "Engine 0's TX FIFO"). Then, in that clock, it pulls the first word and starts its first bit. So the host may push the count and
   the words in one burst at any speed: nothing goes out until the whole frame is in. Underrun cannot happen in FILL.

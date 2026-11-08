@@ -1,7 +1,8 @@
-# Input glitch filter, v0.1 (2 Nov 2026)
+# Input glitch filter, v0.1
 
-Part of the measuring headline: every chip input can ignore pulses shorter than a set time, from
-electrical spikes (tens of ns) to mechanical switch bounce (milliseconds), with one design.
+Every chip input (engine pins 0-7 and 15-19) can ignore pulses shorter than a set time, from electrical spikes (tens
+of ns) to mechanical switch bounce (milliseconds), with one design. One setting, register 0x29 (FILTER), applies to
+every input. Engine 0's receiver bypasses the filter (`docs/isa.md`, "Receiver and full duplex").
 
 ## Settings
 

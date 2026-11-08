@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # End-to-end chip test. Optional: CHIP_SRC_OVERRIDE="file.v=replacement.v" to swap one source (planted bugs);
-# NENG=2 to test the two-engine build the kit uses (default 3, the ASIC); LATE=1 to sample MISO late;
+# NENG=2 to test the two-engine build the kit uses (default 3, src/chip.v; the Tiny Tapeout build is NENG=4 CRC=0); LATE=1 to sample MISO late;
 # SER0=0 CRC=0 TXDEPTH0=4 for the kit's default build (no serialiser, no CRC units, 4-word TX FIFO).
 cd "$(dirname "$0")/.."
 export PATH="/d/Tools/oss-cad-suite/bin:/d/Tools/oss-cad-suite/lib:$PATH"

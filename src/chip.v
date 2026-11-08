@@ -1,6 +1,6 @@
 // The whole chip: SPI host port + chip-wide input filter and ID register + NCLUSTER clusters (src/cluster.v), each of
-// NENG engines (3 on the ASIC, decided 3 Nov 2026: four do not place on the 6x4 tile; the MachXO3L kit fits 2, the
-// Cyclone IV board 3). Tiny Tapeout pin interface. Spec: docs/host_port.md (host side), docs/isa.md (engines),
+// NENG engines (the Tiny Tapeout wrapper sets 4 with CRC = 0; the MachXO3L kit build has 2, the Cyclone IV and Mojo
+// builds 3, or 2 with the serialiser). Tiny Tapeout pin interface. Spec: docs/host_port.md (host side), docs/isa.md (engines),
 // docs/core_design.md (hierarchy).
 
 `timescale 1ns/1ps

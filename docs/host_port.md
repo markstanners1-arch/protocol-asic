@@ -1,8 +1,11 @@
-# Host port, v0.3 (5 Nov 2026: v0.2 plus the serialiser and CRC registers 0x2B-0x33, two STATUS bits)
+# Host port, v0.3
+
+v0.2 plus the serialiser and CRC registers 0x2B-0x33 and two STATUS bits; the receive and full-duplex registers
+(0x34-0x37, SERCFG `[9:7]`) are marked v0.4, as in `docs/isa.md`.
 
 How a microcontroller (the RP2040 on the Tiny Tapeout board, an ESP32, a Raspberry Pi) talks to the chip.
-The chip has **three engines** (A-C, numbered 0-2; four did not place on the tile); the MachXO3L bench build has two.
-Read register 0x2A to find out how many.
+The Tiny Tapeout chip has **four engines** (A-D, numbered 0-3); the FPGA builds have one to three
+(`docs/core_design.md`, "Builds"). Read register 0x2A to find out how many.
 
 ## Wires
 
@@ -16,7 +19,8 @@ Read register 0x2A to find out how many.
 
 SPI **mode 0** (clock idles low, data sampled on the rising edge, changed on the falling edge), MSB first.
 MISO only ever changes just after a **falling** edge, so a host may sample it anywhere between the rising
-edge and the next falling edge. (The ESP32 samples late; see the bench notes in the README.)
+edge and the next falling edge. (A host that samples late in the bit, as the ESP32's SPI hardware does, still reads
+the right bit; the whole-chip test checks both with `LATE=1`.)
 The chip samples SCK with its own clock, so **SCK must be at most 1/8 of the chip clock**
 (e.g. 6 MHz SPI for a 50 MHz chip). This keeps the whole chip in one clock domain: no crossing hazards.
 
@@ -26,15 +30,13 @@ The chip samples SCK with its own clock, so **SCK must be at most 1/8 of the chi
 CS low | 16-bit command | 16-bit word | 16-bit word | ... | CS high
 ```
 
-Command: `[15] 1 = read, 0 = write`  `[14:12] engine (0 = A, 1 = B, 2 = C)`  `[11:6] cluster (0)`  `[5:0] register`.
-So the first byte is `read << 7 | engine << 4` and the second is the register. (v0.1 had a one-byte command with a
-one-bit engine field; it grew on 3 Nov 2026 when the chip went from two engines to three.) An engine number past the
-last one is harmless: its writes are ignored and its reads return 0.
+Command: `[15] 1 = read, 0 = write`  `[14:12] engine (0 = A, 1 = B, 2 = C, 3 = D)`  `[11:6] cluster (0)`  `[5:0] register`.
+So the first byte is `read << 7 | engine << 4` and the second is the register. An engine number past the last one is
+harmless: its writes are ignored and its reads return 0.
 
-Bits `[11:6]` are the **cluster number** (5 Nov 2026; `docs/core_design.md`, Hierarchy). This chip has one cluster,
+Bits `[11:6]` are the **cluster number** (`docs/core_design.md`, Hierarchy). This chip has one cluster,
 number 0, which holds all its engines and the chip-wide registers. A cluster number that does not exist (1 to 63 here)
-reads 0 for every register, FILTER and ID included, and its writes are ignored. Hosts that send 0 in these bits, as
-every program so far does, see no difference.
+reads 0 for every register, FILTER and ID included, and its writes are ignored. Hosts send 0 in these bits.
 
 Each 16-bit word is written to, or read from, the register; then the register number **moves on by one**,
 except for the two FIFO registers, which stay put (so a burst of words goes through the same FIFO).
@@ -54,9 +56,9 @@ while the host clocks out anything (zeros).
 | 0x25 | INCFG | R/W | [4:0] in_base, [9:5] jmp_pin, [14:10] fault_addr |
 | 0x26 | TXFIFO | W (R) | push a word to the engine (dropped if the FIFO is full: check STATUS). Engine 0's FIFO holds 64 words, the others 4. **Engine 0 in receive mode:** reads take the received words in order (0 when none); writes are dropped |
 | 0x27 | RXFIFO | R | pop a word from the engine (reads 0 if empty) |
-| 0x28 | STATUS | R | [2:0] TX level **saturating at 7** (the exact level is in 0x33), [6:4] RX level, [8] running, [13:9] pc, [14] serialiser busy, [15] serialiser underrun (engines 1 and 2: 0) |
+| 0x28 | STATUS | R | [2:0] TX level **saturating at 7** (the exact level is in 0x33), [6:4] RX level, [8] running, [13:9] pc, [14] serialiser busy, [15] serialiser underrun (engines 1-3: 0) |
 | 0x29 | FILTER | R/W | **chip-wide** (any engine number reaches it): input glitch filter, [3:0] N, [7:4] P; a new input level must hold for N+1 ticks of 2^P clocks (docs/input_filter.md). 0 = shortest (about 1 clock) |
-| 0x2A | ID | R | **chip-wide**: [3:0] number of engines (3 on the chip, 2 on the kit), [7:4] this spec's version (2) |
+| 0x2A | ID | R | **chip-wide**: [3:0] number of engines (4 on the Tiny Tapeout chip; FPGA builds 1-3), [7:4] this spec's version (2) |
 | 0x2B | SERCFG | R/W | **engine 0 only** (reads 0 and ignores writes on the others): [0] serialiser enable, [1] Manchester (else NRZ), [2] differential (out_base + 1 carries the inverse), [3] end marker (line high 6 half-bits after the last bit), [4] CRC append (32 bits after the data), [5] complement the appended CRC, [6] CRC watches the serialiser's bits (else IN bits), [8:7] mode (v0.4: read back the mode in force, 00 transmit, 01 receive, 10 full duplex; a write changes it only with the key 101 in [15:13], [8] = 1 asking for full duplex, else [7]; only when idle; see docs/isa.md "Receiver and full duplex"), [9] hardware preamble (seven 0x55 and the SFD before each frame), [12:10] CRC skip: the first N words of a frame are not fed to the CRC (4 for Ethernet's preamble and SFD) |
 | 0x2C | SERDIV | R/W | **engine 0 only**: half-bit period in chip clocks, minus 1 (10 Mbit Manchester: 0 at 20 MHz, 1 at 40 MHz) |
 | 0x2D, 0x2E | CRCPOLY lo, hi | R/W | the CRC unit's polynomial, reflected form (Ethernet 0xEDB88320, Modbus 0xA001) |
@@ -84,9 +86,9 @@ Full duplex (v0.4, engine 0): `sercfg | 0xA100` (with `[9]` set for the hardware
 is under 16 (a longer frame starts when the ring is full and must be topped up as it goes). Read received words from
 0x37.
 
-FPGA builds: the MachXO3L kit and the Cyclone IV board are built without the serialiser and the CRC units
-(`SER0 = 0`, `CRC = 0`, 4-word TX FIFOs; `docs/core_design.md`), so on them 0x2B-0x32 read 0 and STATUS bits 14-15
-are 0. The ID register is the same in every build. All settings reset to 0 (engines stopped) when the chip resets.
+Builds without the serialiser (the default FPGA builds: `SER0 = 0`, 4-word TX FIFOs; `docs/core_design.md`, "Builds")
+read 0 at 0x2B, 0x2C and 0x34-0x37 and have STATUS bits 14-15 at 0 (SERSTAT still gives the TX FIFO level). Builds without CRC units (`CRC = 0`, the Tiny Tapeout chip
+among them) read 0 at 0x2D-0x32. The ID register's layout is the same in every build. All settings reset to 0 (engines stopped) when the chip resets.
 Change settings while an engine is stopped; they are applied when RUN goes to 1.
 
 ## Engine pins to chip pins
@@ -100,6 +102,6 @@ Each engine sees 32 pin numbers. On this chip:
 | 15-19 | `ui_in[3..7]` | in only |
 | others | none | read as 0 |
 
-If several engines drive the same pin, the lowest-numbered one wins (A over B over C). Every engine can read every input.
+If several engines drive the same pin, the lowest-numbered one wins (A over B over C over D). Every engine can read every input.
 Every input (engine pins 0-7 and 15-19) passes through a 2 flip-flop synchroniser and the glitch filter
 before the engines see it, which adds a few clocks of delay (the same on rising and falling edges).

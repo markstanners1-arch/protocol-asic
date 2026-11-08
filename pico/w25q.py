@@ -1,16 +1,16 @@
 """W25Q32 SPI flash from the Pico: engine A runs programs/spi_master.asm (mode 0, MSB first) to a real SPI slave, a Winbond
-W25Q32 module (32 Mbit = 4 MB, 3.3 V). Not run yet: the module arrives 5 Nov 2026.
+W25Q32 module (32 Mbit = 4 MB, 3.3 V). Checked against a modelled device; not yet run on hardware.
 
 Pins. spi_master.asm takes its four pins as ONE group from set_base: SCK = base + 0 (side-set), MOSI = base + 1 (out),
 MISO = base + 2 (in), CS = base + 3 (set), and it drives SCK, MOSI and CS itself ("set pindirs, 11"), so the group must be four
 consecutive engine pins with base + 2 able to read. On the kit that is engine pins 4-7 only: pins 8-13 are output only (a MISO
 there reads nothing), pins 15-19 are input only and pin 14 is not on the header, and 0-3 carry the serial line, the IR receiver and
-the I2C bus. So the flash goes where the 74HC595 went (wiring sheet section 11): the keypad's four COLUMN leads come out of
+the I2C bus. So the flash goes where the 74HC595 went (wiring sheet section 10): the keypad's four COLUMN leads come out of
 J4-14 to 17 first (one at a time, as the 595 already is); the rows and their pull-ups can stay.
     J4-14 (L16) engine pin 4 = SCK  -> module CLK        J4-15 (K14) engine pin 5 = MOSI -> module DI (IO0)
     J4-16 (K16) engine pin 6 = MISO <- module DO (IO1)   J4-17 (K15) engine pin 7 = CS   -> module CS
     module VCC -> J4-1 or J4-2 (3.3 V, never 5 V), module GND -> the negative rail (wired to J4-11 or 12).
-    WP (IO2) and HOLD (IO3): most modules pull them up on the board; if yours brings them out bare, tie both to 3.3 V.
+    WP (IO2) and HOLD (IO3): most modules pull them up on the board; if the module brings them out bare, tie both to 3.3 V.
 SCK = 12 MHz / (6 * (CLKDIV + 1)) = 1 MHz with CLKDIV 1. One 16-bit command word per byte: xfer << 11 | byte << 3, and the byte
 that came back on MISO is pushed to the RX FIFO; select / deselect words drop and raise CS.
 

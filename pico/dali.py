@@ -1,6 +1,6 @@
-"""DALI from the Pico (written 4 Nov 2026, model-proven; the bench run waits for the gear). Engine A runs programs/dali_tx.asm on
+"""DALI from the Pico (the two programs are checked against the model, model/test_dali.py; not yet run on hardware). Engine A runs programs/dali_tx.asm on
 engine pin 8 (J4-18, out only) into the DALI interface's TX input; engine B runs programs/dali_rx.asm on engine pin 0 (J4-6) from
-the interface's RX output. Interface: the Waveshare Pico-DALI2 shield (docs/dali_bench.md: kit 3.3 V to its pin 36, GND to a GND
+the interface's RX output. Interface: the Waveshare Pico-DALI2 shield (kit 3.3 V to its pin 36, GND to a GND
 pin, J4-18 to its pin 9, its pin 5 to J4-6, a DALI PSU or 12-18 V through 56 ohm on its bus terminal, the gear across the bus).
 J4-6 normally carries the Pico's GP0 UART lead (pico/uart_rx.py): move that lead out first.
 The scripted sequence, each line printed with the frame sent and the word that came back:

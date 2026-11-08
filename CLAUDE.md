@@ -1,8 +1,8 @@
 # D:\ProtocolASIC: protocol emulator ASIC (Jane Street / Tiny Tapeout competition)
 
-Mark Stanners + Claude, started 2 Nov 2026. **Submit by 18 Jan 2027** (aim 11 Jan). Read `README.md` first:
-the roadmap and a dated progress log of everything done and found. Specs: `docs/core_design.md`, `docs/isa.md`
-(exact engine rules), `docs/host_port.md`, `docs/input_filter.md`, `docs/memory_options.md`.
+Mark Stanners + Claude, started 2 Nov 2026. **Submit by 18 Jan 2027**. Read `README.md` first:
+what the chip is, its layout, verification and bench results. Specs: `docs/core_design.md`, `docs/isa.md`
+(exact engine rules), `docs/host_port.md`, `docs/input_filter.md`.
 
 ## Rules
 - Bench rule: a lead or key fault is checked by continuity to the labelled pads, or with `programs/read_pins.asm`,
@@ -48,6 +48,6 @@ the roadmap and a dated progress log of everything done and found. Specs: `docs/
 - **Design main** adds receive and full duplex on engine 0 (Manchester receiver, keyed mode in SERCFG [8:7], 16/48-word
   rings, RXDATA 0x37, hardware preamble), proven by model, cosim, chip test, planted bugs and on the Mojo
   (`pico/fdx_loop.py`). TT branch `rx-duplex` carries it (receive pin latch `sg13cmos5l_dlhq_1` in the wrapper,
-  `test/rtl_cells.v` for the RTL test); TT main moves to it when its gds run is clean and Mark says so.
-- Host port v0.2, ISA v0.4 (docs/isa.md). Bench wiring in `docs/bench_wiring.md` / `.pdf`. Mark's Hantek DSO5102P is on
-  the bench if a scope capture is wanted.
+  `test/rtl_cells.v` for the RTL test); TT main moves to it when its gds run is clean.
+- Host port and ISA v0.4 (docs/isa.md). Bench wiring in `docs/bench_wiring.md`. A Hantek DSO5102P oscilloscope is on
+  the bench for scope captures.

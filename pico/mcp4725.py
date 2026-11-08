@@ -1,6 +1,6 @@
 """MCP4725 12-bit I2C DAC from the Pico: engine A runs programs/i2c_master.asm (SCL = engine pin 2 = J4-10, SDA = pin 3 = J4-13)
-at 400 kHz to the DAC module on the same bus as the EEPROMs. Not run yet: the module arrives 5 Nov 2026.
-Wiring (sheet section 13): module VDD/VCC -> J4-1 or J4-2 (3.3 V only), GND -> the negative rail (wired to J4-11 or 12),
+at 400 kHz to the DAC module on the same bus as the EEPROMs. Checked against a modelled device; not yet run on hardware.
+Wiring (sheet section 12): module VDD/VCC -> J4-1 or J4-2 (3.3 V only), GND -> the negative rail (wired to J4-11 or 12),
 SCL -> J4-10, SDA -> J4-13, OUT -> the meter's red lead / the scope probe (black lead to the rail). A0 pad as the module has it.
 The address is 0x60 or 0x61 (A0 pad) on the MCP4725A0 most modules carry, 0x62/0x63 on an A1 part, 0x64/0x65 on an A2: the
 script probes 0x60-0x67 and uses the first that answers.
@@ -20,7 +20,7 @@ The test, in order:
      scope must show (CH1 on OUT, 1 V/div, 1 ms/div at first; trigger on the falling flyback)
   4. triangle, 64 up and 64 down, 10 s: half the sawtooth's frequency
   5. back to 0 V
-PASS = the address answered and every byte of every write was acked (the voltages and the scope trace are Mark's to check).
+PASS = the address answered and every byte of every write was acked (the voltages and the scope trace are checked by meter and scope).
 Run:  pwsh D:/ProtocolASIC/pico/run.ps1 -Script mcp4725.py -Seconds 40"""
 import time
 from chip_host import Chip, wrap_reg, ENG_A, R_CLKDIV, R_WRAP, R_OUTCFG, R_MISC, R_INCFG, R_TX, R_RX, R_FILTER

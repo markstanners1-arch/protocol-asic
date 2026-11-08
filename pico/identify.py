@@ -32,7 +32,7 @@ try:
 except NameError:
     SELFTEST = False
 # SELFTEST: the Pico makes two known signals while it listens, and the answers are checked at the end (Mojo bench sheet,
-# section 14): a 10 kHz PWM clock on GP2 (already wired to engine pin 15, hole 57) and a 115200 baud UART from GP4
+# section 13): a 10 kHz PWM clock on GP2 (already wired to engine pin 15, hole 57) and a 115200 baud UART from GP4
 # (UART1 TX, one extra lead to engine pin 16, hole 58), "Hello, world" every 20 ms.
 if SELFTEST:
     from machine import Pin, PWM, UART, Timer

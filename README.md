@@ -1,934 +1,142 @@
 # Protocol emulator ASIC
 
-Our entry for Jane Street's protocol emulator ASIC competition
-(https://blog.janestreet.com/protocol-emulator-asic-competition/).
+A programmable protocol emulator chip for Jane Street's protocol emulator ASIC competition
+(https://blog.janestreet.com/protocol-emulator-asic-competition/), on IHP's 130 nm SG13CMOS5L process through Tiny
+Tapeout (6x4 tiles). Four small engines run serial protocols as firmware (UART, SPI, I2C, NEC infra-red, LED data and
+more), time what they see on their pins, and are loaded and driven by a host microcontroller over an SPI port.
+Engine A also has a bit-cell serialiser and receiver for Manchester and NRZ lines: 10 Mbit/s Ethernet frames, sent and
+received, in full duplex.
 
-- Process: IHP 130 nm CMOS5L via Tiny Tapeout, 6x4 tiles (about 24K logic cells)
-- Must do: UART, SPI, I2C in firmware on a small programmable core
-- Stretch: low-speed USB, 10 Mbit Ethernet; also CAN, PS/2, JTAG, SWD
-- Deadline: 18 January 2027 (target shuttle: March 2027)
-- Team: Mark Stanners + Claude
+Mark Stanners and Claude (Anthropic). The Tiny Tapeout project is
+[ttihp-protocol-emulator](https://github.com/markstanners1-arch/ttihp-protocol-emulator) (datasheet in its
+`docs/info.md`); its `src/` is a copy of this repository's `src/` plus the Tiny Tapeout wrapper and layout settings.
+
+## The chip
+
+| | |
+|---|---|
+| Engines | 4 (A-D), each with its own 32 x 16-bit program memory, 4-word FIFOs each way, registers x, y, osr, isr (16-bit) |
+| Instruction set | 8 instructions after the RP2040 PIO (JMP, WAIT, IN, OUT, PUSH/PULL, MOV, SET, side-set, wrap) plus TIME, a 16-bit saturating stopwatch; WAIT with a timeout ([docs/isa.md](docs/isa.md)) |
+| Clock | 40 MHz; each engine ticks every clkdiv + 1 clocks (25 ns to 1.64 ms) |
+| Host port | SPI mode 0, SCK up to clk/8; 16-bit command `[15]` read, `[14:12]` engine, `[5:0]` register; bursts; IRQ output; ID register 0x2A reads 0x0024 ([docs/host_port.md](docs/host_port.md)) |
+| Pins | 8 two-way (engine pins 0-7), 6 output-only (8-13), 5 input-only (15-19); the lowest-numbered engine driving a pin wins |
+| Inputs | two-flip-flop synchroniser and a glitch filter on every input: a level must hold N + 1 ticks of 2^P clocks, from tens of ns to milliseconds ([docs/input_filter.md](docs/input_filter.md)) |
+| Memory | IHP RM_IHPSG13_1P_64x16_c2 SRAM macros: one per engine for the program, one for engine A's 64-word transmit buffer; flip-flops on the FPGA builds |
+| Engine A serialiser | NRZ or Manchester, optional differential pair, end marker, half-bit = SERDIV + 1 clocks (10 Mbit/s at SERDIV 1); a frame starts only when it is all in the buffer; underrun flagged. The host supplies the Ethernet FCS on the Tiny Tapeout build (the CRC-32 unit, `src/crc32.v`, is left out there) |
+| Engine A receiver | Manchester decoder sampling the pin on both clock edges (a latch in the wrapper holds the falling-edge sample); locks on the preamble and start-of-frame delimiter; raw mode; keyed, idle-only mode change: transmit, receive (64-word buffer) or full duplex (16-word transmit ring, 48-word receive ring, received words read from RXDATA 0x37); hardware preamble option |
+| Process | IHP SG13CMOS5L 130 nm, Tiny Tapeout 6x4 tiles, die 1289.28 x 710.64 um |
 
 ## Layout
 
-- `src/`  Verilog design
-- `test/` test benches
-- `docs/` notes and design decisions (`core_design.md` the blocks, `isa.md` the exact instruction rules)
-- `model/` Python reference: assembler (`asm.py`) and clock-by-clock engine model (`engine.py`)
-- `programs/` engine programs in our assembly language
-- `fpga/go_board/` bench tests on the Nandland Go Board
+| Build | Cells | Utilisation | Setup slack (slow corner) | Hold slack (fast corner) | Checks |
+|---|---|---|---|---|---|
+| Tiny Tapeout main: four engines, serialiser | 24,785 + 5 SRAM macros | 44.9 % | +6.39 ns | +0.145 ns | DRC, LVS, antenna 0; gate-level test and precheck pass |
+| With the receiver and full duplex (TT branch `rx-duplex`; local LibreLane run) | 25,457 + 5 SRAM macros | 46.5 % | +7.08 ns | +0.151 ns | route DRC, KLayout DRC, LVS, antenna 0; gate-level test pass |
+
+The local LibreLane flow (WSL Ubuntu, LibreLane 3.1.0.dev4, the Tiny Tapeout support tools) reproduces GitHub's runs
+metric for metric.
+
+## Programs
+
+Engine programs in `programs/` (our assembly language, `model/asm.py`). "Bench" means run on an FPGA build of the chip
+against real devices; "model" means proven on the Python model only.
+
+| Program | Words | What it does | Proven |
+|---|---|---|---|
+| `uart_tx` | 5 | UART 8N1 transmit | bench |
+| `uart_rx` | 13 | UART 8N1 receive, stop bit reported | bench |
+| `measure_baud` | 7 | times a start bit | bench |
+| `measure_pulse`, `measure_high` | 6, 6 | time low or high pulses | bench |
+| `i2c_master` | 19 | I2C master, open drain, clock stretching, one host word per START, byte or STOP | bench |
+| `i2c_sniff` | 29 | passive I2C monitor | bench |
+| `spi_master` | 14 | SPI mode 0 | bench |
+| `keypad` | 16 | 4x4 keypad scanner with debounce | bench |
+| `ir_nec`, `ir_tx` | 29, 31 | NEC infra-red decode; transmit with a 38 kHz carrier made in software | bench |
+| `eth_tx`, `ser_tx` | 16, 5 | Ethernet frames with link pulses; one serialiser frame per count | bench |
+| `read_pins`, `push_789` | 3, 10 | raw pin levels; pin isolation test | bench |
+| `dali_tx`, `dali_rx` | 13, 26 | DALI control device, forward and backward frames | model |
+
+Host scripts: `pico/` (MicroPython on a Raspberry Pi Pico 2, library `pico/chip_host.py`, including `identify.py`, which
+listens to an unknown 3.3 V board, measures each wire's levels and pulses, classifies it (UART and its baud, I2C, SPI,
+LED data and others) and pairs wires into buses) and `esp32/` (Arduino sketch
+`chip_test`).
+
+## Verification
+
+- **Python model** (`model/engine.py`), written from `docs/isa.md`, is the reference. Model tests run each program
+  against model partner devices (`model/i2c_slave.py`, `model/spi_slave.py`, simulated UART, keypad, infra-red,
+  DALI and identification targets, and the serialiser's output decoded back): `model/test_*.py`.
+- **Side-by-side random test**: `python model/cosim.py 1000 400 <seed>` runs 1000 random programs for 400 clocks on the
+  Verilog and on the model and compares every pin and register on every clock; `USE_SRAM=1` uses IHP's SRAM model,
+  `CRC=0` the Tiny Tapeout build, `RX_FOCUS=1` concentrates on the receiver and full duplex. Every change is run on both
+  memories; the receive and full-duplex logic alone has run several million clocks, identical throughout.
+- **Whole-chip test**: `bash test/run_chip.sh` drives the whole chip only through the SPI host port (programs loaded,
+  UART, I2C, SPI, the serialiser's Ethernet frame decoded from the pins, receive and full duplex over a loopback wire);
+  options `NENG=2|3|4`, `LATE=1` (the host samples late), `CRC=0`.
+- **Planted bugs**: every new test is checked by planting a bug it should catch; all have been caught.
+- **Gate level**: the Tiny Tapeout gate-level test runs on the routed netlist.
+
+## Bench results
+
+All on FPGA builds of the same `src/`, driven by an ESP32 or a Raspberry Pi Pico 2 through the SPI host port; each
+result is a scripted sequence read back line by line. Wiring in [docs/bench_wiring.md](docs/bench_wiring.md).
+
+| Board | Build | Tested | Result |
+|---|---|---|---|
+| Lattice MachXO3L Starter Kit | 2 engines, 12 MHz, ID 0x0022 | UART at 115200 / 57600 / 19200, engine B timing A's bits (104 / 208 / 624 clocks); glitch filter on and off; I2C master to an ESP32 and an Arduino UNO slave (clock stretching, repeated START) with engine B sniffing; AT24C256 EEPROM; I2C address scan; SPI to a 74HC595 (16 of 16 steps); 4x4 keypad; NEC remotes decoded; IR transmit loopback (6 of 6 frames, carrier 38.46 kHz); UART receive (256 values at 115200); baud measure 1200 to 460800 within 0.16 %; I2C sniffer at 100 and 400 kHz | PASS |
+| Mojo v3 (Spartan-6 LX9) | 3 engines, 50 MHz, ID 0x0023 | Pico regression (UART, timing, IRQ, pins, filter) | PASS |
+| Mojo v3 | serialiser build, 40 MHz, ID 0x0022 | Ethernet frames at 10 Mbit/s, Manchester, differential: 336,100 frames clean; frames captured with a logic analyser at 500 kbit/s and decoded, the FCS equal to zlib's CRC-32; blind identification of WS2811 LED data at 800 kbit/s; full duplex over a loopback wire: 10 Mbit/s with the hardware preamble, and a full Ethernet frame at 20 kbit/s with the host topping up the 16-word ring, every word received back; keyed mode rules | PASS |
+| Cyclone IV EP4CE6 | 3 engines, 50 MHz, ID 0x0023 | ESP32 regression (UART, B timing A at 432 / 872 / 2608 clocks, IRQ, pins, filter) | PASS |
+| Cyclone IV EP4CE6 | serialiser build, 40 MHz from the PLL, ID 0x0022 | ESP32 regression (344 / 696 / 2080 clocks) | PASS |
+| Nandland Go Board (iCE40 HX1K) | single blocks | UART (115,804 characters, all correct); SPI host port, 0 errors in 15,372 checks from 0.25 to 4 MHz; switch-bounce meter | PASS |
+
+Proven on the model only so far: the four-engine chip as a whole (no bench FPGA holds four), the SRAM macros (IHP's
+behavioural model), receive-only mode, DALI, and the `pico/w25q.py`, `ds3231.py` and `mcp4725.py` device scripts.
+
+## FPGA builds
+
+| Board | Build | Size | Fmax |
+|---|---|---|---|
+| MachXO3L-6900C | 2 engines (`bash fpga/machxo3/build.sh`) | 5,953 LUTs (86 %) | 28.7 MHz |
+| Cyclone IV EP4CE6 | 3 engines (`bash fpga/cyclone4/build.sh`) | 6,098 LEs (97 %) | 51.7 MHz |
+| Cyclone IV EP4CE6 | serialiser, receiver, full duplex, 2 engines (`build.sh ser`) | 5,702 LEs (91 %) | 43.7 MHz |
+| Mojo v3 (Spartan-6 LX9) | 3 engines | 4,242 LUTs (74 %) | 54.7 MHz |
+| Mojo v3 | serialiser, receiver, full duplex, 2 engines, 40 MHz | 85 % of slices | 42.3 MHz |
+
+Builds are loaded into the FPGA's RAM only (MachXO3L: `openFPGALoader -b machXO3SK file.bit`; Cyclone IV:
+`quartus_pgm -m jtag`; Mojo: `python fpga/mojo/load.py <port> <bin>`).
+
+## Repository
+
+- `src/` Verilog design: `chip.v`, `cluster.v`, `engine.v`, `serialiser.v`, `receiver.v`, `crc32.v`, `host_spi.v`,
+  `prog_mem.v`, `fifo_mem.v`, `glitch_filter.v`
+- `model/` Python reference: assembler, engine model, partner device models, tests, `cosim.py`
+- `test/` test benches: `tb_chip.v` (whole chip), `tb_cosim.v`; `test/wave/` a GTKWave view of a serialised frame
+- `programs/` engine programs
+- `pico/`, `esp32/` host scripts and sketches
+- `fpga/` builds for the MachXO3L kit, Cyclone IV, Mojo v3 and Go Board
+- `docs/` [core_design.md](docs/core_design.md) the blocks, [isa.md](docs/isa.md) the exact engine rules,
+  [host_port.md](docs/host_port.md) the register map, [input_filter.md](docs/input_filter.md),
+  [bench_wiring.md](docs/bench_wiring.md); `docs/layout/` synthesis reports and layout metrics
 
 ## Run the tests
 
-Tools: OSS CAD Suite 2026-11-02, unpacked at `D:\Tools\oss-cad-suite`
-(Icarus Verilog, Verilator, Yosys, nextpnr, GTKWave). From Git Bash:
+Tools: OSS CAD Suite (Icarus Verilog, Verilator, Yosys, nextpnr, GTKWave). From Git Bash:
 
-    ./run.sh test     # simulate every test bench, prints PASS/FAIL
-    ./run.sh size     # rough cell count per module
-    python model/compare_uart.py   # model running programs/uart_tx.asm vs uart_tx.v, every clock
-    python model/test_measure.py   # TIME stopwatch measuring a UART bit time
-    python model/test_serialiser.py   # serialiser + CRC unit on the model, Manchester decoded back, FCS against zlib
-    python model/cosim.py 1000 400 11   # Verilog engine vs model: 1000 random programs x 400 clocks, every clock
-    USE_SRAM=1 python model/cosim.py    # same, with IHP's SRAM block as program memory
-    bash test/run_chip.sh               # whole chip, end to end, driven only through the SPI host port
-    D:/Tools/oss-cad-suite/bin/gtkwave build/uart_tx.vcd   # look at the waveform
+    ./run.sh test                        # every unit test bench, PASS/FAIL
+    python model/cosim.py 1000 400 11    # Verilog against the model, every clock
+    USE_SRAM=1 python model/cosim.py 1000 400 12
+    bash test/run_chip.sh                # whole chip through the SPI host port
+    LATE=1 bash test/run_chip.sh
+    python model/test_receive.py         # receiver and full duplex on the model
+    bash test/wave/run_ser_frame.sh      # record a frame for GTKWave (test/wave/ser_frame.gtkw)
 
-## Roadmap (11 weeks to 18 Jan 2027)
+## Credits
 
-| Weeks | Stage | Done when |
-|---|---|---|
-| 1 (done 2 Nov) | Paper design: block diagram + instruction set (`docs/core_design.md`) | Mark has checked it and the open questions are settled |
-| 2 (done 2 Nov) | Python model of the core: runs our firmware exactly, clock by clock | UART TX firmware runs on the model and matches `uart_tx.v` bit for bit |
-| 3-4 (first pass done 2 Nov) | Verilog core, tested against the Python model cycle by cycle | thousands of random programs agree between model and Verilog |
-| 4-5 | Firmware: UART TX/RX, SPI, I2C, each with a model partner device | all three pass, plus the measuring features |
-| 6-7 | Into the Tiny Tapeout template; synthesis and layout on GitHub; fit 6x4, meet timing | clean build, timing met with margin |
-| 7-8 | FPGA on the bench, talking to real boards (ESP32/Arduino as the other end) | real UART, I2C and SPI traffic with a real device |
-| 9 | Stretch: CAN or PS/2 or low-speed USB; tidy the docs | |
-| 10 | Submit early (aim for 11 Jan, a week of slack) | |
-
-Other work comes first; this fills the gaps.
-
-## Progress
-
-- 2 Nov 2026: fixed-function UART transmitter + self-checking test bench (the known-good reference).
-  PASS on 46 bytes at two baud rates. Checked the test can fail: a broken stop bit and a
-  bit time one clock short were both caught. Size: 123 cells (31 flip-flops), about 0.5% of the budget.
-- 2 Nov 2026: bench board found: **Nandland Go Board** (iCE40 HX1K VQ100, 25 MHz, 1280 logic cells,
-  16 block RAMs, USB serial on the same lead). `fpga/go_board/`: hello test sends
-  "Hello from Gosforth Skies" at 115200 once a second (hold switch 1 for nonstop). Simulated: the decoded
-  line is correct. Built: 149/1280 cells (11%), timing good to 124 MHz.
-  **Flashed and working on the real board:** 5 s on COM5 = 5 clean lines, 135 characters, no errors.
-  Nonstop test (switch 1 held, back-to-back bytes): 115,804 characters, 4,288 complete lines, all correct.
-  (Scripts: `flash.ps1`, `listen.ps1`, `check_driver.ps1`; run them from an ordinary PowerShell window.)
-  Note: the whole two-engine chip won't fit a 1K part; the board tests one engine at a time.
-
-## Flashing the Go Board (first time only)
-
-iceprog/openFPGALoader talk to the board's FTDI chip through libusb, so on Windows
-interface 0 of the "Dual RS232-HS" device needs the WinUSB driver (Zadig does this).
-Leave interface 1 alone: that's the serial port we read the output on.
-That's a driver change on the PC, so Mark does it himself. Then:
-
-    fpga/go_board/build.sh prog
-    # serial terminal (PuTTY etc.) on the board's COM port, 115200 8N1
-- 2 Nov 2026: design questions settled (two engines, 16-bit registers, measuring as the headline, SPI host port).
-  Exact instruction rules written (`docs/isa.md` v0.1; each engine has its own 32-word program memory;
-  side-set made optional with an enable bit, as the UART program needs it).
-- 2 Nov 2026: **Python model working.** `programs/uart_tx.asm` on the model matches `uart_tx.v` on every frame,
-  sample by sample, at 8/16/32/88 clocks per bit (64 bytes each). The model runs back-to-back at the ideal
-  10 bits per byte; the Verilog test bench leaves 2 clocks between bytes (its handshake). Two planted program
-  bugs were both caught. TIME stopwatch measures a 'U' start bit exactly (8 to 1000 clocks, including a sender
-  2.8% slow). Found on the way: the input synchroniser reads low for 2 clocks after reset; programs wait for
-  idle-high first (noted in isa.md).
-- 2 Nov 2026: **Verilog engine written** (`src/engine.v`, one engine, from isa.md). Spec tightened first:
-  host/FIFO timing (everything decided from the state at the start of a clock) and every reserved encoding defined.
-  **Side-by-side test** (`model/cosim.py` + `test/tb_cosim.v`): random programs (half fully random words),
-  random configs, random pin activity and host traffic, full engine state compared every clock.
-  5 x 1000 programs x 400 clocks = **2,000,000 clocks, all identical**. Five planted Verilog bugs were all caught
-  (stopwatch capture was the weakest, so the generator now uses TIME more often: 3 -> 19 tests catching it).
-  Size: one engine = 7,072 generic gates (about 900 flip-flops, 640 of them program memory and FIFOs).
-  Two engines plus host port and filters: roughly 17K of the ~24K budget; it fits, but trimming is worth doing.
-  On the Go Board (iCE40 HX1K): 2,784 LUTs against 1,280, so **one full engine does not fit the HX1K**.
-  Options: a cut-down bench build (fewer pins/features), or the bigger FPGA Mark is looking for.
-  Next: trim (one shared pin writer instead of several 32-bit rotators, pin space 32 -> 20), then the host port.
-- 2 Nov 2026: Ada-style range checks added to the model (Mark's suggestion): after every clock each register
-  is checked against its declared range (e.g. counts 0..16, words 0..65535) and the model stops dead if one strays.
-  All model tests plus 1.2M more random clocks pass with the checks on; no register ever left its range.
-- 2 Nov 2026: **trim, round 1.** Measured first, by removing one part at a time: pin writing (several 32-pin
-  rotators) cost ~2,090 gates, program memory ~1,450, the IN/OUT shifters ~910, pin reading ~370, FIFO storage ~320.
-  Only one instruction runs per step, so the engine now has **one** shared pin reader, **one** 32-bit shifter
-  (serving IN and OUT, left and right) and **one** pin writer (plus the small side-set writer).
-  Result: 7,168 -> **5,930 gates (-17%)**; iCE40 2,784 -> 2,245 LUTs (still too big for the HX1K's 1,280).
-  Re-proved: 2,000,000 more random clocks identical to the model; three bugs planted in the new shared parts all caught.
-  Further options (not done): pin space 32 -> 24 or 20 (a spec change), program memory in latches or SRAM,
-  or a parameterised narrow bench build for the Go Board.
-- 2 Nov 2026: **SRAM question** (Jane Street hint). IHP has a 64 x 16 SRAM block (15,240 um2). Real IHP-cell area
-  of one engine: 99,091 um2, of which the flip-flop program memory is ~34,000. SRAM would save ~38K um2 chip-wide
-  (~5 %) but needs a clocked-read redesign. Full chip estimate ~230K um2 of ~750K. Details and lean in
-  `docs/memory_options.md`. (Earlier "24K cells" budgets were generic gate counts; um2 is the real measure now.)
-- 2 Nov 2026: **engine made SRAM-ready** (Mark's call: settle the memory's behaviour before building on it).
-  Program memory now reads on the clock (`src/prog_mem.v`), like IHP's SRAM; programs load only while stopped.
-  Two builds, one switch: flip-flops (98,351 um2 per engine) or IHP's 64x16 SRAM block (71,363 um2 incl. the
-  block). Both identical to the model on 1.2M random clocks (`USE_SRAM=1 python model/cosim.py` for the SRAM build);
-  a planted fetch-timing bug caught in both. iCE40 unchanged: 2,246 LUTs.
-- 2 Nov 2026: **host port and whole chip.** `docs/host_port.md` (SPI mode 0, command byte + 16-bit words,
-  auto-incrementing bursts, per-engine registers, pin map); `src/host_spi.v`; `src/chip.v` (`protocol_chip`,
-  Tiny Tapeout pins: two engines, settings registers, pin wiring, IRQ). On review, fixed a burst-read flaw before
-  testing (a pre-fetch would have popped one FIFO word too many). **End-to-end test** (`test/run_chip.sh`),
-  host side only: loads both engines over SPI; A sends "UHello!" as UART on uio[0]; B watches the same pin and
-  **measures A's bit time from the 'U' (40 clocks, exact)**; settings read back; program writes while running
-  ignored; FIFO reads pop exactly what they return (single and burst); pin conflict: A wins, stopping releases.
-  Four planted bugs (pop-on-load, program write while running, MISO shifting early, pin priority) all caught;
-  the pin-priority one was only caught after adding the conflict test.
-  **Whole-chip area (IHP cells):** flip-flop memory 195,069 um2; SRAM build 109,870 + 2 x 15,240 = 140,350 um2.
-  That is about 26 % / 19 % of the ~750K um2 allocation.
-  Not yet: input glitch filters, Tiny Tapeout template/info.yaml, layout.
-- 2 Nov 2026: **FPGA fit test for an iCE40 UP5K** (e.g. iCESugar v1.5), `fpga/up5k/up5k_top.v` (real two-way uio pins).
-  The whole chip places and routes: 4,554 of 5,280 cells (86%), 2 of 30 RAM blocks, 26 of 39 pins,
-  timing good to 15.4 MHz (passes at the iCESugar's 12 MHz; SPI host then up to 1.5 MHz).
-- 2 Nov 2026: **segment 1 bench test ready** (host port on real hardware). `fpga/go_board/spi_test_top.v` wraps the
-  unchanged `src/host_spi.v` with test registers, a loop-back FIFO, an ID register and a write counter;
-  `esp32/spi_host_test` (compiles, ESP32 core 3.2.0) hammers it at 0.25-10 MHz. Simulation predicts it works
-  to ~4.2 MHz and fails by 6.25 MHz (design spec: 3.1 MHz on the 25 MHz board). Wiring: PMOD 1 CS-GPIO5,
-  2 MOSI-GPIO23, 3 MISO-GPIO19, 4 SCK-GPIO18, 5 GND-GND. Not yet run on the bench.
-- 2 Nov 2026: **segment 1 on the bench: real SPI from an ESP32 into the host port on the Go Board.**
-  First run (after a wiring slip: three ESP32 leads one pin along) showed a **real bug simulation had missed**:
-  at 0.25-3 MHz about half the reads had the **last bit wrong** (A5C2 for A5C3), while 4-6 MHz passed.
-  Cause: the ESP32 samples MISO late in the bit; the port loaded the next word just after a *rising* edge,
-  so a late sampler saw the next word's first bit. The simulated host sampled exactly on the rising edge, so
-  it never saw it. Fixed the usual way: reproduced it in simulation first (added a late-sampling host to both
-  test benches), then made MISO change **only after falling edges**; both early and late hosts now pass in
-  simulation, the whole-chip test passes both ways, and the original bug planted back is caught by the late host.
-  **Bench after the fix, two runs: 0 errors in 15,372 checks from 0.25 to 4 MHz** (spec 3.1 MHz, so ~30 % margin);
-  5-6 MHz fail by exactly one bit late (beyond the board's speed, as expected).
-  Bench notes: the ESP32 (CH340 board) needed manual download mode (fixed later with a capacitor EN-GND: uploads now hands-free) and
-  `esp32/upload_noreset.ps1`; moving the Go Board to another USB socket brings back the FTDI driver (re-run Zadig).
-- 2 Nov 2026: **input glitch filter** designed (`docs/input_filter.md`), modelled (`model/glitch_filter.py`) and built
-  (`src/glitch_filter.v`): a new level must hold for N+1 filter ticks, one tick every 2^P clocks (20 ns to ~10 ms
-  at 50 MHz with one design). Model vs Verilog identical on 300 random pulse trains (252K clocks x 4 inputs), and
-  the spec's promise checked directly (short pulses never pass, long levels always do); two planted bugs caught.
-  **Bench: switch-bounce meter on the Go Board** (`fpga/go_board/bounce_top.v` + `bounce_listen.ps1`, log in
-  `bounce_log.csv`). Mark pressed switch 1 84 times across the settings:
-  - The Go Board's buttons bounce rarely (5 of 84 events, 6 %), mostly on release: one extra pulse, spread over
-    1 us to 1.5 ms.
-  - Filter off: the bounce got through (3 edges). Filter on (any setting from ~82 us): every bouncy event came
-    out as exactly 1 edge.
-  - Filter delay matched the design on hardware, including the expected spread from the prescaler:
-    ~82 us setting 77-81 us, ~655 us setting 615-654 us, ~2.6 ms setting 2,465-2,602 us, ~10.5 ms setting
-    10,030-10,470 us (theory: between N x 2^P and (N+1) x 2^P clocks).
-  - Conclusion for these switches: ~0.65 ms cleans every bounce seen, with a delay nobody would notice.
-  - Not yet: the filter wired into `chip.v` with a host register; a worse switch (toggle or microswitch on the PMOD)
-    to see a real bouncer.
-- 2 Nov 2026: fit test for a Lattice MachXO3LF-6900 (if Mark's missing board is the MachXO3 kit): free tools
-  (`synth_lattice -family xo3`, `nextpnr-machxo2`), whole chip routes at 68% of LUTs, 9% FFs, 30 MHz.
-- 2 Nov 2026: **MachXO3L Starter Kit found and working with the free tools.** `openFPGALoader -b machXO3SK <bit>`
-  loads the FPGA's volatile SRAM (never the one-time NVCM). IDCODE LCMXO3L-6900C. Hello test (`fpga/machxo3/`) loads and runs
-  (LED changes), but the kit's USB serial link is **not connected from the factory**: the schematic marks the
-  FT2232H channel B to FPGA A11/C11 path 'FOR FUTURE RS232 FUNCTION' through DNI 0-ohm resistors.
-  Its I/O headers are unpopulated (holes only), so bench wiring needs headers soldered.
-- 2 Nov 2026: **whole chip ready for the MachXO3L kit** (`fpga/machxo3/chip_mxo3.v` + `chip_mxo3.lpf`, header J4).
-  68% of LUTs, 30 MHz (runs at the kit's 12 MHz). End-to-end chip test rerun through this exact board wrapper
-  (`fpga/machxo3/tb_chip_mxo3.v`): PASS with early and late hosts (first attempt failed only because the test
-  talked during the wrapper's 255-clock power-on reset). ESP32 whole-chip sketch `esp32/chip_test` (programs
-  generated from the assembler by `esp32/make_programs_h.py`): loads both engines, A sends text as UART at
-  115200/57600/19200, the ESP32 reads it off the pin, B measures A's bit time. Waiting on J4 headers.
-- 2 Nov 2026 (evening): **THE WHOLE CHIP RUNS ON REAL HARDWARE.** MachXO3L kit + ESP32 host over SPI, 7 leads on J4.
-  At 115,200 / 57,600 / 19,200 baud: settings written and read back correctly; engine A sent "UHello from the chip!"
-  as real serial and the ESP32 received it exactly off the chip's pin; engine B measured engine A's bit time exactly
-  (104 / 208 / 624 chip clocks = 115,385 / 57,692 / 19,231 baud); IRQ rose with the result and cleared when read.
-  **PASS, 0 problems.** Getting there: (1) one lead (M14, MOSI) not making contact; (2) the first build read every
-  setting back as 0. Narrowed down by running the proven Go Board SPI test on the kit (0 errors to 2 MHz: pins and
-  host port fine), which pointed inside the big build: the free MachXO tools' **LUT RAM** mapping (setting registers,
-  FIFOs, program memory) is broken on hardware. Rebuilt with `-nolutram`: passes. `fpga/machxo3/build.sh` now always
-  uses -nolutram. The Go Board SPI test also passes on the kit (0.25-2 MHz, 0 errors).
-- 2 Nov 2026 (late): **glitch filter wired into the chip.** Every engine input (pins 0-7, 15-19) now passes a 2-FF
-  synchroniser and the filter; chip-wide host register 0x29 FILTER ([3:0] N, [7:4] P). New program
-  `programs/measure_pulse.asm` times low pulses. Whole-chip test (early and late hosts): filter off measures a
-  30-clock glitch and a 200-clock pulse exactly; with a 64-clock hold the glitch vanishes and the pulse still
-  measures 200. Planted bypass caught. MachXO3 build includes it.
-- 2 Nov 2026 (late): **Tiny Tapeout repo** `markstanners1-arch/ttihp-protocol-emulator` (private, from the IHP
-  template, CMOS5L, 6x4 tiles, 50 MHz, top `tt_um_gosforth_protocol_emu`, cocotb pin-level test). First layout
-  run started (without the filter; the filter goes in after the baseline result).
-- 2 Nov 2026 (late): MachXO3 build with the filter broke the engines' pins on hardware (no UART out, nothing
-  measured) while the previous build still passed on the same bench. Cause: the free MachXO tools had put the
-  program memories into **block RAM (DP8KC)**, another unreliable mapping. Built with `-nolutram -nobram`
-  (84 % of LUTs): UART at 3 speeds and engine B's measurements pass again on hardware, and the synthesised netlist
-  passes the end-to-end test in gate-level simulation (yosys cell models). `build.sh` now uses both flags.
-  Hardware filter test: G15 pulses (ESP32 GPIO 17) never seen by any build yet; lead being checked.
-- 2 Nov 2026 (late): **glitch filter proven on real hardware** (MachXO3L, no-RAM build). The ESP32 drives engine
-  pin 15 (G15) from GPIO 17. Pin levels read correctly; filter off: a "2 us" glitch measured 2.7 us and a "20 us"
-  pulse 21.1 us (the chip measured the ESP32's own pin-switching overhead, ~0.7 us); filter on (5.3 us hold): the
-  glitch vanished, the pulse still measured 21.0 us. **Whole hardware test PASS, 0 problems.**
-  On the way: the G15 lead was in G16, then F15 (a raw pin-level diagnostic, `programs/read_pins.asm`, showed
-  exactly which pin it was on); and the ESP32's Serial2 had claimed GPIO 17 as its default TX pin (sketch fixed).
-- 2 Nov 2026 (late): **Cyclone IV build ready** (`fpga/cyclone4/`, Quartus Prime Lite 25.1 from the command line,
-  `bash fpga/cyclone4/build.sh`, then `load` for the USB Blaster; JTAG into SRAM only). The same `src/chip.v` fits an
-  EP4CE6E22C8 at 4,496 of 6,272 logic elements (72 %), and Quartus puts both program memories into M9K block RAM
-  (2 of 30), which the free MachXO tools could not do reliably. Timing at 50 MHz, the ASIC's own clock: Fmax 53.9 MHz
-  on the slowest grade at 85 C, 1.4 ns slack. The worst path is program memory read -> instruction decode -> shared
-  pin writer -> output register; yosys's longest-path count on the IHP netlist points at the same chain (52 generic
-  gate levels through the TIME result and the pin writer's rotate), so that is the path to read first in the layout
-  timing. Pin locations are still TODO in `chip_c4.qsf` (board arrives 3 Nov). `esp32/chip_test` now takes the chip
-  clock from one setting (`CHIP_HZ`: 12 MHz kit or 50 MHz Cyclone), deriving the SPI speed and the filter hold from it.
-- 2 Nov 2026 (late): **I2C master and SPI master programs, each proven against a model partner device.**
-  Both use the same trick: the host sends one 16-bit command word per action whose top 5 bits are the routine's
-  address (from the assembler's labels), and the program jumps there with `out pc, 5`, so START, send, receive,
-  STOP (I2C) or select, transfer, deselect (SPI) each cost the host one word and the program stays small (30 and 14
-  words). `programs/i2c_master.asm`: SDA open drain through pin directions, SCL on side-set, 10 ticks per bit with
-  every SCL high and low at least 5 ticks (the standard's 4.7/4.0 us at 100 kHz hold); reports every ACK bit.
-  `model/i2c_slave.py` is a register-pointer slave (like most sensors and EEPROMs); `model/test_i2c.py` writes 4 bytes,
-  reads them back with a repeated START, addresses a missing device (NAK reported), and checks every SCL high/low
-  time, at three clock dividers: PASS. Two planted bugs (data bits not inverted; ACK sampled at the wrong edge) both
-  caught. `programs/spi_master.asm` (mode 0, MSB first, 6 ticks per bit) with `model/spi_slave.py` (command byte =
-  read/write + address, then data) and `model/test_spi.py`: PASS at three dividers; planted bugs (MISO sampled on the
-  wrong edge; CS driven before its idle level was set, a real slip the test found) both caught. The labels are exported
-  to `esp32/chip_test/programs.h` for the bench. Not yet: the ESP32 as an I2C/SPI slave on the bench, a real I2C part,
-  and engine B watching the bus (sniffer programs: the measuring headline).
-- 2 Nov 2026 (late): **I2C on the whole chip, with engine B watching the bus.** `programs/i2c_sniff.asm` (27 words):
-  samples SDA on every SCL rise, then polls both pins until SCL falls; SDA moving while SCL is high is a START or
-  STOP and resyncs the byte (a first version that just counted 9 clocks per byte drifted, because STOP and repeated
-  START each carry a data-less SCL rise). It reports each byte with its ACK bit. Proven on the model alongside the
-  master and slave (every byte, every ACK/NAK, repeated START included); it needs an SCL period of at least 20 of its
-  ticks. Then in the whole-chip test (`test/tb_chip.v`, early and late hosts): engine A runs the I2C master on
-  uio[0]/uio[1], engine B watches the same pins, and a few lines of bench Verilog play a slave that ACKs. The chip's
-  pins idle right (SCL driven high, SDA released), A reports both ACKs, B reports both bytes. Two planted bugs
-  (master data bits not inverted; watcher on the wrong pin) caught. Two things found on the way: the bench slave must
-  count SCL *rises* (the fall inside START is not a data clock), and the filter test before it left a 64-clock hold
-  that swallowed every 20-clock I2C edge, so the I2C section resets FILTER first. A real host must remember the same.
-- 2 Nov 2026 (late): **ISA v0.2: `side_dir`** (Mark's call). One config bit (MISC bit 13): when set, side-set writes
-  the side pins' *directions* instead of their levels, so a bus line can be open drain (side 1 = pull low, 0 = let go)
-  from the side-set, which costs no instruction. Why: the ESP32 as an I2C slave stretches the clock, and a push-pull
-  SCL would fight it electrically. Proven three ways: model and Verilog identical on 400,000 random clocks with the
-  bit randomised (plus 120,000 with the SRAM build); a planted Verilog bug ignoring the bit was caught in 71 of 200
-  programs; whole-chip test both host timings. Assembler: `.side_set 1 opt pindirs`.
-  **I2C master rewritten open drain on both lines, honouring clock stretching**: after every SCL release it waits
-  for SCL to really be high (`wait 1, rel 31`: the pin below SDA, so the pair sits anywhere). Model test: the slave
-  now stretches SCL for 7 and 300 clocks after every ACK, every byte still right; the whole-chip bench slave stretches
-  90 clocks mid-byte and after each ACK. A planted master that ignores stretching is caught by both (the chip test
-  only once the bench stretched *mid-byte*: after an ACK the master was already waiting for the slow SPI host, so the
-  stretch never overlapped it; a test that cannot fail is not a test). Use clkdiv >= 2 for exact 10-tick bits (the
-  2-clock synchroniser delays the engine's view of its own release by a tick below that). The bench UART monitor is
-  now switched off once uio[0] is reused for SCL. `src/` recopied to the Tiny Tapeout repo (push held until the two
-  running layout jobs report, so the baseline numbers are from the v0.1 engine).
-- 2 Nov 2026 (late): **v0.2 engine on real hardware: PASS, 0 problems** (MachXO3L kit rebuilt, 26 MHz, loaded into
-  SRAM; `esp32/chip_test` rerun: UART at 115200/57600/19200, B's bit-time measurements, pin diagnostic, glitch
-  filter all as before). Cyclone IV rebuilt too: 72 %, Fmax 51.8 MHz, still above 50. `esp32/chip_test` has a new
-  on-demand I2C test (send `i` on the Serial Monitor): engine A master at 10 kHz on engine pins 2/3, engine B
-  watching, the **ESP32 as the I2C slave** at 0x50 (Wire slave mode; it stretches SCL in its interrupt handler, so
-  this is the stretching test on real wires). Needs two more leads, J4-10 (M16) -> GPIO 22 (SCL) and J4-13 (L15) ->
-  GPIO 21 (SDA), plus 4.7 k pull-ups to 3.3 V. Compiles; **not yet run** (leads not fitted).
-- 2 Nov 2026 (late): **FIRST LAYOUT RESULT (Tiny Tapeout flow, IHP SG13 CMOS5L, 6x4 tiles), from the v0.1 engine with the
-  filter, commit 4017063 of the TT repo.** The gds job completed and published the GDS after about 1 h 40 min; then **precheck PASSED (24 min 47 s, the
-  foundry's KLayout rule deck included) and the gate-level cocotb test PASSED**; only the viewer job failed, because GitHub Pages
-  is not available on a private repo (it will work once the repo is public, as submission requires). They were still running at 23:20 (a watcher's exit code, really GitHub's API rate limit
-  after 90 minutes of polling, was first misread as a failure: lesson, don't poll `gh run watch` for hours). Numbers (`docs/layout/`):
-  - **Fits easily**: 19,765 standard cells, 302,319 um2, **33.5 % of the 902K um2 core** (die 1289 x 711 um). Of that,
-    2,043 flip-flops (100K um2) and 3,155 timing-repair buffers (42K um2, 2,107 of them hold buffers).
-  - **Timing met at 50 MHz at all three corners** (fast -40 C, typical, slow 125 C): setup and hold slack 0 ns worst
-    negative, total negative 0. Clock skew about 0.4 ns.
-  - **Clean**: DRC 0, LVS 0 differences, antenna 0 violating nets, power grid 0, detailed routing converged (0 DRC
-    errors after 8 iterations). Warnings only: 147 nets over the max-fanout limit (the program-write data and reset
-    fan out to every flop; the resizer buffered them and timing passes) and 9 slew violations at the slow corner.
-  - Synthesis in the flow: 16,184 cells, 253K um2 (our local yosys estimate was 202K: different ABC script).
-  So: there is room for the v0.2 engine, the SRAM build, and more. The v0.2 layout run starts when the TT repo is pushed.
-- 2 Nov 2026 (late): **I2C ON REAL WIRES: PASS, 0 problems.** MachXO3L kit (v0.2 engine) + ESP32 as the I2C slave at
-  0x50 on engine pins 2/3 (J4-10, J4-13 -> GPIO 22/21, 5.1 k pull-ups to 3.3 V), 10 kHz. Engine A wrote 4 bytes into
-  the ESP32's registers (every ACK reported 0, the ESP32 holds A5 3C 00 FF), read them back, got the NAK from an
-  empty address, and **engine B watching the same two wires reported every byte and ACK bit on the bus**, 13 bytes,
-  all right. First run failed on the read-back only: the watcher showed the ESP32 itself put 0xCB then 0xFF on the
-  wire, so our master read faithfully what it was given. Cause: the original ESP32's I2C slave hardware cannot stretch
-  the clock, so its callback could not load the reply in time (the S2/S3/C3 parts can). Fix on the ESP32 side: load
-  the reply when the pointer write arrives (`Wire.slaveWrite`), and read as pointer-write, STOP, fresh START. So the
-  stretching test on wires still needs a stretching slave (an S3, or the UNO); the chip side is proven in simulation.
-  Run it with `esp32/rerun.ps1 -Cmd i`.
-- 3 Nov 2026 (00:30): **I2C with clock stretching on real wires: PASS, 0 problems.** An Arduino UNO R3 (ATmega328P,
-  `arduino/i2c_slave_nano`, same register-pointer device as the model slave, its 5 V pull-ups switched off so it only
-  pulls low on our 3.3 V bus) as the slave on the same two wires; the ESP32's own I2C off (`rerun.ps1 -Cmd n`).
-  The AVR holds SCL low while its handler queues the reply, and the master waited for it: 4 bytes written, read back
-  with STOP-then-START **and with a repeated START**, every ACK right, engine B reporting all 20 bytes on the bus. Two
-  slips on the way, both on the bench side: the FPGA was not plugged in (the watcher showed the master's bytes on the
-  wire with no ACKs, so the chip was fine and nobody was listening), and the AVR Wire library calls the request handler
-  once per read, so it must queue all 4 bytes. The test's last data byte is now 0x7E, not 0xFF, because an unanswered
-  read reads as 0xFF and a byte that cannot fail is no test. Do not run the ESP32-as-slave test (`-Cmd i`) with the UNO
-  connected: both answer at 0x50. Not needed after all: level shifting (the 328's I2C inputs were read as the
-  datasheet's 0.7 Vcc = 3.5 V threshold, but 3.3 V worked on this board).
-- 3 Nov 2026 (00:50, stopping for the night): **SPI to a 74HC595 on the bench, not yet working**: engine A drives SCK /
-  MOSI / latch on engine pins 4/5/7 (J4-14/15/17) and reads the 595's QH' on pin 6 (J4-16); engine B confirms SCK
-  (60-clock lows at 100 kHz). The LEDs on the 595 stayed dark and MISO read 0, with one lead found in the wrong hole
-  (J4-14 was in 13) and still dark after. Next: meter the 595's VCC (16) = 3.3 V, GND (8) = 0, OE (13) = 0, SRCLR (10)
-  = 3.3 V, then QA (15) after a run (ends on 0x55, so QA = 1); then the QH' lead. Test: `esp32/rerun.ps1 -Cmd s`.
-  The v0.2 layout run (TT repo commit 4258d90) was still in its build step at 00:50; read it first thing
-  (`gh run view 41543287970 -R markstanners1-arch/ttihp-protocol-emulator`, one call, no watching).
-- 3 Nov 2026 (morning): **Specs reread, the "32-word pinch" measured, and the I2C master cut from 30 words to 19.**
-  Send and receive were the same nine SCL clocks with different levels on SDA, so one routine (`xfer`) now takes the
-  nine SDA levels from the host's word (the byte, then the ACK slot) and pushes back the nine levels seen on the wire
-  as byte << 1 | ACK bit, the sniffer's format. Command words: `start << 11`, `xfer << 11 | byte << 3 | ack << 2`
-  (send: ack = 1, the slot released; read: byte = 0xFF, ack = 0 to ACK, 1 to NAK), `stop << 11`; labels 12, 3, 15.
-  Bonus: a sent byte comes back as it went on the wire, so a mismatch means another master pulled SDA low
-  (arbitration lost); `model/test_i2c.py` checks this by jamming SDA during a send (reads back 0x00). Proven: model
-  test at dividers 2/4/49 with and without stretching, cosim 400K clocks on both memory builds (engine unchanged),
-  whole-chip test LATE=0/1, ESP32 sketch compiles (not yet run: the bench is being rebuilt from scratch today, and the
-  Cyclone IV board arrives). Planted bug (eight clocks instead of nine) caught by both the model and the chip test.
-  Verdict on the pinch: by the PIO yardstick (32 instructions shared by four state machines) 32 per engine is not
-  short; the sniffer's 29 words are the lack of a "wait for pin change", not of words; checksums stay the host's job,
-  as on PIO. 64 words (a 6-bit address: JMP loses a delay bit, WRAP splits) held in reserve. Four engines partly
-  relieve it (split a job over two engines). Decision (Mark): **go to four engines next**; the engines already sit
-  in a generate loop in `src/chip.v`, so the work is the host port's engine addressing (a two-byte command), the
-  pin priority chain, tests, docs and a layout run.
-- 3 Nov 2026 (afternoon): **Four engines.** `protocol_chip` takes `NENG` (default 4; the MachXO3L and Cyclone tops pass 2,
-  since neither board fits four: 84 % and 72 % full with two). Host port v0.2 (`docs/host_port.md`): the command is now
-  16 bits, `[15] read, [14:12] engine, [5:0] register` (register numbers unchanged; one more byte per transaction);
-  new chip-wide read-only register 0x2A ID = `[7:4]` spec version 2, `[3:0]` number of engines, so a host can ask;
-  an engine number past the last is ignored on write and reads 0; the lowest-numbered engine driving a pin wins
-  (A > B > C > D, a chain in `src/chip.v`); IRQ = any engine's RX FIFO non-empty. The engine itself is untouched (cosim
-  400K clocks both memories, unchanged). `test/tb_chip.v` takes `NENG` (`NENG=2 bash test/run_chip.sh`), converts every
-  command to the two-byte form, and adds: ID register through any engine number, engine C running push_789 with the
-  IRQ, the priority chain with D low / C high / A low, and writes to engine 5 ignored. PASS for NENG=4 and NENG=2,
-  LATE=0/1. Planted bugs caught: the chain the wrong way round (highest wins), and the engine field taken from the
-  wrong command bits. ESP32 sketch converted (`cmd()` two bytes, `ENG_C/D`, ID check at the top of the regression) and
-  compiles; **not yet run on hardware** (bench being rebuilt). FPGA builds with two engines: MachXO3L 30.9 MHz
-  (PASS at 12), Cyclone IV 4,461 LEs (71 %), Fmax 53.56 MHz. TT repo commit 2d2a76c (sources, cocotb test with the
-  16-bit command, info.yaml/info.md "four engines"): **cocotb test PASS on GitHub**; gds run 41642156659 started 13:11,
-  to be read with one `gh run view` after ~15:30. The v0.2 two-engine layout (run 41543287970, read this morning):
-  20,448 cells, 306,341 um2, 33.9 % utilisation, setup/hold slack 0.0 at all three corners, DRC 0, LVS 0, antenna 0
-  (24 slew and 156 max-fanout warnings at the slow corner, as before). Pins are the budget now: 20 shared by four
-  engines, about five each.
-- 3 Nov 2026 (14:00): **first four-engine layout failed in placement**, not for want of area but for the flow's default
-  placement density target. Synthesis: 552,741 um2 for four engines (61 % of the 902K core; two engines were 253K,
-  so the pin chain and host mux cost a little over the doubled engines). OpenROAD reported 66.7 % utilisation, the
-  Tiny Tapeout config's `PL_TARGET_DENSITY_PCT` of 60 was "too low", the placer's own target came out at 1.007 and
-  detailed placement failed on 8 instances (GDS run 41642156659, 6m53s; precheck and gl_test skipped). The config's
-  own comment says to raise the target, up to 80 reported working: set to 80 (TT commit ac6fb72), second run started
-  13:26 (run 41644302624). If that fails too: the SRAM program memory (saves ~27K um2 per engine, ~110K in all, taking four engines to
-  about 49 %), or three engines (~46 %).
-- 3 Nov 2026 (14:30): bench being rebuilt. After the USB replug the ESP32 moved from COM7 to COM12 (the three ESP32
-  scripts now find the CH340 port themselves) and the kit's FT2232 came back on the FTDI serial driver, so
-  openFPGALoader could not open it until Zadig put WinUSB on "USB Serial Converter A" again (same as the Go Board;
-  expect this after any socket change). Kit loaded with today's two-engine build (`fpga/machxo3/build/chip.bit`),
-  ESP32 uploaded with the two-byte-command sketch; with no J4 leads fitted yet the regression reads 0xFFFF everywhere,
-  as an open MISO should. Cyclone IV board arriving within the hour; it has no pin assignments yet, so the kit stays
-  the bench for today's hardware check of the new host port.
-- 3 Nov 2026 (15:00): **host port v0.2 proven on real hardware.** Rebuilt bench, MachXO3L kit with the two-engine build,
-  ESP32 regression PASS, 0 problems: ID 0x0022, two-byte commands, both engines, UART at three rates, glitch filter,
-  IRQ. Three lead slips on the way, each diagnosed from the ESP32 side with new sketch commands: IRQ lead in GPIO 2
-  instead of 4 (the regression's IRQ checks fail, all else passes); then CS/SCK/MOSI disturbed while moving it (all
-  reads 0x0000, nothing received: `p` lead probe showed MISO and IRQ driven low by the chip, so the command was not
-  arriving); then the MISO lead's J4 end in a hole held low (writes worked, engine A's UART heard, reads still 0).
-  `p` = lead probe (pull-up/pull-down test of MISO and IRQ + raw ID read), `q` = IRQ held high 15 s, `l` = 30 s of
-  repeating ID reads for the oscilloscope (Mark's Hantek DSO5102P came out; 6,000 of 6,000 reads 0x0022 once the
-  MISO lead was home). Written into `docs/bench_wiring.md` / `.pdf` as "If it doesn't answer".
-- 3 Nov 2026 (15:40): **second four-engine layout run failed the same way** (run 41644302624, density target 80): utilisation
-  66.7 % after global placement, the placer's own target density 1.03 (limit 0.99), detailed placement failed on 7
-  instances in the post-placement repair step. So the density knob was not the problem: four flip-flop-memory engines
-  at 553K um2 (61 % of the 902K core) are too dense for this flow on IHP's cells, where two engines at 34 % placed with
-  ease. Options, Mark's call: (1) three engines, about 45 %, a parameter change; (2) four engines with the IHP SRAM
-  block for each program memory (~445K, 49 %, plus four 15K macros to place: the memory_options plan, a day or more,
-  and the block's acceptance on CMOS5L is still unchecked); (3) slimmer engines (a 20- or 24-pin space instead of 32,
-  shallower FIFOs). Started a **measurement run with three engines** (TT project.v `#(.NENG(3))`, density back to 60)
-  so the decision has a number behind it. Lesson for the roadmap: keep the synthesised area under about half the core.
-- 3 Nov 2026 (16:00): **I2C PASS on the rebuilt bench with the 19-word master** (one `xfer` routine) and the two-byte host
-  port: ESP32 as the slave at 0x50, 4 bytes written and read back, engine B saw all 13 bytes, 0 problems. The bus
-  wiring took three goes, each found from the ESP32 side without a meter (the meter had been tidied away): new sketch
-  command `b` (I2C wire check: engine B reads all 20 engine pins raw while the ESP32 pulls its SDA, then its SCL, low,
-  so the printout names the chip pin each lead reaches) and `k` (GPIO 22 held low for 30 s for a meter). Findings in
-  order: both leads reaching no chip pin; SDA right, SCL reaching nothing; swapping the ESP32 ends proved both GPIOs
-  good, so the kit end was wrong; it was in H16 (hole 25, an output-only pin) read as M16 (hole 10). Lesson for the
-  sheet: the ball letters H/M are easy to confuse on the kit's silkscreen; the hole number is the safer label.
-- 3 Nov 2026 (16:15): **I2C PASS with the UNO R3 as the slave** (clock stretching, STOP-then-START and repeated-START
-  read-backs), first time after the leads moved over from the ESP32, 0 problems. The 19-word master has now done both
-  slaves on real wires.
-- 3 Nov 2026 (16:40): **SPI master to the 74HC595 PASS, 0 problems** (yesterday's dark LEDs were the bench, not the
-  design: rebuilt per `docs/bench_wiring.md` section 3 with four LEDs on QA-QD it worked first time). Engine B times
-  every SCK low at 60 clocks (100 kHz, clkdiv 19), each transfer returns the previous byte through QH'. New sketch
-  command `w`: a slow LED walk (QA first, 0.7 s a step, twice round, all on, all off) with the QH' read-back printed;
-  16 of 16 steps returned the byte before. So on the rebuilt bench, all with the two-byte host port: regression PASS,
-  I2C PASS with both slaves, SPI PASS. Still to wire: nothing; next hardware is the Cyclone IV.
-- 3 Nov 2026 (16:55): the 595's LEDs: the flat-topped ones from the drawer never light at 3.3 V (a red one did at once); with
-  red/red/white/yellow fitted the walk (`-Cmd w`) chased as it should, white dim as expected. Noted on the wiring sheet.
-- 3 Nov 2026 (17:20): **Cyclone IV board pinned.** It is the black EP4CE6E22C8N core board (USB-C power + CH340 serial,
-  10-pin JTAG, 50 MHz oscillator on pin 24, serial 23/10, LEDs 1 2 3 7 11, bank jumpers VB/VC both at 3.3 V); the headers
-  carry the FPGA pin numbers. `fpga/cyclone4/chip_c4.qsf` now places everything on the right-hand header 38-72 in
-  silkscreen order (CS 38, SCK 39, MOSI 42, MISO 43, IRQ 44, uio 46-55, uo 58-66, ui 67-71, LEDs 1/2); build 4,466 LEs
-  (71 %), Fmax 53.4 MHz, no pin complaints. `docs/bench_wiring.md` section 5 has the lead table. Not programmed yet:
-  the board needs a USB Blaster on its JTAG header and there is none on the bench (the PC has the driver); ordered.
-- 3 Nov 2026 (17:45): USB Blaster (Rev C clone, eBay seller digexx15, Leicester) ordered, due 5-6 Nov; the Cyclone build waits for it.
-- 3 Nov 2026 (18:00): `test/tb_chip.v`'s multi-engine section now works for any engine count (`NENG=2|3|4 bash
-  test/run_chip.sh`): the last engine runs push_789 with the IRQ, the priority chain is tested with the last engine
-  low, the one below it high, then A low (for three or more engines), and the number past the last is checked. PASS at
-  2, 3 and 4; the reversed-chain bug planted at 3 is caught. So whichever count the layout settles on is already proven.
-- 3 Nov 2026 (18:15): **three engines fit the Cyclone IV board**: 6,273 cells wanted of 6,272 with Quartus's defaults
-  (one over), 6,116 (98 %) with `OPTIMIZATION_TECHNIQUE AREA` and registers packed for area, Fmax 51.6 MHz, timing met
-  at 50. `fpga/cyclone4/chip_c4.v` now builds three (`#(.NENG(3))`), the kit stays at two (84 % full already). So the
-  three-engine chip can be run on real hardware at the ASIC's clock as soon as the Blaster arrives.
-- 3 Nov 2026 (18:30): **on the list: a "what is this chip?" demo.** An unknown part on the bench: idle levels on all pins
-  (read_pins), any pulse or period measured (stopwatch), an I2C address scan one word per address with the ACK bit as
-  the answer (0x50 EEPROM, 0x68 RTC, 0x76 pressure...), the SPI JEDEC command 0x9F read off an unknown 8-pin device
-  (flash answers with maker and part), then exact-timed talking once there is a guess. All on the existing i2c_master /
-  spi_master / measure programs: it is a host-side script (ESP32 now, RP2040 MicroPython for the demo board later).
-  Target: try it on the Cyclone with three engines once the Blaster is here (Fri 6 Nov).
-- 3 Nov 2026 (18:45): **first piece of the "what is this chip?" demo: an I2C address scan** (`esp32/rerun.ps1 -Cmd a`):
-  START, address + W, STOP for 0x08-0x77 with the existing i2c_master program at 100 kHz; the ACK bit in the reply says
-  who answered, and a short table guesses the part from the address (0x50-57 EEPROM, 0x68 RTC/MPU6050, 0x76 BMP280,
-  0x27/0x3F LCD backpack, 0x3C OLED, 0x48 ADC...). First run found the UNO slave at 0x50 and nothing else. Also a
-  check that the address went out as sent (a bus held low shows up as a wrong read-back).
-- 3 Nov 2026 (evening): **three engines lay out cleanly** (TT run 41665293508, commit f087b2d, density target 60):
-  30,221 cells, 446,885 um2, **49.5 % utilisation**, setup and hold slack 0.0 at all three corners at 50 MHz, DRC 0,
-  LVS 0, antenna 0 (49 slew and 224 fanout warnings at the slow corner, the usual kind), gate-level test PASS, 2h30m
-  build. Stats in `docs/layout/metrics_3nov_v02_3eng.csv`. So the ladder is: two engines 34 % (clean), three 49.5 %
-  (clean), four 61 % (fails detailed placement). Four would need the SRAM program memory (~49 %). Decision pending
-  Mark: three as it stands, or SRAM for four. Note the TT repo's project.v is still at `#(.NENG(3))` from the
-  measurement run; whichever way, the ProtocolASIC `src/chip.v` default (4) and the TT wrapper must agree before
-  submission.
-- 3 Nov 2026 (night): **decision (Mark): three engines.** `src/chip.v` default `NENG = 3`; tests, specs (`host_port.md`,
-  `core_design.md`) and the sketch say three; the TT wrapper uses the chip default and its metadata says three (new gds
-  run on the push, expected the same as the measurement run). Proven at three: cosim 400K clocks both memories, whole-chip
-  test NENG=3 (LATE=0/1) and NENG=2. Hardware proof of three waits for the Blaster and the Cyclone.
-- 3 Nov 2026 (late): **engine isolation proven** (Mark's question: does one engine failing hurt the others?). New section
-  in `test/tb_chip.v`: A hangs on a WAIT that is never met (measure_pulse on an input held low; STATUS shows pc 0,
-  running), B pushes 7/8/9 meanwhile, the last engine (three-engine builds) sends two UART bytes meanwhile, then A is
-  stopped, reloaded and restarted through the host alone: A runs, B is still running with its third word still
-  waiting, the last engine still running. PASS at NENG=3, 2, LATE=1. Two planted cross-couplings caught: every engine
-  reset when A stops (caught in several places), and stopping any engine popping every RX FIFO (caught only by the new
-  section). Same test in the sketch (`rerun.ps1 -Cmd x`, push_789 now exported to programs.h): **PASS on the kit**.
-  Nothing joins the engines but the host's selector, the pin priority chain and the IRQ OR; the chip-wide glitch
-  filter setting is the one shared knob.
-- 3 Nov 2026 (late): **both repos made public** (Mark: "no need for secrecy"): markstanners1-arch/protocol-asic and
-  ttihp-protocol-emulator, scanned first for credentials or personal data (none). GitHub Pages enabled on the TT repo
-  (source: Actions), so the layout viewer job should now pass; it will publish at
-  https://markstanners1-arch.github.io/ttihp-protocol-emulator/ after the next gds run (41697384154, the three-engine
-  confirmation, in progress). Next open question for the Tiny Tapeout Discord: is IHP's RM_IHPSG13_1P_64x16_c2 SRAM
-  block accepted on the CMOS5L shuttle? (Decides whether four engines is ever an option.)
-- 3 Nov 2026 (23:30): **first oscilloscope captures of the chip on real wires** (`docs/bench/i2c_scope_1.png`, `_2.png`,
-  Hantek DSO5102P, saved to a FAT32 stick: the scope's PC driver is Windows-7 era and Windows 11's core isolation
-  refuses it; the scope's rear USB is no use without it). CH1 SCL, CH2 SDA, engine A as I2C master to the UNO slave at
-  100 kHz, new sketch commands `o` (60 s of START 0xA0 0x03 0xA5 STOP every 20 ms) and `z` (the same until a key).
-  The trace shows the address byte 1010 0000 = 0xA0 on nine clocks with the UNO's ACK low on the ninth, and the
-  host-paced gaps either side (SCL held low while the master waits for the host's next command word, a few hundred
-  us at the ESP32's 100 us polling): a faithful picture of a host-paced master. Scope hints kept: probes on breadboard
-  rows beside the leads, trigger CH1 rising or SDA falling with holdoff ~1 ms to frame the START, 1 V/div, 20-50
-  us/div. To check with cursors next time: one SCL period = 10 us. Also tonight: a 2010-2015 USB stick backed up to
-  D:\USB stick backup 2010-2015 before it went in the scope.
-- 3 Nov 2026 (23:45): scope cursors on one SCL period: **10.0 us**, i.e. 100 kHz as set (clkdiv 11 at 12 MHz, 10 ticks a bit); the chip's timing confirmed by an outside instrument for the first time.
-- 3 Nov 2026 (23:55): three more captures (`docs/bench/i2c_scope_3..5.png`), cursors on. Picture 4 is the period:
-  adjacent SCL rising edges, **dt 10.80 us** by the scope's cursors (Mark read 10.0 by eye earlier), i.e. 93-100 kHz
-  against 100 nominal. The designed bit is 10 ticks of 1 us; the cursor is good to about half a microsecond at this
-  zoom, and a bit can honestly be 11 ticks when the pull-up's rise (5.1 k into breadboard + two probes) plus the
-  2-clock synchroniser pushes the "SCL seen high" past the tick boundary, as the program comment warns. To pin down:
-  2 us/div and cursors on one period; and a 2.2 k pull-up would sharpen the rise. Pictures 3 and 5 are partial widths.
-- 4 Nov 2026 (00:30): **a sketch bug found by the scope.** After the photo session the kit answered every read with
-  0x0000 while writes worked (UART text arrived, IRQ followed), the afternoon's "MISO lead off" signature, but the
-  leads were fine: CH2 on the MISO wire at GPIO 19 during the ID-read loop showed two pulses per read, i.e. 0x0022
-  arriving at the ESP32's pin. The ESP32 was not sampling it: the `p` lead probe sets GPIO 19 to a plain input to
-  test it and then calls SPI.begin() again, and on this ESP32 core a second begin() does not hand the pin back to the
-  SPI hardware. Every earlier `p` had been followed by an upload (a reboot) before the next test, which hid it.
-  Fix: SPI.end() before the begin(). Proven: regression PASS, then `p`, then regression PASS again. Lesson for the
-  bench: when the chip's reply is on the wire but the host reads zero, suspect the host's pin setup before the leads.
-- 4 Nov 2026 (02:00): the three-engine confirming run (41697384154, TT commit 2c401e2) built in 2h44m, gate-level test PASS, and **the viewer job passed for the first time** now the repo is public with Pages on: the layout is viewable at https://markstanners1-arch.github.io/ttihp-protocol-emulator/ . Precheck was still running at this check; expected to pass as the measurement run did.
-- 4 Nov 2026 (01:30): **the backups had not reached GitHub since the isolation commit**: a 309 MB Copilot installer had
-  been downloaded into the project folder, the backup's "add everything" swept it in, and GitHub refuses files over
-  100 MB, so every push after that was rejected while the script's last line still read as success. Found while
-  removing the bench photo (which, as a result, had never reached GitHub: it was folded out of the unpushed commits and
-  is kept at D:\ outside the repo). Fix: installer dropped from the commit and moved to Downloads, `*.exe *.msi *.rar`
-  gitignored, nine local commits folded into one and pushed. Lesson: read the whole backup output, not its last line.
-- 4 Nov 2026 (morning): run 41697384154 precheck PASS, so the three-engine chip as it stands is a complete, submittable
-  layout. **First new program: the 4x4 keypad
-  scanner** `programs/keypad.asm` (16 words): one column pulled low at a time, open drain, so two keys on a row can never
-  short two drivers; rows read with pull-ups; the 16-key map is pushed only when it changes, then a 20 ms pause for the
-  bounce. `model/test_keypad.py` scans a model keypad (one key, a key bouncing for 5 ms each way, two keys on one row,
-  all sixteen in turn, one column ever driven) PASS at the kit's and the ASIC's dividers; a planted short pause was
-  caught (extra pushes on bounce). Sketch command `y` (engine B, names the keys, compiles); wiring sheet section 6
-  (keypad on J4-14..17 columns and 27..30 rows with 10 k pull-ups, plus IR receiver and HC-SR04 rows for the next two
-  programs). **Keypad PASS on the kit** (midday): idle map 0000, a scripted sequence (1, 5, 9, D, * with #, 4 with 6) read
-  back exactly, twice, two at once including two on one row, one report per change, no bounce. The first "pass" had
-  columns 3 and 4 crossed (tail pins 7 and 8 swapped at J4-16/17): the names looked plausible until checked against
-  what was actually pressed. Lesson: test a keypad with a scripted sequence, never "press some keys". On the way: every key "pressed" = the row pull-ups not
-  reaching J4-27..30 (the columns had been wired through the 10 ks); then rows 1 and 3 only, both ends of their
-  resistors at the rail voltage (no current, so open), while the good rows showed a 0.5 V drop from the FPGA's internal
-  pull-down. New sketch command `e` (live level of engine pins 15-19 for 30 s, a line on every change) found the lead
-  fault at once. The kit's silkscreen marks the 3.3 V holes IO1, not a ball name.
-- 4 Nov 2026 (afternoon): **NEC infrared remote decoder** `programs/ir_nec.asm` (29 words, engine B, tick 50 us: clkdiv 599
-  at 12 MHz, 2499 at 50 MHz; in_base = jmp_pin = 1, no outputs). Every length is judged by a counting loop that polls the
-  pin with `jmp pin` while X counts down, no stopwatch: leader burst at least 4.5 ms (else noise, back to idle), leader
-  space over 3.3 ms = a data frame (shorter = the 2.25 ms repeat frame), bit space over 1.1 ms = a 1. Bits shift in LSB
-  first and `push iffull` sends each 16: two words a frame (address pair, then command pair); a repeat frame pushes
-  0xFFFF. A bit space stuck high for another 2.5 ms abandons the frame so a cut-short frame cannot garble the next one.
-  The inverse check is left to the host (the sketch). `model/test_ir_nec.py` plays a model receiver (frames, repeats,
-  stray pulses, 5 % fast and 5 % slow, a wrong inverse, extended NEC, frames cut at 9 and 20 bits) PASS at both dividers;
-  a planted bit threshold (10 changed to 20) failed every frame, then removed. The IR test session's review caught two
-  wrong comments (margins, and a loop loaded with N polls N+1 times); fixed. Sketch commands `m` (decoder: prints address
-  and command, repeat count, flags a bad inverse) and `j` (raw low-pulse lengths). **Bench PASS, with a long road to it:**
-  (1) three runs saw nothing because the module was not wired yet; pin 1 has a pull-up in the kit build, so "idle high"
-  proved nothing and the sketch now says so. (2) The line then read stuck LOW 800 of 800: Mark had wired the Elegoo IR
-  **emitter** (KY-005, a clear LED) instead of the receiver; the pads on the receiver are marked G R Y (ground, power, signal).
-  (3) With the receiver in, a raw capture showed a steady train of 5 ms pulses every 36 ms: Mark's phone, confirmed later: opening its
-  camera app does it (the infrared autofocus or depth sensor pulses at the receiver). Keep a phone with its camera open away from the receiver
-  during captures; to check the emitter with a phone camera, hold it well to the side of the receiver. (4) A scripted window then read back correctly:
-  1, 2, 3, 4, 5, 6, 7, 8, 9, 0, POWER, VOL+ held gave 12 frames in order (command bytes B7 B6 B5 C2 C1 C0 C7 C6 C5 C9
-  B3 E0, address word 2916, the VOL+ hold 17 repeats at 108 ms), and an earlier 1, 2, 3, VOL+, POWER window gave the same
-  codes. Mark's LG smart remote (thumb wheel) power key read address 04 command 08 with both inverses good. This remote (a Manhattan) has NEC timing but a
-  16-bit address and command with no inverse rule, so the sketch flags BAD INVERSE on every key; that is the remote, not
-  the decoder. Code table in `docs/bench_wiring.md` section 6 (PDF rebuilt), occupancy table section 7 (holes 2 and 8
-  taken). There is no Elegoo remote (the kit has only the IR emitter board), so the remotes read were an LG smart remote and a Manhattan. Lessons: send a command letter twice
-  and the second stops the first, so check the sketch is idle before a timed window; a pulled-up input reads high
-  with nothing connected.
-- 4 Nov 2026 (evening): **logic analyser set up and the IR decoder checked against it.** Binghe 8-channel 24 MHz USB analyser
-  (a Saleae Logic clone, USB ID 0925:3881). Windows needed the WinUSB driver (Zadig, the copy that comes with PulseView); it
-  then loads the sigrok fx2lafw firmware and shows as "Saleae Logic with 8 channels". **PulseView 0.4.2 crashes on Windows 11**
-  (access violation in its auto-scan, hang or crash on capture, and its Python 3.4 cannot load one newer decoder): use the
-  nightly installers instead, now in D:\Tools\PulseView and D:\Tools\sigrok-cli (sigrok-cli 0.8.0). The old 0.4.2 stays
-  in C:\Program Files (x86)\sigrok and can be uninstalled. Capture from the command line, no window needed:
-  `sigrok-cli --driver fx2lafw --config samplerate=24m --samples 2m --triggers D0=f -o file.sr` (CH1 = D0, CH8 = D7, the CLK
-  lead unused), decode with `sigrok-cli -i file.sr -P ir_nec:ir=D0`. First capture, the Manhattan remote's button 1, CH1 on
-  J4-8: sigrok's NEC decoder reads address 0x16 / 0x29 and command 0xB7 / 0x5C (flagging both inverse pairs, as the sketch
-  did: 2916 and 5CB7), and the raw samples give leader burst 9.01 ms, leader space 4.53 ms, bit bursts 531-556 us, 0 spaces
-  600 us, 1 spaces 1706-1733 us, so the decoder's 4.5 ms, 3.3 ms and 1.1 ms thresholds sit 0.5 ms or more from every real
-  edge (the receiver module shortens bursts and lengthens spaces by about 20 and 40 us). The capture is saved as
-  `docs/bench/ir_nec_manhattan_button1.sr` (open it in PulseView or sigrok-cli). Not done: a chip-side trace beside it
-  (CH1 on J4-8 plus the ESP32's CS on CH2) and I2C/SPI captures.
-- 4 Nov 2026 (night): **NEC infrared transmitter** `programs/ir_tx.asm` (31 words, engine A, partner of the decoder). The host pushes the
-  same two words the decoder pushes (address | ~address << 8, command | ~command << 8, so extended 16-bit addresses and odd
-  remotes go through); the engine sends the 9 ms / 4.5 ms leader, 32 bits LSB first and the closing burst, with the 38 kHz
-  carrier made in software. Tick = a third of a carrier cycle (8.67 us: clkdiv 103 at 12 MHz, 433 at 50 MHz); a cycle is pin
-  high, pin low, loop = 38.4 kHz at one third duty in a bit burst, 37.7 kHz averaged over the leader (its two nested loops add
-  2 ticks per 30 cycles; the first version, 18 x 18, averaged 36.8 kHz, found by the model test and fixed). One space a frame
-  (after bit 16, where the second word is fetched) is 44 us long. The repeat frame (2.25 ms space) is not generated: 31 of 32
-  words are used, and receivers accept repeated full frames. `model/test_ir_tx.py` runs transmitter, a model receiver module
-  (low while carrier was seen in the last 40 us) and `ir_nec.asm` together: LED idle and low, carrier within tolerance, leader 8.74 ms
-  and space 4.49 ms, every bit within 8 % and each bit period within 2 %, an independent decoder in the test reads back the word, the
-  line stays low after the closing burst, and engine B pushes the two words sent. PASS at 12 MHz (plain NEC, all zeros, all
-  ones, the Manhattan's raw words) and at 50 MHz (two frames). Planted bug (the 1-space loop cut from 4 x 32 to 2 x 32 ticks):
-  16 bits out of tolerance and engine B decoded 8400 / 8000 and similar garbage; removed. Sketch command `t` (A transmits to the
-  emitter on engine pin 9, J4-19 / H14; B decodes the receiver; six frames compared word for word, and a failure says whether A never
-  sent it or the receiver did not see it). **Bench PASS first time**: emitter signal to H14, G to GND, middle pin open, facing the
-  receiver a few cm away: all six frames (address 00 command 45, LG power 04/08, 5A/3C, all ones, all zeros, the Manhattan's raw
-  2916 5CB7) came back exactly. With the emitter unwired the same command failed as designed: A sent it, B got nothing.
-  Wiring sheet: emitter rows, hole 19 taken (PDF rebuilt). Not yet done: the emitter pin on the logic analyser (CH2 on H14, CH1 on J4-8)
-  to measure the real carrier and burst lengths.
-- 4 Nov 2026 (night, later): **IR transmitter checked on the logic analyser.** CH1 on the receiver output (J4-8), CH2 on the emitter
-  signal (H14), GND on J4-11, 24 MHz, trigger on the emitter's first edge; the capture is `docs/bench/ir_tx_loopback_00_45.sr`
-  (address 00 command 45, the first frame of the `t` run). The receiver channel, an independent witness of what the emitter really
-  sends, shows: leader low 8.76 ms, space 4.47 ms, 32 bit lows of 526-555 us, short spaces 564-592 us, long spaces 1681-1726 us,
-  closing low 531 us, frame 67.5 ms, and the 32 bits read back as BA45FF00, exactly what was sent. Compared with the Manhattan
-  remote's real frame (9.01 / 4.53 ms, lows 531-556 us, spaces 600 and 1706-1733 us) every figure is within 5 %. The emitter channel
-  gives the carrier cycle (median 26.00 us = 38.46 kHz, the 3-tick design) but not the pulse width or a full burst train: the IR LED
-  holds its own pin near its forward voltage (about 1.2 V), below the analyser's input threshold, so only the leading edge spikes
-  above it, intermittently. To see that waveform use the Hantek scope on H14. Bench lessons: the analyser's CLK lead is not an
-  input (it was clipped there for a while); sigrok-cli sometimes exits without writing its file when the output path is in the
-  temp folder, so captures now go to D:\Tools\sigrok_captures first; and an unconnected analyser input floats high, so "all
-  channels high" proves nothing.
-- 4 Nov 2026 (late night): **the Pico 2 arrived and is a second host.** MicroPython v1.29.0 for the RP2350 (`RPI_PICO2-20260824-v1.29.0.uf2`,
-  661,504 bytes, from micropython.org, kept in D:\Tools\pico2_micropython) copied onto the boot drive; it comes up on a COM port as
-  "USB Serial Device", 150 MHz. `pico/chip_host.py` is the host module (SPI0 on its default pins, the same 16-bit command and
-  one-burst program load as the ESP32 sketch), `pico/programs.py` the assembled programs (now generated by
-  `python esp32/make_programs_h.py` beside programs.h), `pico/id_test.py` the first test. No pyserial or mpremote on the PC, so
-  `pico/put.ps1` copies files over the serial raw REPL and `pico/run.ps1` runs a script and shows the output. Checked with nothing wired:
-  the code runs and fails cleanly (a floating MISO reads 0x0000). Wiring in sheet section 8 (CS GP17, MOSI GP19, MISO GP16, SCK GP18,
-  IRQ GP20, GND pin 23; one host at a time). Next: wire it, ID register 0x0022, then port the IR decoder and the keypad.
-- 4 Nov 2026 (night, Pico on the bench): **the Pico 2 drives the chip.** Five SPI/IRQ leads and the ground moved from the ESP32 to the
-  Pico (sheet section 8). `pico/id_test.py`: ID register 0x0022 five times, spec 2, two engines, PASS. Ported from the ESP32 sketch
-  and run from the Pico, all against the same kit build: `pico/ir_loopback.py` (engine A transmits through the emitter, engine B
-  decodes from the receiver) **PASS 6 of 6 frames exactly**, the first run; `pico/ir_decode.py` (the sketch's `m`) with the Manhattan
-  remote pressing 1, 2, 3, POWER read B7, B6, B5, B3 with a tap's two or three repeats each: the same codes the ESP32 read; `pico/keypad.py`
-  (the sketch's `y`) with the sequence 1, 5, 9, D, * with #, 4 with 6 read back line by line, each key one report on press and one of
-  0000 on release, pairs as both bits, except that **D appeared twice** the first time where the sequence had it once. Mark did not knowingly press it twice; a rerun of
-  the same sequence read D once and everything else identically (PASS). Not bounce as such: the program waits 20 ms after every change,
-  so a double report needs the contact to open and close again for longer than that, e.g. a slow press on a tired membrane key. The chip needs no change to
-  switch hosts: only the five host-port lines move. Scripts run with `pico/run.ps1 -Script <name>.py -Seconds n`.
-- 4 Nov 2026 (late night): **AT24C256 EEPROM on the I2C bus, from the Pico: PASS.** A blue AT24C256 module (32 KB, 2 address bytes, 64-byte
-  pages, jumpers A0-A2 to GND = 0x50) replaced the UNO slave on J4-10 / J4-13, powered from 3.3 V (its own pull-ups go to VCC). No engine
-  change: engine A runs the existing `i2c_master.asm`; `pico/at24c.py` is the host script (it needed `LABELS` added to `pico/programs.py`, and
-  `pico/run.ps1` now soft-resets the Pico first because it had cached an old module). The script: probe 0x50-0x57 and 0x68, read the
-  8 bytes as found, page-write a pattern seeded by the clock (so old contents cannot pass), time the write by ACK polling (6 ms), sequential
-  read back, random read, the top of memory at 0x7FF0 with the low area checked unchanged (proves the high address byte), then put every byte back.
-  PASS on the real chip. Planted bug (ADDR_BYTES = 1 on the 2-byte part): FAIL, writes went to the wrong place and read back blank; the 7
-  stray bytes it left (0x1055-0x105B) were found and cleaned, so the module is blank again. `pico/pins.py` shows live pin levels (note:
-  pins 0-7 have kit pull-ups, so "high" proves nothing about a lead). **The long way round to a pass:** nothing answered any of the eight
-  addresses although the analyser decoded perfect START / address / NACK / STOP from the chip (so the engine and the lines were right) and the
-  module's LED was lit but dim. Cause: the module's ground was on the board's negative rail, which had no wire to the kit's GND; the logic
-  analyser's ground lead had been tying the rail in. A wire from the kit's GND to the rail fixed it. Lesson: a lit LED proves only that a
-  little current flows; give every board a ground wire to the device under test, not via an instrument.
-- 4 Nov 2026 (night, last): **the "what is this chip?" demo** `pico/whatis.py`, from the Pico, all measuring done by the engines: the
-  ID register (spec 2, 2 engines, 12 MHz), an I2C scan of 0x08-0x77 by engine A with a short table of guesses, and a pin survey by engine B (level,
-  then every low pulse timed to 1 us over 0.4 s, for pins 0-7 and 15-19, each labelled with what is wired to it on this bench). On the bench it
-  found the AT24C256 at 0x50 **and also something at 0x58**, repeatably (three rounds): not an AT24C256 address, but 24Cxxx parts with an
-  identification page answer at device code 1011 as well, so the demo says so (the chip's marking does not say whose part it is: not confirmed).
-  Not done: an SPI JEDEC ID read (needs an SPI flash chip, none on the bench) and period/frequency of a running signal (the survey times low
-  pulses only; press a remote button during it to see the receiver's). Also `pico/pins.py` (live levels). That is the end of 4 Nov.
-- 4 Nov 2026 (evening): **the competition rules, as pasted by Mark from Jane Street's page.** IHP 130 nm CMOS5L through Tiny Tapeout, from the
-  ttihp-verilog-template (cmos5l branch); tile size 6x4 in info.yaml (ours already is); the maximum is 6x4, with 8x4 (about 30 % more area)
-  possible later: they will update the page and email everyone who signed up (Mark has signed up). Open source required, building in public
-  welcome; teams recommended; **deadline 18 Jan 2027**; **the prize is a tape-out of the "most novel designs"** on the March 2027 CMOS5L shuttle
-  (subject to the foundry), chips and dev boards back after fabrication. The final submission form is not published yet (it will appear on the
-  competition page closer to the deadline).
-- 4 Nov 2026 (evening, later): **SRAM macros do get through the TT IHP flow.** A Discord post Mark pasted led to a public
-  competition entry (JLNuijens/ttihp-cpu-1-1-uart): 8x4 tiles, four 512x32 IHP SRAM macros, gds + precheck + gl_test +
-  viewer all passed on 19 Oct. It needed a substituted power-grid step, its own pdn_cfg.tcl and a hold SDC (details in
-  `docs/memory_options.md`). Our 64x16 macro exists in the PDK. The Discord question is now the narrower "is that route
-  accepted on the shuttle". Also: the 3 Nov layout render saved as `docs/layout/render_3nov_v02_3eng.jpg`.
-- 4 Nov 2026 (evening, Discord): **the SRAM question is answered without posting.** A search of the Tiny Tapeout Discord
-  from Mark's account found Ken Pettit's PRISM entry (kdp1965/ihp-um-janestreet-prism, 8x4, two 512x32 macros, all four
-  gds jobs green) and his walkthrough "Dropping a real SRAM macro into your CMOS5L tile": the maintainers whitelisted the
-  macro marker layers in the precheck in September and confirmed the Metal4 stripe method on the Discord. Our 64x16 macro
-  (236.8 x 64.36 um, 15.2K um2, A_DLY tied 1, no BIST on this size) is complete at the pinned PDK commit. Recipe and
-  numbers in `docs/memory_options.md`. Three macros would save about 56K um2 and double every program to 64 words;
-  parked with the ISA v0.3 ideas since it reopens the proven layout.
-- 4 Nov 2026 (night): **UART receive, the missing must-do.** The chip had only ever sent serial; `programs/uart_rx.asm` (13 words,
-  engine B, pin 0) takes it in: 8N1, LSB first, 8 ticks a bit on the transmitter's divider rule, each byte pushed with its stop bit
-  in bit 8 so the host sees a framing error; the start bit is re-checked at a third of a bit (glitches dropped) and a bad stop bit
-  sends the engine back to waiting for idle, so a break is one 0x0000 and nothing more. Found on the way: the first draft re-armed
-  straight after a framing error (a break became a stream of zeros), and the engine is busy 78 of the 80 ticks of a frame, so a
-  sender can run bytes back to back only up to 2.5 % fast (4 % either way with gaps; the usual budget is 2 % an end).
-  `model/test_uart_rx.py` PASS at clkdiv 12 and 155 (115200 and 9600 at 12 MHz) and 53 (115200 at 50 MHz): gaps, twenty back to
-  back, 2 % fast/slow back to back, 4 % with gaps, a glitch, a framing error, a break, a 32-byte loopback from uart_tx; a planted
-  7-tick bit loop failed every byte, then removed. **Bench PASS from the Pico** (`pico/uart_rx.py`): loopback (engine A sends on
-  pin 0, engine B reads the same pad, no leads) 39 bytes exact at 9600, 19200, 57600 and 115200; then the Pico's own UART0 TX
-  (GP0) on J4-6 with A stopped: "The chip hears the Pico." and all 256 values in bursts of four at 115200, a 256-byte stream with
-  no gaps at 9600, all exact; 0x55s at 4800 into the 9600 receiver came back flagged (6 of 7). The chip now does all three
-  must-do protocols in both directions on real wires. Wiring sheet: hole 6 row.
-- 4 Nov 2026 (night, later): **baud measurer PASS from the Pico** (`pico/baud.py`): engine B on pin 0 at clkdiv 0 times the
-  start bit of a 'U' from the Pico's GP0 at 1200, 2400, 9600, 19200, 38400, 57600, 115200, 230400 and 460800 baud; every rate
-  identified within 0.16 % (the 12 MHz clock's rounding: 104 clocks for 115200, 26 for 460800). **I2C sniffer PASS on the kit**
-  (`pico/i2c_sniff.py`): engine B watches the pads engine A drives to the AT24C256; in every transaction at 100 and 400 kHz
-  (probes, a 2-address-byte read with a repeated START, a page write, ACK polling, the put-back) the watcher's words equalled the
-  master's own replies byte for byte, ACK for ACK. **On the way, a bench lesson:** during the first sniffer runs the EEPROM went
-  flaky (page writes NAKed from the address byte, ACK polling never ending, reads FD FD FD FD with one bit dragged low) and
-  `pico/at24c.py`, which had passed, failed the same way while the watcher still agreed with the master in every word, so the chip
-  was reporting a sick bus faithfully. The only change on the bench: the logic analyser had been switched off with its probes
-  still clipped to SCL and SDA. An unpowered instrument's input-protection diodes clamp each line to half a volt above its dead
-  supply rail, so the highs sag and the slave sees marginal levels; its ground lead had also been part of the rail's ground path.
-  Analyser powered on: EEPROM PASS (6 ms write cycle), sniffer PASS. Rule: an instrument on the bus is powered or unclipped,
-  never off and attached. The flaky runs left FD FD FD FD at 0x0020 on the blank module; `pico/eeprom_blank.py` put it back to FF.
-- 4 Nov 2026 (night, last): the Feit "smart LED strip" in the drawer is Wi-Fi with a USB-C-shaped plug from a mains box, not DALI:
-  parked (too messy to get at). **Decision (Mark): buy proper DALI gear.** Shopping note: a small DALI LED driver (Mean Well
-  LCM-xxDA or any "DALI dimmable" constant-voltage driver, 15-25 GBP) and a bus supply (a DALI PS, or a 12-18 V DC wall wart
-  through 56 ohm 2 W); a USB-C breakout if the strip is ever revisited; the P82B96 for split I2C; a 3-pin addressable strip as
-  the one-wire LED demo. Chip side of DALI (both programs and a model gear) can be written before the parts come.
-- 4 Nov 2026 (night, DALI interface): **Waveshare Pico-DALI2** (SKU 28643, about 5.50 USD) chosen as the chip's DALI interface:
-  an isolated board (two optocouplers, bridge rectifier, polarity-free bus terminal) on the Pico footprint, 3.3 V logic, **no bus
-  power supply** (a DALI PSU or 12-18 V DC through 56 ohm 2 W still needed) and a DALI LED driver as the gear. Pins on its 40-pin
-  header, from Tasmota's test on an ESP32-S3-Pico (GPIO14 = DALI RX, GPIO17 = DALI TX_i) and Waveshare's S3-Pico pinout: **pin 5 =
-  RX** (bus level, non-inverted: high = idle), **pin 9 = TX** (pin high = bus shorted, idle low: Tasmota's "TX_i"), pin 36 = 3V3,
-  pins 3/8/... = GND; pin 4 carries a divided bus-voltage sense, unused. That polarity is what the DALI programs assume. Jumper
-  leads into the shield's header from the kit; no Pico sits in it. Passed to the DALI session.
-- 4 Nov 2026 (night, DALI, chip side): **DALI control-device programs, model-proven; the bench run waits for the gear.**
-  `programs/dali_tx.asm` (13 words, engine pin 8): one host word per forward frame, start bit, 16 bits MSB first, 1200 bit/s
-  Manchester at a tick of an eighth of a bit (104.17 us: clkdiv 1249 at 12 MHz, 5207 at 50 MHz; every half bit exactly 4 ticks,
-  so the only error is the divider's rounding, 0.006 % at 50 MHz), pin high = NPN on = bus shorted, and after each frame it holds
-  the bus idle 9.5 ms (the standard's 9.17 ms settling) so frames can be queued in the FIFO. `programs/dali_rx.asm` (26 words,
-  engine pin 0): the host arms it with the listening window (96 ticks = 10 ms) before pushing the forward frame; it skips that
-  frame on the bus (a falling edge, then the bus high at 8 polls 2 ticks apart = the end of the frame, since a Manchester frame
-  is never high for more than a bit), listens for the answer's start bit, decodes the 8 bits resyncing on every mid-bit edge
-  (a gear may be 10 % off and nine bits of drift would be most of a half bit; from one edge to the next it is under a tick:
-  first half sampled at T+5 after the edge seen at T, the opposite level waited for with a timeout at T+10) and pushes one word:
-  0x100 | byte, 0x000 for no answer, or 0x200 | the bits read before a missing edge (a framing error). `model/test_dali.py`:
-  a model gear on the bus decodes the forward frames independently (edges, timing measured), keeps an arc level and answers
-  after 2.9, 5.5 or 9.2 ms at 0 and +-5 % timing, each answer at a different phase of the engine's tick; sequence DAPC 254,
-  QUERY LEVEL (nine times, every phase), DAPC 127, QUERY LEVEL, DEVICE TYPE (6), STATUS (lamp on, no short address), OFF, QUERY
-  LEVEL (0), STATUS, LAMP FAILURE ("no" = no frame), a query to short address 5 (nobody), then seven coding violations (start
-  bit and bits 0, 3, 7 sent both halves high or both low: 0x201, 0x201, 0x20A, 0x2AA) each followed by a clean query, and two
-  DAPC words queued together (9.48 ms apart). **PASS at 12 MHz (five runs) and 50 MHz**; a gear 10 % fast and slow also
-  passes. Planted bugs: the transmitter's first half a tick short (3 ticks) failed the timing check (bit periods 12.5 % off)
-  though the gear still decoded it; in the receiver, the bit read two ticks late (past the boundary) gave wrong bytes at
-  both +-5 %; the first data bit sampled a tick early passed the first test and was caught only once the answers were spread
-  across the tick's phases (phase 8 of 9 with a +5 % gear): the phase sweep stays in the test. Both bugs removed. Bench
-  interface decided: the **Waveshare Pico-DALI2** shield (isolated; its TX input is pin high = bus shorted, its RX output the plain
-  bus level, exactly the programs' polarity; no bus supply of its own, so a DALI PSU or 12-18 V through 56 ohm 2 W) wired as
-  `docs/dali_bench.md` and wiring sheet section 10 (planned, not yet wired: J4-18 to its pin 9, its pin 5 to J4-6 because the
-  kit's input-only pins 15-19 carry pull-downs; the Pico's GP0 lead comes out of J4-6). `pico/dali.py` is the scripted run:
-  eight frames, every answer checked, PASS only if all match. Tables regenerated (`esp32/make_programs_h.py`).
-- 4 Nov 2026 (night, DALI plan settled, Mark): **no shield.** "We don't need to see the race car speed down the track to prove we can
-  start the engine." The 16 V bus is the electrical layer only; the protocol is proven on a 3.3 V open-drain wire with a pull-up
-  (idle high, either end pulls low). Order: the USB Blaster arrives, the chip moves to the Cyclone IV (three engines, 50 MHz, ID
-  0x0023, every bench test re-run from the Pico), which frees the MachXO3L kit to be a DALI control gear in Verilog (3.3 V I/O,
-  eight LEDs, no RAM needed) with the Go Board as a second gear at another short address (the addressing demo); engine C on the
-  Cyclone watches the wire as a DALI sniffer. The Waveshare Pico-DALI2 (20 GBP in the UK) and a driver are dropped unless real gear
-  turns up; a transistor and a divider would then do the shield's job. The Go Board gear is proposed as its own task (card).
-- 4 Nov 2026 (night, last word): **ISA v0.3 agreed in outline**, to start after the Cyclone has proven three engines on the
-  bench, as one re-layout on a branch. The submission stays the proven three-engine 6x4 chip until the v0.3 layout has passed
-  everything it has.
-- 4 Nov 2026 (night, for the parts due 5 Nov): **three Pico host scripts written and desk-checked, not yet run** (the W25Q32
-  SPI flash, DS3231 clock and MCP4725 DAC modules arrive 5 Nov). Each has its expected readback in its header and prints PASS/FAIL.
-  `pico/w25q.py`: engine A runs `spi_master.asm` (mode 0, 1 MHz) to the flash: JEDEC ID expect EF 40 16 (decoded: maker, type,
-  capacity, with the other common IDs named), the 64-bit unique ID read twice, status 1 = 00, 16 bytes at address 0 as found, then
-  a non-destructive write proof (the first all-FF 16-byte region from the top of memory down is page-programmed with a
-  clock-seeded pattern, BUSY polled, read back, WEL seen set then cleared; `ERASE = True` erases the top 4 KB sector since erase
-  wears the part). **Pins:** `spi_master.asm` takes SCK, MOSI, MISO and CS as one group from `set_base` (base + 0..3, MISO the
-  third) and sets the directions itself, so the four must be consecutive with the third readable: on the kit that is engine pins
-  4-7 only (8-13 output only, 15-19 input only, 14 not on the header), the 74HC595's holes J4-14 to 17; the keypad's column leads
-  come out for it, as for the 595. `pico/ds3231.py`: scan expects 0x50, 0x57, 0x68; register 0x75 must not read 0x68 (that is the
-  GY-521's MPU6050, the other 0x68 in the drawer); the time registers twice two seconds apart must show the seconds advanced by
-  2 +-1; the temperature in degrees; then the module's AT24C32 at 0x57 with the at24c.py logic (2 address bytes, 8-byte write,
-  0x0FF0 written without disturbing 0x0010 to prove the high address byte within 4 KB); `SET_TIME` sets the clock and clears OSF.
-  `pico/mcp4725.py`: probes 0x60-0x67, fast-mode writes of 0, 2048 and 4095 held 3 s each (meter 0, 1.65, 3.30 V), a 64-step
-  sawtooth and a triangle for 10 s each inside one transaction at 400 kHz, with the ramp frequency measured and printed for the
-  scope (the wire would allow 347 Hz; the host round trip per byte sets the real rate). All three were run on the desktop against a
-  fake chip that models the engines' command words and the slaves (`spi_master` in front of a modelled W25Q32; `i2c_master` in
-  front of a DS3231 with a running clock, two AT24Cs and a DAC): every path runs and every check passes, which proves the scripts'
-  logic and the register maps, not the bench. Wiring sheet sections 11-13 and the PDF, section 7 updated (holes 14-17 shared with
-  the flash; 10 and 13 gain the two I2C modules); `whatis.py` guesses 0x57, 0x60-0x63 and 0x68 by name.
-- 5 Nov 2026 (morning): **Mojo v3 (Spartan-6 LX9) brought up as a fourth FPGA board.** Xilinx ISE 14.7 WebPACK installed under
-  WSL (Ubuntu); `fpga/mojo/load.py` loads a bitstream through the board's own ATmega32U4 over USB serial, into the FPGA
-  (volatile) or the flash with verify. A blink design built with xst/ngdbuild/map/par/bitgen (all constraints met at
-  50 MHz) and loaded into the FPGA: the eight LEDs count. The chip has not yet been built for it.
-- 5 Nov 2026 (late morning): **the three-engine chip on the Mojo v3 at 50 MHz, regression PASS from the Pico.** `src/`
-  unchanged; `fpga/mojo/chip_mojo.v` (wrapper, reset from the Mojo's button, synchronised), `fpga/mojo/chip.ucf`,
-  `fpga/mojo/build.sh` (ISE 14.7 under WSL: xst, ngdbuild, map, par, trce, bitgen; `load` puts it in the FPGA's RAM).
-  XC6SLX9-2TQG144: 4,247 of 5,720 slice LUTs (74 %, 104 as LUT RAM), 1,098 of 11,440 flip-flops (9 %), 1,301 of 1,430
-  slices (90 %), no block RAM; all constraints met at 50 MHz, minimum period 16.743 ns (59.7 MHz). Pins: the IO Shield
-  stays stacked; its devices use 65 of the 84 header pins, so host CS/SCK/MOSI and engine pins 0-7 take the 11 free pins,
-  MISO, IRQ and engine pins 8-13 the Mojo's eight LED pins, engine pins 15-19 shield DIP switch pins (switches off); the
-  shield prints each hole's FPGA pin beside it (inner and outer rows). Wiring sheet section 14 and the PDF.
-  `pico/regression.py`: the ESP32 sketch's `r` and `x` ported to the Pico (UART0 RX on GP1 from engine pin 0, PIO pulses
-  on GP2 to engine pin 15). Bench: ID 0x0023 five times; regression **PASS, 0 problems**: UART out at 115200, 57600 and
-  19200 received exactly with engine B's bit times 432, 872 and 2608 clocks, IRQ up and down, pin 15 low and high, glitch
-  filter (2 us seen 100 clocks and 20 us 1000 clocks with it off; with it on, hold 5.1 us, 2 us blocked and 20 us seen),
-  isolation with engine C sending "C!" while A hung. Planted fault (the pulse lead looked for on engine pin 16): FAIL,
-  4 problems. On the way: the first ID reads were garbage (0x39BC, 0x9CCE ...) because the Mojo had restarted into its
-  flash design (LED PWM on the MISO and IRQ pins, seen by `pico/lead_probe.py`); reloaded, both lines steady, then PASS.
-  `fpga/mojo/pin_finder.v`: a bench tool that shows on the shield display the FPGA pin a grounded lead touches.
-- 5 Nov 2026 (branch `cluster`): **engine / cluster / chip hierarchy made explicit, no behaviour change.** New `src/cluster.v`
-  (`NENG` engines populated of `NSLOT = 4` slots, `NPIN = 32` pin numbers): the per-engine setting registers, the engines, the pin
-  mux with "lowest engine wins" and the IRQ OR moved there from `src/chip.v`, which keeps the SPI host port, the synchronisers and
-  glitch filter, FILTER and ID, and instantiates `NCLUSTER = 1` clusters. Host command bits `[11:6]` now decode as the cluster
-  number (`src/host_spi.v` latches them): cluster 0 is the chip; 1-63 read 0 for every register and ignore writes. Reads use the
-  compare directly; write and pop strobes use a copy registered one clock later (a strobe follows the command by at least 128
-  clocks), because the direct form put the 6-bit compare into every program-word enable and cost about 245 LUTs on the kit. The
-  register map, ID value, timing and pin assignment are unchanged; `test/tb_chip.v` gains five checks on cluster numbers 1, 2 and 63.
-  Tests: cosim 1000 x 400 clocks at seeds 1, 2, 3 and seed 4 with `USE_SRAM=1`, every clock identical; `test/run_chip.sh` PASS at
-  `NENG=3`, `NENG=2` and `LATE=1`; `./run.sh test` PASS. Planted in a copy of `cluster.v` (`CHIP_SRC_OVERRIDE`): engine 1's pin
-  bank rotated by 8 (B's bit-time measurement read 0, IRQ 0: caught at the first check) and CLKDIV taken from the mirrored slot
-  (UART garbled, B measured 8 not 40: caught); both removed. Size (`./run.sh size`, which now reads every source and takes the
-  module name from the file, since it stopped at `chip.v` before): whole chip 17,428 cells on main, 17,351 after (host_spi 179 to
-  185); `cluster` alone 19,926 because all 32 pin numbers are live outside the chip. MachXO3L kit (`fpga/machxo3/build.sh`, two
-  engines, no load): 5,922 of 6,864 LUTs (86 %) and 2,079 flip-flops on main, 5,982 (87 %) and 2,087 after; fmax at the default
-  seed 30.14 MHz before, 27.02 after; seeds 1-4 gave 28.96-30.81 MHz before and 26.47-29.49 after, all PASS at 12 MHz, critical
-  path inside engine 0 (INCFG to the stopwatch carry chain) in both. `fpga/cyclone4/chip_c4.qsf` lists the new file; the Tiny
-  Tapeout repo's `src/` copy has not been refreshed.
-- 5 Nov 2026 (branch `serialiser`): **ISA v0.3 part: bit-cell serialiser and 64-word TX FIFO on engine 0, a 32-bit CRC unit on
-  every engine.** New `src/serialiser.v` (16-bit shift register fed from the TX FIFO, half-bit divider SERDIV + 1 clocks, NRZ or
-  Manchester, differential option on `out_base + 1`, CRC append optionally complemented, end marker 6 half-bits high, bit order
-  from `out_right`) and `src/crc32.v` (reflected form, host-set polynomial and start value). Engine encodings: `MOV` destination 3
-  (`mov ser, src`: start a frame of `src` words, 0 stops), `WAIT` number 24 (serialiser busy, `wait 0, ser`), `IN` source 7 (CRC
-  low 16 bits), `TIME` action 5 (`time crc reset`); `MOV status` bits 8-9 busy and underrun. Host registers 0x2B SERCFG ([12:10]
-  CRC skip words, so the FCS leaves out the preamble), 0x2C SERDIV, 0x2D-0x30 CRCPOLY and CRCINIT, 0x31-0x32 CRC, 0x33 SERSTAT
-  (full TX level); STATUS bits 14 busy and 15 underrun, its TX field saturating at 7; ID unchanged. Corner rules in
-  `docs/isa.md`. `programs/eth_tx.asm` (16 words): a frame from a count and its words, then a 100 ns link pulse every 16.4 ms.
-  Tests: `model/test_serialiser.py` PASS (Ethernet minimum frame at SERDIV 0 and 1 decoded from the pair, FCS equal to
-  `zlib.crc32`, TP_IDL, link pulse at 16.39 ms; NRZ with CRC-16/MODBUS appended; MSB-first Manchester at SERDIV 4999; 70 words
-  streamed through 64; underrun at word 65; abort; CRC IN mode against CRC-16/MODBUS; an engine without the serialiser); every
-  earlier model test PASS. Cosim now runs two engines (with and without the serialiser) and randomises SERCFG, SERDIV, CRCPOLY,
-  CRCINIT: 1000 x 400 clocks at seeds 1, 2, 3 and seed 4 with `USE_SRAM=1`, plus 100 x 6000 clocks at seed 5, every clock
-  identical (pins, FIFOs, CRC, busy and underrun compared). `test/run_chip.sh` PASS at `NENG=3`, `NENG=2`, `LATE=1`, with a
-  whole-chip Ethernet transmit (count and 34 words in one SPI burst, all 72 bytes and the FCS decoded at uo_out[2]/[3], TP_IDL,
-  CRC registers, an underrun and its clearing) and the kit's build (`SER0=0 CRC=0 TXDEPTH0=4 NENG=2`). Planted bugs: Manchester
-  halves swapped in the model (8 checks of `test_serialiser.py` failed); in `serialiser.v`, the CRC not complemented (whole-chip
-  test: FCS byte 0x53 for 0xAC; cosim: 8 of 1000 tests) and the end marker one half-bit short (whole-chip test: 1157 half-bits for
-  1158; cosim: 18 of 1000 tests); all removed. Size (`./run.sh size`, generic cells): whole chip 17,351 before, 22,576 after;
-  engine without the serialiser 5,968 to 6,108; serialiser 559, CRC unit 132. MachXO3L kit: two engines with the serialiser do
-  not fit (64-word FIFO 7,688 of 6,864 LUTs; 32 words 7,156; 16 words 6,937). The kit has two named builds (no board loaded):
-  `bash fpga/machxo3/build.sh` (default, `build/chip.bit`): two engines, ID 0x0022, no serialiser, no CRC units, 4-word TX
-  FIFOs (the v0.2 engines; `SER0=0 CRC=0 TXDEPTH0=4`): 5,953 LUTs (86 %), 2,087 flip-flops, fmax 28.74 MHz.
-  `bash fpga/machxo3/build.sh ser` (`build/chip_ser.bit`): one engine, ID 0x0021, with the serialiser, the CRC unit and the
-  64-word TX FIFO: 4,785 LUTs (69 %), 2,328 flip-flops, fmax 29.63 MHz. Both pass at the kit's 12 MHz; `load` after either
-  puts it in SRAM. `fpga/cyclone4/chip_c4.v` uses the default build's parameters (not rebuilt in Quartus). The Tiny Tapeout repo's
-  `src/` copy has not been refreshed.
-- 5 Nov 2026 (branch `serialiser-bench`): **serialiser on the Mojo v3, frames decoded from an analyser capture.**
-  `fpga/mojo/build.sh` options: default (three v0.2 engines, `NENG=3 SER0=0 CRC=0 TXDEPTH0=4`, ID 0x0023): 4,242 of 5,720
-  LUTs (74 %), 1,276 slices (89 %), 1,104 flip-flops, fmax 54.7 MHz. `ser` (`build/chip_ser.bin`, two engines, serialiser,
-  CRC units, 64-word TX FIFO on engine 0, `NENG=2 SER0=1 CRC=1 TXDEPTH0=64`, ID 0x0022): 3,815 LUTs (66 %), 1,191 slices
-  (83 %), 1,087 flip-flops, fmax 56.8 MHz, timing met at 50 MHz. `ser clk40` (`build/chip_ser_40.bin`): the same with the
-  chip clock at 40 MHz from a DCM_SP (50 x 4 / 5, chip held in reset until LOCKED; `chip_mojo.v` parameter `CLK40`):
-  3,834 LUTs, 1,184 slices, 1,090 flip-flops, derived 25 ns constraint met at 17.831 ns. `chip.ucf` clock net renamed
-  `clk_in`; no pin moved. `src/engine.v`: `$clog2` in the TX FIFO width written as a ternary (XST 14.7 rejects it): cosim
-  1000 x 400 at seed 1 and seed 4 `USE_SRAM=1` identical, `test/run_chip.sh` PASS at default, `NENG=2`, `LATE=1`.
-  TD+ = engine pin 1 (shield hole 34), TD- = engine pin 2 (hole 35), same row. New: `programs/ser_tx.asm` (5 words: pull
-  a count, `mov ser, osr`, wait; works MSB first, where `eth_tx.asm`'s FIFO poll `out x, 4` needs `out_right`);
-  `pico/eth_tx.py` (MODE eth / dali / full / leads; settings by `pico/run.ps1 -Pre`, new); `pico/regression.py` takes
-  `CHIP_HZ` and `ENGINES` from `-Pre`; `docs/bench/decode_manchester.py` (reads the .sr only: frame = the longest run with
-  either line high, bit clock from a line fit to the 56 preamble mid-bit edges or from the half-bit edge spacings,
-  Manchester by mid-bit edges, TD- against TD+ per sample, end marker length, `zlib.crc32` against the FCS). Decoder check
-  on a model-made capture (eth_tx.asm in `model/`, sampled at 24 MHz): PASS; planted bug (halves swapped): preamble
-  `aa..2a`, FCS fail. Bench (Mojo, Pico host, Binghe analyser CH1 hole 34, CH2 hole 35, GND row 1 outer):
-  ID 0x0022 x 5; regression `-Pre "CHIP_HZ=50_000_000; ENGINES=2"` PASS, 0 problems. Lead check (`MODE='leads'`, 24,000
-  samples a step): TD+ high / TD- low read CH1 24000 / CH2 0; reversed 0 / 24000; both low 0 / 0.
-  Ethernet, SERDIV 49 (half-bit 50 clocks = 1.000 us, 500 kbit/s), SERCFG 0x107F, CRCPOLY 0xEDB88320, CRCINIT
-  0xFFFFFFFF, out_right 1: 30 frames, SERSTAT 0 after each, chip CRC register 0x2BDA0853 each. Capture (trigger D1 rising,
-  2 M samples): frame 1158.1 us, bit 2.0000 us from the preamble, 576 bits, end marker 6.00 half-bits (6.00 us), TD- the
-  inverse of TD+ (11 of 27,795 samples equal, each beside an edge), bytes `55 x 7 d5`, destination ff:ff:ff:ff:ff:ff,
-  source 02:00:00:00:00:01, type 0x88b5, payload 30..5d (46 bytes) equal to the bytes sent, FCS on the wire `ac f7 25 d4`
-  = `zlib.crc32` 0xD425F7AC: **PASS**. Same capture, decoder with the halves swapped: FAIL (preamble, FCS, bytes).
-  DALI rate, `ser_tx.asm`, SERDIV 20832 (half-bit 20833 clocks = 416.66 us), SERCFG 0x000F (Manchester, differential,
-  end marker, no CRC), MSB first, word 0xFE51: capture half-bit 416.71 us, 16 bits `fe 51` equal to the word sent, end
-  marker 6.00 half-bits (2500.25 us), TD- the inverse of TD+: **PASS**. Saved: `docs/bench/serialiser_eth_500kbit_mojo.sr`,
-  `docs/bench/serialiser_dali_1200bit_mojo.sr`. 40 MHz (`ser clk40`): regression `CHIP_HZ=40_000_000` PASS, 0 problems
-  (B timed A's bits at 344, 696, 2080 clocks). 10 Mbit/s (`MODE='full'`, SERDIV 1, half-bit 50 ns): 336,100 frames, SERSTAT
-  0 and CRC register 0x2BDA0853 after every one. Analyser at 24 MHz: frame 57.9 us, bit 0.1000 us from the preamble;
-  decoding stops at bit 63 (50 ns half-bits are 1.2 samples): data and FCS at 10 Mbit/s not checked by the analyser.
-  Hantek, triggered on CH1: the 50 ns link pulse between frames (TD+ only); Autoset (2 ns/div): TD+ idle at 0 V with
-  552 mV peak-to-peak at 48.3 MHz (the 50 MHz oscillator); a scope view of the frame itself (trigger on
-  TD-, 100 ns bit period, TD- the mirror of TD+) is outstanding. Bench: the Mojo's USB cable and the 4-port hub gave
-  "Device Descriptor Request Failed"; the Mojo is on a front PC socket with another cable (COM15 there: `MOJO_PORT`).
-- 5 Nov 2026 (midday): **ISA v0.3 merged into main** (e3167c1): the cluster hierarchy, the serialiser on engine 0 with the
-  64-word TX FIFO, the CRC unit on every engine, and the Mojo builds. Proofs re-run on main after the merge: model tests
-  PASS; cosim 1000 x 400 clocks on seeds 1 and 2 and seed 3 with the IHP SRAM model, every clock identical; whole-chip
-  test PASS at NENG=3, NENG=2 and LATE=1. The Tiny Tapeout repository's `sram-macro` branch carries this src with four
-  engines at 40 MHz; its main (the submission) is unchanged.
-- 5 Nov 2026 (night): **engine 0's TX FIFO on a one-port memory** (branch `fifo-macro`). New `src/fifo_mem.v`: 64 x 16,
-  reads on the clock, flip-flops by default, IHP's `RM_IHPSG13_1P_64x16_c2` with `+define+USE_SRAM` (as `prog_mem.v`).
-  `src/engine.v` (TXDEPTH = 64): write pointer, read pointer, 7-bit count, head-valid flip-flop and a 16-bit head register
-  (captured on the clock after each read); a host push writes the memory and has the port; on a clock without a push an
-  empty or departing head is refilled. PULL and the serialiser take the head only (`src/serialiser.v` input `tx_ready`).
-  Engines 1 and 2 keep the 4-word flip-flop FIFO. Timing rule in `docs/isa.md`, "Engine 0's TX FIFO": a word pushed into
-  the empty FIFO in clock k is ready from k + 2 when k + 1 has no push (k + 1 before); each further push clock delays it
-  one more; levels unchanged in meaning. `model/engine.py` mirrors it (`tx_hv`). Proofs: cosim 1000 x 400 at seeds 11,
-  12, 13 (flip-flops) and 14, 15 (`USE_SRAM=1`, IHP model), every clock identical; 130 x 5000 at seeds 21, 22, 23 (6
-  serialiser underruns reached), identical. Coverage counters added: refill blocked by a push (261-297 tests per 1000),
-  PULL with words in the FIFO but no head ready (38-48). Planted bugs: refill skipped on the clock after a blocked refill,
-  caught in 27 of 1000 tests (PULL one clock late); read given priority over the write, caught in 122 (wrong word on the
-  serialiser's pin). `test/run_chip.sh` PASS at NENG=3, NENG=2, LATE=1, Ethernet frame decoded. `model/test_serialiser.py`
-  PASS: new check 8 (PULL takes a word pushed into the empty FIFO in clock 2, clock 3 after two consecutive pushes, clock
-  1 on a 4-word FIFO); check 4's 66-word underrun case now leaves one clock after the count push and requires every push
-  accepted (it pushed 65 words in consecutive clocks, the 65th refused). `./run.sh test` PASS. yosys, three engines,
-  flip-flop build: 22,576 -> 22,328 cells, 4,472 -> 4,500 flip-flops; `USE_SRAM` build: 18,905 -> 16,223 cells, 2,888 ->
-  1,876 flip-flops, 3 -> 4 SRAM blocks. Mojo `ser clk40`: 3,943 LUTs (68 %), 1,168 slices (81 %), 1,144 registers, 76 LUTs
-  as memory, timing met at 40 MHz (minimum period 19.343 ns); not loaded. Source lists: `fifo_mem.v` added to
-  `model/cosim.py`, `test/run_chip.sh`, `fpga/mojo/build.sh`, `fpga/machxo3/build.sh`, `fpga/cyclone4/chip_c4.qsf`.
-- 7 Nov 2026 (branch `engine-regs`): **ASIC build without CRC units.** Layout runs 8-11 (TT branch `sram-macro`) failed in
-  detailed routing: shorts inside the program-store macros, LVS and KLayout DRC errors. Local LibreLane (WSL Ubuntu,
-  LibreLane 3.1.0.dev4, tt-support-tools 9d13ff3) reproduced GitHub run 9 exactly (311 of 311 final metrics). Partial
-  runs to global routing, four engines with the macros in columns: Metal3 83.9 % used, 2,749 overflow; with `CRC = 0`
-  (the existing switch): 76.1 %, 42 overflow, utilisation 48.5 -> 42.8 %, flip-flops 2,222 -> 1,834. Metal3 is the only
-  horizontal signal layer (Metal2 and Metal4 vertical). Without the CRC unit, an Ethernet frame is sent with the FCS as the
-  last two FIFO words and SERCFG CRC append off (docs/isa.md, CRC unit). New: `crc_unit` in `model/engine.py`, `CRC=0`
-  in `model/cosim.py` and `tb_cosim.v`; `test/tb_chip.v` sends the frame with the host's FCS when `CRC = 0` and checks the
-  same 72 bytes on the pair. Proofs: model tests PASS; cosim 1000 x 400 with `CRC=0` at seeds 11, 12 and 13 (`USE_SRAM=1`),
-  and seed 14 with the CRC unit, every clock identical; `test/run_chip.sh` PASS at CRC=0 with NENG=4, NENG=4 LATE=1, NENG=3,
-  NENG=2; CRC=1 with NENG=4 and NENG=3 LATE=1; the kit build. Planted bugs: `crc` reading 1 without the unit (cosim FAIL
-  in 200 of 200 tests; chip test FAIL on the CRC read); the host's FCS one byte wrong (chip test FAIL at byte 70).
-- 8 Nov 2026 (04:05-05:00): **10 Mbit/s frame on the scope.** Mojo v3, 40 MHz serialiser build (ID 0x0022), Pico running
-  `eth_tx.py` `MODE='full'` (SERDIV 1, half-bit 50 ns), one frame every 10 ms; two 20-minute batches PASS (SERSTAT 0 and CRC
-  register 0x2BDA0853 after every frame). Hantek DSO5102P, CH1 TD+ (hole 34), CH2 TD- (hole 35), 10x, DC, BW limit off;
-  trigger edge CH2 rising 1.5 V, Normal, holdoff 100 us. Widths read from the saved bitmaps (40 pixels a division):
-  `docs/bench/eth_10mbit_scope_1.png` (40 ns/div): first TD- pulse 48 ns (one half-bit), then 102 / 98 ns, TD+ edges
-  within 2 ns of TD- in the opposite sense; `_4.png` (80 ns/div): five preamble periods 1000 ns (200 ns each);
-  `_5.png` (200 ns/div, 5 ns a pixel): 30 widths of 100 ns (preamble) then 15 of 50 ns (the SFD's closing 1s and the
-  all-ones destination address), CH1 and CH2 edges in the same columns; `_6.png` (400 ns/div): 37 widths of 100 ns then 76
-  of 50 ns to the screen edge, both channels: **PASS**, the frame's bit cells at 10 Mbit/s seen by an outside instrument.
-  Scope notes: holdoff is under HORIZ MENU (F4, V0 knob), not TRIG MENU; at 200 ns/div the horizontal position stops
-  near 5.2 us (the readout can go further but the picture no longer moves). An idle screen with S top-centre was the end
-  of a frame batch, not the scope.
-- 8 Nov 2026 (12:40-13:30): **three engines on the Cyclone IV at 50 MHz, regression PASS.** USB Blaster on the board's
-  JTAG header: `jtagconfig` reads ID 0x020F10DD (EP4CE6 die) once the board's power switch is on. `bash fpga/cyclone4/build.sh`
-  from main (v0.3 src, NENG 3, SER0 0, CRC 0): 6,098 of 6,272 LEs (97 %), slow-corner Fmax 51.74 MHz, built in 1 min 50 s;
-  loaded with `quartus_pgm -m jtag` to SRAM only. ESP32 host (COM16, `chip_test` with `CHIP_HZ = 50e6`, SPI 4 MHz), leads
-  as wiring sheet section 5: ID 0x0023; engine A UART at 115200 / 57600 / 19200 received by the ESP32, engine B timed A's
-  bits at 432 / 872 / 2608 clocks (exact); IRQ high then low; pin 15 follows GPIO 17 low/high; glitch filter off: 2 us
-  pulse 138 clocks (2.8 us), 20 us pulse 1028 clocks (20.6 us); filter on (N=15 P=4, 5.1 us): 2 us rejected, 20 us
-  1024 clocks: **PASS (0 problems)**. Two earlier runs failed only the pin-15 checks: the GPIO 17 lead had come out of
-  pin 67 (static levels passed once through a dangling contact, pulses did not).
-- 8 Nov 2026 (14:00): **Cyclone IV serialiser build, 40 MHz from the PLL, regression PASS.** `fpga/cyclone4/build.sh ser`
-  (new option: Verilog macro SER_BUILD, `altpll` 50 x 4 / 5 = 40 MHz, SER_NENG engines, output `build/chip_c4_ser<N>.sof`;
-  the default build is unchanged): engine 0 with the serialiser and the 64-word TX FIFO, no CRC units. SER_NENG=3 does
-  not fit (7,094 of 6,272 LEs); SER_NENG=2 fits: 5,870 LEs (94 %), 2,083 registers, slow-corner Fmax 45.73 MHz on the
-  40 MHz clock. Loaded to SRAM; ESP32 `chip_test` with `CHIP_HZ = 40e6`: ID 0x0022, UART at 116279 / 57471 / 19231 baud
-  (B timed A's bits at 344 / 696 / 2080 clocks), IRQ, pin 15 levels, filter off 2.7 / 20.5 us, filter on (N=15 P=4,
-  6.4 us) 2 us rejected and 20 us at 20.4 us: **PASS (0 problems)**. Sketch fix found on the way: `chip_test` chose the
-  larger filter prescale only from 50 MHz, so at 40 MHz its hold was 1.6 us and a 2.7 us pulse passed (the chip was
-  right); now from 32 MHz, as `pico/regression.py`.
-- 8 Nov 2026 (15:30): **blind identification merged into main** (`claude/identify`, 3 commits). `pico/identify.py`
-  listens on every chip input (levels with `read_pins`, low and high pulses with `measure_pulse` and the new
-  `programs/measure_high.asm`, one engine per pin, a second pass at the chip clock for short pulses) and
-  `pico/identify_core.py` names what it finds: quiet high/low, UART with baud, Manchester (DALI), IR NEC, 1-Wire, clocks,
-  one-wire LED data, and pairs (I2C, SPI, matching LED lines); listen only unless `PROBE` (an open-drain I2C address scan
-  on quiet idle-high pairs). `model/test_identify.py`: 16 simulated targets through the real programs in the model, PASS;
-  planted bugs caught (measure_high measuring lows; a 2 % bit-time tolerance; the LED rule's wrong fingerprint). Bench,
-  Mojo 40 MHz serialiser build, Pico host: `SELFTEST` (Pico PWM 10 kHz and UART 115200) named both; an SP107E LED
-  controller (5 V logic through 3 kOhm series and 10 kOhm to ground: 2.88 V high on engine pins 17 and 18) named
-  "one-wire LED data, 800 kbit/s: bit 1.24 us, 0 = 0.35 us high, 1 = 0.88 us high" on both pins, found to carry matching
-  data; the Hantek read 1.205-1.247 us, 0.36 us and 0.885 us, and decoded red 0x70 0x00 0x00 per LED (WS2811, RGB order;
-  `docs/bench/sp107e_*.png`). With 5.1 kOhm instead of 10 kOhm the high was only 2.29 V (the IO Shield pulls engine pins
-  15-19 down at about 9 kOhm) and the chip read both widths about 30 ns short.
-- 8 Nov 2026 (branch `receive`): **receive on engine 0, half duplex: the serialiser run backwards** (docs/isa.md
-  "Receiver", docs/host_port.md 0x26, 0x2B [7], 0x34-0x36). New `src/receiver.v`: two samples of the receive pin per clock
-  (the level at the falling edge from a latch in the wrapper, then the rising edge), both taken before the glitch filter
-  with flip-flops matched so they stay in time order; a mid-bit edge carries the bit (rising 1), edges sooner than RXGAP
-  half-clocks are bit boundaries, 2 x RXGAP without one ends the frame; preamble lock on 16 alternating bits and the SFD's
-  "11"; words into engine 0's 64-word buffer, read by the host from 0x26; WAIT 25 and IRQ for frame ready. The direction
-  is engine state: changed only by a SERCFG write with the key 101 in [15:13], only when idle (else refused and flagged),
-  every change empties the buffer, resets the receiver and stops the serialiser; reset and a stopped engine give transmit;
-  MOV ser, host writes to 0x26 and PULL are blocked in receive mode. Proof: `model/test_receive.py` (loopback from the
-  serialiser model at SERDIV 0 and 1; jitter, 20 random-phase frames per step: both clock edges right up to +-7 ns per
-  edge, rising edge only fails at 1 ns; every switch rule; a link pulse ignored; overrun keeps 64 words; the 3/4-bit
-  threshold exact to the half-clock); `model/cosim.py` with receive stimulus (Manchester frames, random direction writes,
-  arms and buffer reads; `RX_FOCUS=1` for long frames and overruns): 3 x 400,000, 750,000 long and 2 x 750,000 focused
-  clocks, every clock identical, flip-flop memory and IHP SRAM model; it found a real hole (MOV ser in the clock a change
-  to receive was taken left the serialiser running in receive mode; fixed: the change also stops it) and a test now pins
-  it; `test/tb_chip.v`: a frame driven onto engine pin 16 with edges at both clock phases, received with the glitch filter
-  fully on (0x4F), all 32 words read back through 0x26, RXSTAT and IRQ checked, a keyed change mid-frame refused, a write
-  without the key ignored: PASS at NENG 2, 3, 4 (CRC 0), LATE=1 and the kit build. Planted bugs caught: model 6 (edge
-  direction, threshold off by one, change allowed mid-frame, buffer not emptied, falling-edge sample ignored, the
-  same-clock MOV ser), chip 7 (falling path stuck or one stage short, rising path through the filter or one stage short,
-  no key check, IRQ, 0x26 read). Local Tiny Tapeout layout (four engines, CRC 0, IHP `sg13cmos5l_dlhq_1` latch in the
-  wrapper, a false path to its input, antenna repair after detailed routing set to diodes only with up to 10 rounds):
-  route DRC, KLayout DRC, LVS and antenna 0, setup +6.29 ns and hold +0.124 ns worst, 45.7 % utilisation (44.9 % before),
-  gate-level test PASS. Cyclone IV serialiser build with the receiver: 5,487 LEs (87 %), 43.88 MHz on the 40 MHz clock.
-- 8 Nov 2026 (branch `duplex`): **full duplex on engine 0, and a hardware preamble.** SERCFG [8:7] is now a keyed,
-  idle-only mode: 00 transmit, 01 receive (each with the whole 64-word buffer), 10 full duplex: the buffer split into a
-  16-word transmit ring (memory words 0-15) and a 48-word receive ring (16-63), each with its own pointers, count and head
-  register; a received word waits in a one-word hold register; the one memory port takes turns (host write, held word,
-  transmit head refill, receive head refill). Received words are read from the new RXDATA 0x37. SERCFG [9]: the serialiser
-  sends seven 0x55 and the SFD itself (not fed to the CRC), so the host sends a frame from the destination address on.
-  Proof: model (engine A sends an Ethernet frame through its 16-word ring while catching it on its own pin into the 48-word
-  ring, all 32 words, SERDIV 0 and 1; host push limit at 10 Mbit/s measured: a word every 140 clocks keeps a 30-word frame
-  going, 160 underruns); cosim 400,000 clocks with flip-flop memory, IHP SRAM and no CRC units, 750,000 focused clocks on
-  each memory, every clock identical, full duplex in 291 tests (held words, both heads refilled, 168 overruns in the
-  focused run); chip test with a loopback wire from TD+ to engine pin 16: full duplex with the hardware preamble, the
-  host feeding the ring by its level, all 32 words read back through 0x37: PASS at NENG 2, 3, 4 (CRC 0), LATE=1 and the
-  kit build; 7 planted bugs caught (SERCFG [8] ignored, 0x37 read, transmit ring not capped, held word over a push,
-  receive ring not wrapping at 48, both heads refilled at once, preamble without the SFD's closing 1). Local Tiny Tapeout
-  layout: route DRC, KLayout DRC, LVS and antenna 0, setup +7.08 ns, hold +0.151 ns, 46.5 % utilisation, gate-level test
-  PASS. Cyclone IV serialiser build: 5,702 LEs (91 %), 43.74 MHz. **Bench, Mojo v3** (40 MHz, 85 % of slices, 42.3 MHz;
-  a jumper from TD+, hole 34, to engine pin 19, hole 74, checked first by `pico/jumper_check.py`): `pico/fdx_loop.py`:
-  10 Mbit/s, hardware preamble, 14 words and the CRC unit's FCS sent and received back at once, all 16 words right; a full
-  Ethernet frame at 20 kbit/s with the Pico topping up the ring (never above 16), no underrun, all 32 words right; a keyed
-  change while sending refused and flagged, a write without the key ignored, the change back taken when idle: PASS.
+- The engine instruction set follows the Raspberry Pi RP2040's PIO.
+- SRAM macro integration in the Tiny Tapeout flow follows Ken Pettit's walkthrough
+  ([kdp1965/ihp-um-janestreet-prism](https://github.com/kdp1965/ihp-um-janestreet-prism)), including its timing-repair
+  settings; the power-grid plugin (`librelane_plugin_sram_pdn.py`, `odb_stripes.py`) and `pdn_cfg.tcl` are J.L.
+  Nuijens's, from [JLNuijens/ttihp-cpu-1-1-uart](https://github.com/JLNuijens/ttihp-cpu-1-1-uart) (Apache-2.0), unchanged.
+- IHP's open PDK, the Tiny Tapeout template and LibreLane; OSS CAD Suite, Quartus Prime Lite, Xilinx ISE, sigrok /
+  PulseView, MicroPython.

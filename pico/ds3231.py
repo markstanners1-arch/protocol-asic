@@ -1,11 +1,11 @@
 """DS3231 clock module from the Pico: engine A runs programs/i2c_master.asm (SCL = engine pin 2 = J4-10, SDA = pin 3 = J4-13,
 100 kHz) to the RTC at 0x68 and the AT24C32 EEPROM (4 KB, 2 address bytes, 32-byte pages) that rides on the same module at 0x57.
-Not run yet: the module arrives 5 Nov 2026. The module sits on the same two wires as the AT24C256 (0x50): both can stay.
-Wiring (sheet section 12): module VCC -> J4-1 or J4-2 (3.3 V only: its pull-ups go to VCC), GND -> the negative rail (wired to
+Checked against a modelled device; not yet run on hardware. The module sits on the same two wires as the AT24C256 (0x50):
+both can stay. Wiring (sheet section 11): module VCC -> J4-1 or J4-2 (3.3 V only: its pull-ups go to VCC), GND -> the negative rail (wired to
 J4-11 or 12), SCL -> J4-10, SDA -> J4-13; 32K and SQW left open. At 3.3 V the module's LIR2032 charge path (VCC, diode, 200 ohm)
-sits below a 3 V cell and does nothing, so a plain CR2032 is safe in it on this bench.
+sits below a 3 V cell and does nothing, so a plain CR2032 is safe in it at 3.3 V (never 5 V with a CR2032 fitted).
 
-Two devices in Mark's drawer answer at 0x68: this DS3231 and the GY-521's MPU6050 (whose AD0 low gives 0x68 as well). The script
+Two common devices answer at 0x68: this DS3231 and the MPU6050 on a GY-521 module (whose AD0 low gives 0x68 as well). The script
 tells them apart in two ways: the MPU6050's WHO_AM_I register 0x75 reads 0x68 (its own address; the DS3231 has only registers
 0x00-0x12 and its pointer wraps, so 0x75 there comes back as one of its own small time or alarm registers, not 0x68); and the
 DS3231's seconds register runs: read twice two seconds apart it must advance, while an MPU6050's register 0x00 is a static
@@ -27,7 +27,7 @@ from chip_host import Chip, wrap_reg, ENG_A, R_CLKDIV, R_WRAP, R_OUTCFG, R_MISC,
 from programs import PROGRAMS, LABELS
 
 try: SET_TIME
-except NameError: SET_TIME = None      # e.g. (2026, 11, 5, 14, 30, 0, 4) = Thursday 5 Nov 2026 14:30:00 (weekday 1 = Monday, your choice)
+except NameError: SET_TIME = None      # e.g. (2026, 11, 5, 14, 30, 0, 4) = Thursday 5 Nov 2026 14:30:00 (weekday 1 = Monday by this script's convention)
 CHIP_HZ = 12_000_000
 SCL, SDA = 2, 3
 RTC, EEPROM, OTHER = 0x68, 0x57, 0x50
