@@ -50,6 +50,7 @@ against real devices; "model" means proven on the Python model only.
 | `i2c_master` | 19 | I2C master, open drain, clock stretching, one host word per START, byte or STOP | bench |
 | `i2c_sniff` | 29 | passive I2C monitor | bench |
 | `spi_master` | 14 | SPI mode 0 | bench |
+| `onewire` | 22 | Dallas 1-Wire master: reset and presence, byte send and receive in timed slots | bench |
 | `keypad` | 16 | 4x4 keypad scanner with debounce | bench |
 | `ir_nec`, `ir_tx` | 29, 31 | NEC infra-red decode; transmit with a 38 kHz carrier made in software | bench |
 | `eth_tx`, `ser_tx` | 16, 5 | Ethernet frames with link pulses; one serialiser frame per count | bench |
@@ -85,7 +86,7 @@ result is a scripted sequence read back line by line. Wiring in [docs/bench_wiri
 |---|---|---|---|
 | Lattice MachXO3L Starter Kit | 2 engines, 12 MHz, ID 0x0022 | UART at 115200 / 57600 / 19200, engine B timing A's bits (104 / 208 / 624 clocks); glitch filter on and off; I2C master to an ESP32 and an Arduino UNO slave (clock stretching, repeated START) with engine B sniffing; AT24C256 EEPROM; I2C address scan; SPI to a 74HC595 (16 of 16 steps); 4x4 keypad; NEC remotes decoded; IR transmit loopback (6 of 6 frames, carrier 38.46 kHz); UART receive (256 values at 115200); baud measure 1200 to 460800 within 0.16 %; I2C sniffer at 100 and 400 kHz | PASS |
 | Mojo v3 (Spartan-6 LX9) | 3 engines, 50 MHz, ID 0x0023 | Pico regression (UART, timing, IRQ, pins, filter) | PASS |
-| Mojo v3 | serialiser build, 40 MHz, ID 0x0022 | Ethernet frames at 10 Mbit/s, Manchester, differential: 336,100 frames clean; frames captured with a logic analyser at 500 kbit/s and decoded, the FCS equal to zlib's CRC-32; blind identification of WS2811 LED data at 800 kbit/s; full duplex over a loopback wire: 10 Mbit/s with the hardware preamble, and a full Ethernet frame at 20 kbit/s with the host topping up the 16-word ring, every word received back; keyed mode rules | PASS |
+| Mojo v3 | serialiser build, 40 MHz, ID 0x0022 | Ethernet frames at 10 Mbit/s, Manchester, differential: 336,100 frames clean; frames captured with a logic analyser at 500 kbit/s and decoded, the FCS equal to zlib's CRC-32; blind identification of WS2811 LED data at 800 kbit/s; full duplex over a loopback wire: 10 Mbit/s with the hardware preamble, and a full Ethernet frame at 20 kbit/s with the host topping up the 16-word ring, every word received back; keyed mode rules; DS18B20 temperature sensor over 1-Wire (`pico/onewire.py`): presence pulse, ROM code and scratchpad with good CRC-8, MATCH ROM with the right code answered and with one bit changed silent, scratchpad written and read back, 60 readings a second apart all with good CRC-8, the reading rising from 19.2 to 28.8 C when held | PASS |
 | Cyclone IV EP4CE6 | 3 engines, 50 MHz, ID 0x0023 | ESP32 regression (UART, B timing A at 432 / 872 / 2608 clocks, IRQ, pins, filter) | PASS |
 | Cyclone IV EP4CE6 | serialiser build, 40 MHz from the PLL, ID 0x0022 | ESP32 regression (344 / 696 / 2080 clocks) | PASS |
 | Nandland Go Board (iCE40 HX1K) | single blocks | UART (115,804 characters, all correct); SPI host port, 0 errors in 15,372 checks from 0.25 to 4 MHz; switch-bounce meter | PASS |
