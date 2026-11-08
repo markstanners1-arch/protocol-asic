@@ -844,3 +844,12 @@ That's a driver change on the PC, so Mark does it himself. Then:
   pulse 138 clocks (2.8 us), 20 us pulse 1028 clocks (20.6 us); filter on (N=15 P=4, 5.1 us): 2 us rejected, 20 us
   1024 clocks: **PASS (0 problems)**. Two earlier runs failed only the pin-15 checks: the GPIO 17 lead had come out of
   pin 67 (static levels passed once through a dangling contact, pulses did not).
+- 8 Nov 2026 (14:00): **Cyclone IV serialiser build, 40 MHz from the PLL, regression PASS.** `fpga/cyclone4/build.sh ser`
+  (new option: Verilog macro SER_BUILD, `altpll` 50 x 4 / 5 = 40 MHz, SER_NENG engines, output `build/chip_c4_ser<N>.sof`;
+  the default build is unchanged): engine 0 with the serialiser and the 64-word TX FIFO, no CRC units. SER_NENG=3 does
+  not fit (7,094 of 6,272 LEs); SER_NENG=2 fits: 5,870 LEs (94 %), 2,083 registers, slow-corner Fmax 45.73 MHz on the
+  40 MHz clock. Loaded to SRAM; ESP32 `chip_test` with `CHIP_HZ = 40e6`: ID 0x0022, UART at 116279 / 57471 / 19231 baud
+  (B timed A's bits at 344 / 696 / 2080 clocks), IRQ, pin 15 levels, filter off 2.7 / 20.5 us, filter on (N=15 P=4,
+  6.4 us) 2 us rejected and 20 us at 20.4 us: **PASS (0 problems)**. Sketch fix found on the way: `chip_test` chose the
+  larger filter prescale only from 50 MHz, so at 40 MHz its hold was 1.6 us and a 2.7 us pulse passed (the chip was
+  right); now from 32 MHz, as `pico/regression.py`.

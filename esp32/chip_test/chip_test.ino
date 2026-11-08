@@ -25,11 +25,11 @@
 const int PIN_CS = 5, PIN_SCK = 18, PIN_MISO = 19, PIN_MOSI = 23, PIN_IRQ = 4, PIN_RX2 = 16, PIN_PULSE = 17;
 // Which board the chip is running on: the chip clock sets the SPI limit (clk/8), the baud dividers and the filter hold.
 //   MachXO3L kit (fpga/machxo3/build/chip.bit): 12 MHz.   Cyclone IV board (fpga/cyclone4): 50 MHz, the ASIC's own speed.
-const float CHIP_HZ = 50e6;
+const float CHIP_HZ = 40e6;
 const uint32_t SPI_HZ = (CHIP_HZ >= 50e6) ? 4000000 : 1000000;   // under clk/8 either way
 const float CHIP_MHZ = CHIP_HZ / 1e6;
 // Filter hold of about 5 us: N=15 with P chosen for the clock (hold = 16 x 2^P clocks; P=2 at 12 MHz, P=4 at 50 MHz)
-const int FILTER_P = (CHIP_HZ >= 50e6) ? 4 : 2;
+const int FILTER_P = (CHIP_HZ >= 32e6) ? 4 : 2;     // hold = 16 x 2^P clocks: 5.1 us at 50 MHz, 6.4 us at 40 (as pico/regression.py)
 const uint16_t FILTER_ON = (FILTER_P << 4) | 0xF;
 const float FILTER_HOLD_US = 16.0 * (1 << FILTER_P) / CHIP_MHZ;
 const int PULSE_PIN = 15;                  // engine pin wired to GPIO 17: 17 = ball F15 (J4 hole 28); 15 = G15 (hole 26)
