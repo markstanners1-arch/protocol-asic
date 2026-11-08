@@ -59,14 +59,15 @@ def drain(eng, limit=200):
 
 
 # ---- 1. loopback from the serialiser
-def test_loopback(serdiv):
+def test_loopback(serdiv, hw_pre=False):
     prog = assemble(open(os.path.join(ROOT, "programs", "eth_tx.asm")).read())
     tx = Engine(prog, Config.for_program(prog, out_base=TDP, out_count=2, set_base=TDP, set_count=2, out_right=True,
                                           serdiv=serdiv, ser=True, ser_en=True, manch=True, diff=True, end_marker=True,
-                                          crc_append=True, crc_cpl=True, crc_ser=True, crc_skip=4, crcpoly=0xEDB88320,
+                                          crc_append=True, crc_cpl=True, crc_ser=True, crc_skip=0 if hw_pre else 4,
+                                          pre=hw_pre, crcpoly=0xEDB88320,
                                           crcinit=0xFFFFFFFF))
     rx = receiver(rxgap=3 * (serdiv + 1))         # 3/4 of a bit in half-clocks: a bit is 4 (SERDIV + 1) half-clocks
-    words = words_le(PREAMBLE + BODY)
+    words = words_le(BODY if hw_pre else PREAMBLE + BODY)       # hardware preamble: the host sends the body only
     feed = [len(words)] + words
     for t in range(6000):
         if feed and t >= 10:
@@ -74,7 +75,7 @@ def test_loopback(serdiv):
                 feed.pop(0)
         tx.clock(0)
         rx.clock(tx.pins_out)
-    print(f"-- loopback, SERDIV {serdiv}")
+    print(f"-- loopback, SERDIV {serdiv}{', hardware preamble' if hw_pre else ''}")
     check(f"SERDIV {serdiv}: frame ready", rx.rx_ready, True)
     check(f"SERDIV {serdiv}: words written", rx.rx_words, len(WANT))
     check(f"SERDIV {serdiv}: no partial word, no overrun", (rx.rx_left, rx.rx_over), (0, False))
@@ -237,9 +238,67 @@ def test_threshold():
               (rx.rx_left, got[0] if got else None), want)
 
 
+# ---- 5. full duplex: engine A sends a frame through its 16-word ring (topped up by the host as it goes) while its own
+#         receiver catches the same frame from its pin into the 48-word ring
+def test_full_duplex(serdiv, host_gap):
+    from engine import MODE_FDX
+    prog = assemble(open(os.path.join(ROOT, "programs", "eth_tx.asm")).read())
+    eng = Engine(prog, Config.for_program(prog, out_base=TDP, out_count=2, set_base=TDP, set_count=2, out_right=True,
+                                           in_right=True, serdiv=serdiv, ser=True, ser_en=True, manch=True, diff=True,
+                                           end_marker=True, crc_append=True, crc_cpl=True, crc_ser=True, crc_skip=0, pre=True,
+                                           crcpoly=0xEDB88320, crcinit=0xFFFFFFFF, rx_pin=TDP, rxgap=3 * (serdiv + 1)))
+    eng.clock(0, mode_wr=MODE_FDX)
+    eng.clock(0, arm=True)
+    feed = [len(words_le(BODY))] + words_le(BODY)
+    got, pins, most, refused = [], 0, 0, 0
+    for t in range(8000):
+        push = None
+        if feed and t % host_gap == 0:
+            if eng.tx_put(feed[0]):
+                feed.pop(0)
+            else:
+                refused += 1
+        eng.clock(pins, bpop=(t % 7 == 3))
+        if eng.bpopped is not None:
+            got.append(eng.bpopped)
+        most = max(most, len(eng.txf))
+        pins = eng.pins_out                       # TD+ straight back into the receive pin
+    tag = f"full duplex, SERDIV {serdiv}, host push every {host_gap} clocks"
+    print(f"-- {tag}: transmit ring peak {most} words, {refused} pushes refused while full")
+    check(f"{tag}: transmit ring never above 16", most <= 16, True)
+    check(f"{tag}: frame sent, no underrun", (eng.ser_busy, eng.ser_under, len(feed)), (False, False, 0))
+    check(f"{tag}: frame received (ready, no overrun)", (eng.rx_ready, eng.rx_over), (True, False))
+    check(f"{tag}: received words = destination address to FCS", got + drain(eng), WANT)
+
+
+def test_full_duplex_rules():
+    from engine import MODE_FDX, MODE_TX
+    print("-- full duplex: the rules")
+    prog = assemble("set x, 3\nmov ser, x\njmp 1\n")
+    eng = Engine(prog, Config.for_program(prog, ser=True, ser_en=True, rx_pin=0, rxgap=6))
+    eng.clock(0, mode_wr=MODE_FDX)
+    check("full duplex accepted", (eng.mode, eng.rx_refused), (MODE_FDX, False))
+    for w in range(20):
+        eng.tx_put(w); eng.clock(0)
+    check("full duplex: the host fills the transmit ring, 16 at most", len(eng.txf) <= 16, True)
+    check("full duplex: MOV ser works (the serialiser is busy)", eng.ser_busy, True)
+    eng.clock(0, mode_wr=MODE_TX)
+    check("a change while a frame goes out is refused", (eng.mode, eng.rx_refused), (MODE_FDX, True))
+    eng.rxb.extend([1, 2]); eng.rb_hv = True
+    n_tx = len(eng.txf)
+    eng.clock(0, arm=True)
+    check("full duplex: arm empties the receive ring only", (len(eng.rxb), len(eng.txf) >= n_tx - 1), (0, True))
+
+
 test_threshold()
+test_full_duplex(1, 1)
+test_full_duplex(1, 40)
+test_full_duplex(0, 1)
+test_full_duplex_rules()
 test_loopback(1)
 test_loopback(0)
+test_loopback(1, hw_pre=True)
+test_loopback(0, hw_pre=True)
 best = test_jitter()
 test_switch()
 print("PASS" if not fails else "FAIL: " + "; ".join(fails))

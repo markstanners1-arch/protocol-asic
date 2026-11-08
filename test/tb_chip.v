@@ -24,7 +24,9 @@ module tb_chip;
     wire rx_pad;                       // the receive pin's pad; the bench's falling-edge flip-flop stands in for the latch
     reg  rx_fall = 0;
     always @(negedge clk) rx_fall <= rx_pad;
-    protocol_chip #(.NENG(NENG), .SER0(SER0), .CRC(CRC), .TXDEPTH0(TXDEPTH0)) dut (.ui_in({ui_hi, mosi, sck, cs_n}), .uo_out(uo_out), .uio_in(uio_in),
+    reg  loopback = 0;                 // full-duplex test: a wire from TD+ (engine pin 8, uo_out[2]) to engine pin 16
+    wire [4:0] ui_hi_eff = loopback ? {ui_hi[4:2], uo_out[2], ui_hi[0]} : ui_hi;
+    protocol_chip #(.NENG(NENG), .SER0(SER0), .CRC(CRC), .TXDEPTH0(TXDEPTH0)) dut (.ui_in({ui_hi_eff, mosi, sck, cs_n}), .uo_out(uo_out), .uio_in(uio_in),
                        .uio_out(uio_out), .uio_oe(uio_oe), .ena(1'b1), .clk(clk), .rst_n(rst_n),
                        .rx_pad(rx_pad), .rx_fall(rx_fall));
     wire miso = uo_out[0];
@@ -41,7 +43,7 @@ module tb_chip;
         case (a)
             6'h22, 6'h23, 6'h25: sweep_mask = 16'h7FFF;
             6'h24:               sweep_mask = 16'h3FFF;
-            6'h2B:               sweep_mask = 16'h1F7F;   // [7] reads the direction in force (transmit here)
+            6'h2B:               sweep_mask = 16'h1E7F;   // [8:7] read the mode in force (transmit here)
             default:             sweep_mask = 16'hFFFF;
         endcase
     endfunction
@@ -547,6 +549,48 @@ module tb_chip;
             read_reg(0, 6'h36, w); check("RXSTAT after the change: all clear", w, 0);
             write_reg(0, 6'h29, 0);
             check("IRQ low again (the received frame was dropped with the buffer)", {15'd0, irq}, 0);
+
+            // full duplex (8 Nov 2026): a loopback wire from TD+ to engine pin 16. Engine A sends the frame through its
+            // 16-word ring with the hardware preamble (the host feeds words as the level allows) while its own receiver
+            // catches it into the 48-word ring; the host reads the received words from 0x37. SERDIV 63 (a word every
+            // 2048 clocks) so the bench's SPI host, a word per ~1100 clocks with its level check, keeps up.
+            write_reg(0, 6'h2C, 16'd63);
+            write_reg(0, 6'h35, 16'd192);                               // RXGAP: 3/4 bit = 96 clocks = 192 half-clocks
+            write_reg(0, 6'h2B, (sc & 16'hE3FF) | 16'h0200 | 16'hA100);  // skip 0, hardware preamble, key, full duplex
+            read_reg(0, 6'h2B, w); check("SERCFG [8:7] after the keyed write: full duplex in force", {14'd0, w[8:7]}, 2);
+            check("SERCFG [9] hardware preamble kept", {15'd0, w[9]}, 1);
+            read_reg(0, 6'h36, w); check("RXSTAT: the receiver on, nothing yet", w, 16'h8000);
+            write_reg(0, 6'h34, 16'd16 | 16'h0040 | 16'h0080);          // pin 16, both edges, arm
+            loopback = 1;
+            nw = CRC ? 30 : 32;                                         // the body (+ the FCS when the host sends it)
+            write_reg(0, 6'h26, nw[15:0]);                              // the count: the program pulls it and starts
+            k = 0;
+            for (j = 4; j < 4 + nw; j = j + 1) begin
+                read_reg(0, 6'h33, w);
+                while (w[6:0] >= 7'd16) begin repeat (200) @(posedge clk); read_reg(0, 6'h33, w); end
+                if (w[6:0] > k) k = w[6:0];
+                write_reg(0, 6'h26, fw[j]);
+            end
+            check("full duplex: the transmit ring never reported above 16", {9'd0, k[6:0]} <= 16, 1);
+            st = 16'h4000;
+            for (j = 0; j < 400 && st[14]; j = j + 1) begin repeat (500) @(posedge clk); read_reg(0, 6'h28, st); end
+            check("full duplex: frame sent, not busy, no underrun", {14'd0, st[15:14]}, 0);
+            repeat (2000) @(posedge clk);
+            read_reg(0, 6'h36, w); check("full duplex: RXSTAT ready, 32 words, receiver on", {w[15], w[14:8], w[0]}, {1'b1, 7'd32, 1'b1});
+            read_reg(0, 6'h26, w); check("full duplex: 0x26 reads 0 (received words are at 0x37)", w, 0);
+            bad = 0;
+            for (j = 0; j < 32; j = j + 1) begin
+                read_reg(0, 6'h37, w);
+                if (w !== {want[8 + 2 * j + 1], want[8 + 2 * j]}) begin
+                    if (!bad) $display("FAIL: full duplex received word %0d = %h, expected %h", j, w, {want[8 + 2 * j + 1], want[8 + 2 * j]});
+                    errors = errors + 1; bad = 1;
+                end
+            end
+            if (!bad) $display("ok:   full duplex: engine A sent the frame and received it back, all 32 words through 0x37");
+            loopback = 0;
+            write_reg(0, 6'h2B, sc | 16'hA000);                         // back to transmit (idle)
+            read_reg(0, 6'h2B, w); check("back to transmit", {14'd0, w[8:7]}, 0);
+            write_reg(0, 6'h2C, 16'd0);
             write_reg(0, 6'h20, 0);
         end
 

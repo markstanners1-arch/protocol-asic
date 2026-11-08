@@ -26,18 +26,18 @@ module receiver (
     input  wire        rise_in,         // the pin at the rising edge of clk, before the chip's glitch filter
     input  wire        fall_in,         // the pin at the last falling edge of clk (latch outside the engine)
     // requests
-    input  wire        mode_wr,         // keyed SERCFG write: change the direction to mode_val
-    input  wire        mode_val,
+    input  wire        mode_wr,         // keyed SERCFG write: change the mode to mode_val
+    input  wire [1:0]  mode_val,        // 0 transmit, 1 receive, 2 full duplex
     input  wire        arm,             // RXCFG write with the arm bit
     input  wire        start_req,       // MOV ser this clock with the serialiser enabled
     input  wire        ser_busy,
     input  wire        buf_full,        // the buffer holds 64 words (start of the clock)
     // results
-    output reg         rx_mode,         // 0 transmit (reset), 1 receive
+    output reg  [1:0]  mode,            // 0 transmit (reset), 1 receive, 2 full duplex
     output reg         refused,
     output reg         wr,              // write wdata into the buffer this clock
     output reg  [15:0] wdata,
-    output wire        clear,           // empty the buffer at the end of this clock
+    output wire        clear,           // an accepted change or an arm: the engine empties the buffer it concerns
     output reg         ready,           // a frame has ended
     output reg         over,
     output wire        locked,
@@ -73,7 +73,7 @@ module receiver (
         n_lv = lv; n_last = last; n_ready = ready; n_over = over; n_st = st; n_gap = gap; n_sh = sh; n_run = run;
         n_bits = bits; n_left = left; n_words = words; wr = 1'b0; wdata = 16'd0;
         s = 1'b0; is_edge = 1'b0; take = 1'b0; tb = 1'b0; w = 16'd0;
-        if (rx_mode) begin
+        if (mode != 2'd0) begin                                    // receive or full duplex: the receiver listens
             for (k = 0; k < 2; k = k + 1) begin
                 s = (k == 0) ? (cfg_both ? f2 : n_lv) : r2;
                 is_edge = s ^ n_lv;
@@ -129,12 +129,12 @@ module receiver (
 
     // ---- the direction, the arm, the refusals (decided on the state at the start of the clock)
     assign accept = mode_wr && idle;
-    wire do_arm = !mode_wr && arm && rx_mode;
+    wire do_arm = !mode_wr && arm && (mode != 2'd0);
     assign clear = accept || do_arm;
 
     always @(posedge clk) begin
         if (!rst_n) begin
-            rx_mode <= 1'b0; refused <= 1'b0; f1 <= 1'b0; f2 <= 1'b0; r1 <= 1'b0; r2 <= 1'b0; lv <= 1'b0;
+            mode <= 2'd0; refused <= 1'b0; f1 <= 1'b0; f2 <= 1'b0; r1 <= 1'b0; r2 <= 1'b0; lv <= 1'b0;
             armed <= 1'b0; st <= IDLE; gap <= 16'd0; run <= 6'd0; last <= 1'b0; sh <= 16'd0; bits <= 4'd0;
             words <= 7'd0; left <= 4'd0; ready <= 1'b0; over <= 1'b0;
         end else begin
@@ -148,10 +148,10 @@ module receiver (
                 st <= n_st; gap <= n_gap; run <= n_run; last <= n_last; sh <= n_sh; bits <= n_bits;
                 words <= n_words; left <= n_left; ready <= n_ready; over <= n_over;
             end
-            if (accept) rx_mode <= mode_val;
+            if (accept) mode <= mode_val;
             if (mode_wr) refused <= !idle;
             else if (do_arm) refused <= 1'b0;
-            else if (start_req && rx_mode) refused <= 1'b1;
+            else if (start_req && mode == 2'd1) refused <= 1'b1;   // receive only: MOV ser refused
         end
     end
 endmodule

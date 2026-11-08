@@ -9,7 +9,8 @@
 //   ntests
 //   per test: ncycles, 32 program words, 26 config words, then per cycle: pins, push, pop, pins_fall, req
 //   (push = bit 16 valid, bits 15:0 data; pop = bit 0; pins_fall = the pins at the falling edge before this clock;
-//   req = [0] keyed direction write, [1] its value, [2] arm, [3] host buffer read)
+//   req = [0] keyed mode write, [1] receive, [4] full duplex (the mode written), [2] arm, [3] host read of a
+//   received word)
 // cosim_out.txt: per test "T <n>", then per cycle one line of state (see the $fwrite below).
 
 `timescale 1ns/1ps
@@ -35,7 +36,8 @@ module tb_cosim;
     reg [4:0]  cfg_rx_pin;
     reg        cfg_rx_raw, cfg_rx_both;
     reg [15:0] cfg_rxgap;
-    reg        rx_fall = 0, rx_rise = 0, mode_wr = 0, mode_val = 0, rx_arm = 0, host_bpop = 0;
+    reg        rx_fall = 0, rx_rise = 0, mode_wr = 0, rx_arm = 0, host_bpop = 0;
+    reg [1:0]  mode_val = 0;
     reg [31:0] pins_fall = 0;
     reg        kind;
     reg        imem_we = 0;
@@ -53,7 +55,9 @@ module tb_cosim;
     wire [15:0] x [0:1], y [0:1], osr [0:1], isr [0:1], sw [0:1];
     wire        sw_run [0:1], ser_busy [0:1], ser_under [0:1];
     wire [15:0] host_bpop_data [0:1], rxstat [0:1];
-    wire        buf_ready [0:1], rx_mode [0:1], rx_ready [0:1];
+    wire        buf_ready [0:1], rx_ready [0:1], rx_held [0:1];
+    wire [1:0]  mode_o [0:1];
+    wire [5:0]  rb_level [0:1];
 
     genvar g;
     generate for (g = 0; g < 2; g = g + 1) begin : duts
@@ -72,7 +76,8 @@ module tb_cosim;
             .ser_busy(ser_busy[g]), .ser_under(ser_under[g]), .crc(crc[g]),
             .cfg_rx_pin(cfg_rx_pin), .cfg_rx_raw(cfg_rx_raw), .cfg_rx_both(cfg_rx_both), .cfg_rxgap(cfg_rxgap),
             .rx_fall(rx_fall), .rx_rise(rx_rise), .mode_wr(mode_wr), .mode_val(mode_val), .rx_arm(rx_arm), .host_bpop(host_bpop),
-            .host_bpop_data(host_bpop_data[g]), .buf_ready(buf_ready[g]), .rx_mode(rx_mode[g]), .rx_ready(rx_ready[g]),
+            .host_bpop_data(host_bpop_data[g]), .buf_ready(buf_ready[g]), .mode(mode_o[g]), .rb_level(rb_level[g]),
+            .rx_held(rx_held[g]), .rx_ready(rx_ready[g]),
             .rxstat(rxstat[g]),
             .pc(pc[g]), .x(x[g]), .y(y[g]), .osr(osr[g]), .osr_count(osr_count[g]), .isr(isr[g]), .isr_count(isr_count[g]),
             .delay(delay[g]), .sw(sw[g]), .sw_run(sw_run[g]));
@@ -117,21 +122,22 @@ module tb_cosim;
                 host_pop = mem[p+2][0];
                 pins_fall = mem[p+3]; rx_fall = pins_fall[cfg_rx_pin];
                 rx_rise = pins_in[cfg_rx_pin];
-                mode_wr = mem[p+4][0]; mode_val = mem[p+4][1]; rx_arm = mem[p+4][2]; host_bpop = mem[p+4][3];
+                mode_wr = mem[p+4][0]; mode_val = mem[p+4][4] ? 2'd2 : {1'b0, mem[p+4][1]};
+                rx_arm = mem[p+4][2]; host_bpop = mem[p+4][3];
                 p = p + 5;
                 #1;
                 popped_ok = host_pop && (rx_level[kind] != 0);
                 popped = host_pop_data[kind];
-                bpopped_ok = host_bpop && rx_mode[kind] && buf_ready[kind];
+                bpopped_ok = host_bpop && (mode_o[kind] != 2'd0) && buf_ready[kind];
                 bpopped = host_bpop_data[kind];
                 @(negedge clk);
                 // pc x y osr osr_count isr isr_count delay sw sw_run pins_out out_dir tx rx popped busy under crc
-                $fwrite(f, "%0d %h %h %h %0d %h %0d %0d %h %0d %h %h %0d %0d %s %0d %0d %h %h %s\n",
+                $fwrite(f, "%0d %h %h %h %0d %h %0d %0d %h %0d %h %h %0d %0d %s %0d %0d %h %h %s %0d %0d\n",
                         pc[kind], x[kind], y[kind], osr[kind], osr_count[kind], isr[kind], isr_count[kind], delay[kind],
                         sw[kind], sw_run[kind], out_val[kind], out_dir[kind],
                         tx_level[kind], rx_level[kind], popped_ok ? $sformatf("%h", popped) : "-",
                         ser_busy[kind], ser_under[kind], crc[kind], rxstat[kind],
-                        bpopped_ok ? $sformatf("%h", bpopped) : "-");
+                        bpopped_ok ? $sformatf("%h", bpopped) : "-", rb_level[kind], rx_held[kind]);
             end
         end
         $fclose(f);

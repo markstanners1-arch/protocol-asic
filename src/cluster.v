@@ -85,7 +85,7 @@ module cluster #(
                     6'h23: r_outcfg <= wdata[14:0];
                     6'h24: r_misc   <= wdata[13:0];
                     6'h25: r_incfg  <= wdata[14:0];
-                    6'h2B: if (HAS_SER) r_sercfg <= {wdata[12:8], 1'b0, wdata[6:0]};   // [7], the direction, is engine state
+                    6'h2B: if (HAS_SER) r_sercfg <= {wdata[12:9], 2'b00, wdata[6:0]};  // [8:7], the mode, is engine state
                     6'h2C: if (HAS_SER) r_serdiv <= wdata;
                     6'h2D: if (CRC) r_crcpoly[15:0]  <= wdata;
                     6'h2E: if (CRC) r_crcpoly[31:16] <= wdata;
@@ -107,8 +107,12 @@ module cluster #(
             wire [4:0]  oc_, ic_, dl_;
             wire        swr_;
             wire [15:0] bpop_data, e_rxstat;
-            wire        e_bufready, e_rxmode, e_rxready;
-            // the direction changes only on a SERCFG write carrying the key 101 in [15:13] (bit 7: 1 receive, 0 transmit)
+            wire        e_bufready, e_rxready;
+            wire [1:0]  e_mode;
+            wire [5:0]  e_rblevel;
+            wire        e_held;
+            wire _unused_fdx = &{e_rblevel, e_held, 1'b0};   // for the engine-level tests only
+            // the mode changes only on a SERCFG write carrying the key 101 in [15:13]: [8] full duplex, else [7] receive
             wire mode_wr = HAS_SER && wr_s && addr == 6'h2B && wdata[15:13] == 3'b101;
             wire rx_arm  = HAS_SER && wr_s && addr == 6'h34 && wdata[7];
             engine #(.SER(HAS_SER), .TXDEPTH(g == 0 ? TXDEPTH0 : 4), .CRC(CRC)) e (
@@ -132,9 +136,11 @@ module cluster #(
                 .pc(e_pc), .x(x_), .y(y_), .osr(osr_), .osr_count(oc_), .isr(isr_), .isr_count(ic_),
                 .delay(dl_), .sw(sw_), .sw_run(swr_),
                 .cfg_rx_pin(r_rxcfg[4:0]), .cfg_rx_raw(r_rxcfg[5]), .cfg_rx_both(r_rxcfg[6]), .cfg_rxgap(r_rxgap),
-                .rx_fall(HAS_SER ? rx_fall : 1'b0), .rx_rise(HAS_SER ? rx_rise : 1'b0), .mode_wr(mode_wr), .mode_val(wdata[7]), .rx_arm(rx_arm),
-                .host_bpop(pop && sel && addr == 6'h26), .host_bpop_data(bpop_data), .buf_ready(e_bufready),
-                .rx_mode(e_rxmode), .rx_ready(e_rxready), .rxstat(e_rxstat));
+                .rx_fall(HAS_SER ? rx_fall : 1'b0), .rx_rise(HAS_SER ? rx_rise : 1'b0), .mode_wr(mode_wr),
+                .mode_val(wdata[8] ? 2'd2 : {1'b0, wdata[7]}), .rx_arm(rx_arm),
+                .host_bpop(pop && sel && ((addr == 6'h26 && e_mode == 2'd1) || addr == 6'h37)), .host_bpop_data(bpop_data),
+                .buf_ready(e_bufready), .mode(e_mode), .rb_level(e_rblevel), .rx_held(e_held),
+                .rx_ready(e_rxready), .rxstat(e_rxstat));
 
             // host reads of this slot: the address picks the word here, the cluster then picks the slot
             reg [15:0] rd;
@@ -146,11 +152,11 @@ module cluster #(
                     6'h23: rd = {1'b0, r_outcfg};
                     6'h24: rd = {2'b0, r_misc};
                     6'h25: rd = {1'b0, r_incfg};
-                    6'h26: rd = (e_rxmode && e_bufready) ? bpop_data : 16'd0;   // receive mode: the received words
+                    6'h26: rd = (e_mode == 2'd1 && e_bufready) ? bpop_data : 16'd0;   // receive mode: the received words
                     6'h27: rd = (rxl != 0) ? pop_data : 16'd0;
                     6'h28: rd = {e_under, e_busy, e_pc, run, 1'b0, rxl, 1'b0,
                                  (txl > 7'd7) ? 3'd7 : txl[2:0]};                // TX level saturating at 7
-                    6'h2B: rd = HAS_SER ? {3'd0, r_sercfg[12:8], e_rxmode, r_sercfg[6:0]} : 16'd0;   // [7]: in force
+                    6'h2B: rd = HAS_SER ? {3'd0, r_sercfg[12:9], e_mode[1], e_mode[0], r_sercfg[6:0]} : 16'd0;   // [8:7]: in force
                     6'h2C: rd = HAS_SER ? r_serdiv : 16'd0;
                     6'h2D: rd = r_crcpoly[15:0];
                     6'h2E: rd = r_crcpoly[31:16];
@@ -162,6 +168,7 @@ module cluster #(
                     6'h34: rd = HAS_SER ? {9'd0, r_rxcfg} : 16'd0;
                     6'h35: rd = HAS_SER ? r_rxgap : 16'd0;
                     6'h36: rd = e_rxstat;                                         // RXSTAT (0 off engine 0)
+                    6'h37: rd = (e_mode != 2'd0 && e_bufready) ? bpop_data : 16'd0;   // RXDATA: receive or full duplex
                     default: rd = 16'd0;
                 endcase
             end

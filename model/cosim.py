@@ -31,7 +31,7 @@ CFG_FIELDS = ["clkdiv", "start", "wrap_bottom", "wrap_top", "out_base", "out_cou
 BOOLS = ("side_opt", "side_dir", "out_right", "in_right", "rx_raw", "rx_both")
 EVENTS = ["start", "abort", "done", "underrun", "crc_sent", "end_sent", "in_crc", "time_crc", "wait_ser", "pull_busy",
           "refill_blocked", "pull_not_ready", "under_not_ready",
-          "rx_change", "rx_refused", "rx_lock", "rx_frame", "rx_over", "rx_bpop"]
+          "rx_change", "rx_refused", "rx_lock", "rx_frame", "rx_over", "rx_bpop", "fdx", "fdx_held", "fdx_both"]
 OPNAMES = ["jmp", "wait", "in", "out", "push/pull", "mov", "set", "time"]
 
 
@@ -80,6 +80,8 @@ def random_test(rnd, ncycles):
                crcpoly=rnd.choice([0xEDB88320, 0xA001, 0x8C, rnd.getrandbits(32), rnd.getrandbits(16)]),
                crcinit=rnd.choice([0, 0xFFFFFFFF, 0xFFFF, rnd.getrandbits(32)]))
     sercfg = rnd.getrandbits(7) | (rnd.choice([0, 0, 1, 2, 4, rnd.randrange(8)]) << 10)
+    if rnd.random() < 0.3:
+        sercfg |= 1 << 9                                         # hardware preamble
     if rnd.random() < 0.75:
         sercfg |= 1                                              # enabled three times in four
     cfg["sercfg"] = sercfg
@@ -106,6 +108,7 @@ def random_test(rnd, ncycles):
     push_rate = rnd.choice([0.05, 0.3, 0.3, 0.7])
     push_stop = rnd.choice([ncycles, ncycles, ncycles // 2, 300])   # a host that stops feeding: underruns in long runs
     to_rx = bool(focus) or rnd.random() < 0.6                        # the host asks for receive early on
+    to_mode = 2 if (not focus or rnd.random() < 0.5) and rnd.random() < 0.5 else 16    # receive (2) or full duplex (16)
     req_rate = rnd.choice([0.0, 0.005, 0.02])                        # later direction writes and arms, at random
     bpop_rate = rnd.choice([0.0, 0.05, 0.3])                         # 0: a host that never reads (overruns)
     if focus:
@@ -127,11 +130,11 @@ def random_test(rnd, ncycles):
         pop = 1 if rnd.random() < 0.3 else 0
         req = 0
         if to_rx and t == 3:
-            req = 1 | 2                                              # keyed write: receive
+            req = 1 | to_mode                                        # keyed write: receive or full duplex
         elif to_rx and t == 5:
             req = 4                                                  # arm
         elif rnd.random() < req_rate:
-            req = rnd.choice([1, 3, 4, 4])                           # a direction write (either way) or an arm
+            req = rnd.choice([1, 3, 17, 4, 4])                       # a mode write (any of the three) or an arm
         if rnd.random() < bpop_rate:
             req |= 8
         stim.append((pins, push, pop, pins_fall, req))
@@ -147,13 +150,14 @@ def run_model(prog, cfg, stim, events=None):
     lines = []
     for pins, push, pop, pins_fall, req in stim:
         popped = eng.clock(pins, push=(push & 0xFFFF) if push >> 16 else None, pop=bool(pop), pins_fall=pins_fall,
-                           mode_wr=((req >> 1) & 1) if req & 1 else None, arm=bool(req & 4), bpop=bool(req & 8))
+                           mode_wr=(2 if req & 16 else (req >> 1) & 1) if req & 1 else None, arm=bool(req & 4),
+                           bpop=bool(req & 8))
         lines.append(f"{eng.pc} {eng.x:04x} {eng.y:04x} {eng.osr:04x} {eng.osr_count} {eng.isr:04x} "
                      f"{eng.isr_count} {eng.delay} {eng.sw:04x} {int(eng.sw_run)} {eng.pins_out:08x} "
                      f"{eng.out_dir:08x} {len(eng.txf)} {len(eng.rxf)} "
                      f"{'-' if popped is None else format(popped, '04x')} "
                      f"{int(eng.ser_busy)} {int(eng.ser_under)} {eng.crc:08x} {eng.rxstat:04x} "
-                     f"{'-' if eng.bpopped is None else format(eng.bpopped, '04x')}")
+                     f"{'-' if eng.bpopped is None else format(eng.bpopped, '04x')} {len(eng.rxb)} {int(eng.rx_hold is not None)}")
     if events is not None:
         for k in EVENTS:
             events[k] += 1 if eng.events[k] else 0
@@ -196,7 +200,7 @@ def run_verilog(tests):
     return out
 
 
-HEAD = "pc x    y    osr  oc isr  ic dl sw   r pins_out out_dir  tx rx pop  busy under crc      rxst bpop"
+HEAD = "pc x    y    osr  oc isr  ic dl sw   r pins_out out_dir  tx rx pop  busy under crc      rxst bpop rb held"
 
 
 def main():

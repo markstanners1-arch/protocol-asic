@@ -230,22 +230,34 @@ Phases: FILL, DATA, CRC, END. State visible to programs: `ser_busy` (`WAIT` 24, 
   0 at the end of the clock in which the last half-bit ends. `WAIT` 24, `MOV status` and PULL see `ser_busy` as it was
   at the start of the clock, like the FIFO levels.
 - **Flags.** `ser_under` stays set until the next `MOV ser` with a non-zero count.
+- **Hardware preamble** (v0.4, SERCFG `[9]`). After FILL the serialiser sends 64 bits before the first word's bits:
+  1 0 1 0 ... 1 0 1 1 in time order (seven 0x55 and the SFD 0xD5, LSB first), Manchester-coded like data. They are not
+  fed to the CRC. The host then sends the frame from the destination address on (4 words fewer).
 
-## Receiver (v0.4; engine 0 only)
+## Receiver and full duplex (v0.4; engine 0 only)
 
-Engine 0 sends or receives, one at a time (half duplex). The receiver decodes Manchester from one input pin into the same
-64-word buffer the serialiser sends from. Checked against the model (`model/engine.py`, `model/test_receive.py`) every
+Engine 0 has three modes: **transmit** (the reset state: the serialiser and the whole 64-word buffer), **receive**
+(the receiver and the whole buffer) and **full duplex** (both at once: the buffer split into a 16-word transmit ring and
+a 48-word receive ring). The receiver decodes Manchester from one input pin. Checked against the model (`model/engine.py`, `model/test_receive.py`) every
 clock by `model/cosim.py`.
 
-- **Direction.** Engine state, transmit after reset (and whenever the engine is stopped, since a stopped engine is held
-  in reset). A SERCFG write changes it only if bits `[15:13]` are `101` (the key); bit 7 is then the direction (1 receive,
-  0 transmit). The change is taken only when idle: the serialiser not busy and no frame coming in. Otherwise it is
-  refused, nothing changes, and RXSTAT's refused flag is set. A change that is taken empties the buffer, resets the
-  receiver and stops the serialiser, even if `MOV ser` executes in the same clock. SERCFG bit 7 reads back the direction
-  in force.
-- **Interlocks in receive mode.** `MOV ser` does nothing and sets the refused flag; host writes to the buffer (0x26) are
+- **Mode.** Engine state, transmit after reset (and whenever the engine is stopped, since a stopped engine is held in
+  reset). A SERCFG write changes it only if bits `[15:13]` are `101` (the key); then `[8]` = 1 asks for full duplex,
+  else `[7]` = 1 receive, 0 transmit. The change is taken only when idle: the serialiser not busy and no frame coming
+  in. Otherwise it is refused, nothing changes, and RXSTAT's refused flag is set. A change that is taken empties the
+  buffer (both rings), resets the receiver and stops the serialiser, even if `MOV ser` executes in the same clock.
+  SERCFG `[8:7]` read back the mode in force.
+- **Full duplex.** The transmit ring is memory words 0-15 (the serialiser, PULL and host writes to 0x26 use it as the
+  whole buffer is used in transmit mode, a 16-word FIFO), the receive ring words 16-63 (48 words). Each ring has its own
+  pointers, count and head register. A received word goes first into a one-word hold register. The one memory port
+  takes turns each clock: a host write, else the held word, else the transmit head's refill, else the receive head's
+  refill. A received word that finds the hold occupied and the port taken, or the ring full, is dropped and sets
+  overrun. A frame longer than 16 words is sent while the host keeps the ring topped up (the serialiser starts when
+  the ring is full); at 10 Mbit/s and 40 MHz the model keeps a 30-word frame going with a word pushed every 140 clocks.
+- **Interlocks in receive mode** (not full duplex). `MOV ser` does nothing and sets the refused flag; host writes to the buffer (0x26) are
   dropped; `PULL` finds the buffer empty (the received words are the host's).
-- **Arm.** An RXCFG write with bit 7 set empties the buffer, clears the status and listens for one frame.
+- **Arm.** An RXCFG write with bit 7 set empties the received words (the buffer in receive mode, the receive ring in
+  full duplex, where sending carries on), clears the status and listens for one frame.
 - **Sampling.** Two samples of the receive pin per clock: the level at the falling edge of the clock (a latch outside the
   engine), then the level at the rising edge, in that order, both through flip-flops matched so they stay in time
   order. Both bypass the chip's glitch filter: receive does not depend on FILTER, which stays as set for the other pins.
