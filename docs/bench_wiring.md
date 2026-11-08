@@ -372,7 +372,7 @@ If it doesn't answer: `-Script lead_probe.py` (MISO and IRQ driven and steady wi
 running), then `TOP=pin_finder` build of `fpga/mojo/pin_finder.v` (touch a hole with a ground lead through 220 R - 1 k: the
 display shows P and the pin number).
 
-## 15. Scope setup for a 10 Mbit/s frame on the Mojo (5 Nov 2026, not yet captured)
+## 15. Scope setup for a 10 Mbit/s frame on the Mojo (5 Nov 2026; captured 8 Nov, README 8 Nov entry)
 
 Chip side: load the 40 MHz serialiser build and send frames for twenty minutes (the sender reports its totals at the end):
 
@@ -389,13 +389,14 @@ swapped probes only turn the picture over.
 | Volts/div | VERTICAL SCALE knobs | 1.00V on both (readout at the bottom); CH1 in the top half, CH2 in the bottom |
 | Trigger | TRIG MENU | Edge, source CH2, rising, coupling DC, mode Normal |
 | Trigger level | LEVEL knob | 1.50V (readout beside CH2 at the bottom) |
-| Holdoff | TRIG MENU | 100 us, so the scope arms once per frame, not inside it |
+| Holdoff | HORIZ MENU, F4, V0 knob (not TRIG MENU) | 100 us, so the scope arms once per frame, not inside it |
 | Horizontal offset | push the HORIZONTAL POSITION knob | 0.000s (the number top-left); then turn it so the marker sits one division from the left |
 
 Timebases, saving a picture (SAVE/RECALL to the USB stick) at each: 10.0us shows the whole 58 us burst; 100ns at the
-trigger shows the preamble, 100 ns pulses one division wide, CH2 the mirror of CH1; 100ns with the position turned to
-about 6.5 us after the trigger shows the all-ones destination address, 50 ns pulses half a division wide, the 10 Mbit
-proof. In Normal mode the screen stays blank until a trigger comes: R top-centre and 0 Hz mean the CH2 tip is not on a
+trigger shows the preamble, 100 ns pulses one division wide, CH2 the mirror of CH1. The position will not go past about
+5.2 us at 200ns (the readout moves on, the picture does not), so for the change to 50 ns pulses (SFD end and the
+all-ones destination address, about 6.2 us after the trigger) use 200ns at 5.125 us or 400ns at about 7 us: the 10 Mbit
+proof (8 Nov captures `docs/bench/eth_10mbit_scope_5.png`, `_6.png`). In Normal mode the screen stays blank until a trigger comes: R top-centre and 0 Hz mean the CH2 tip is not on a
 driven hole. AUTO SET finds whatever is there; the chip's 50 MHz oscillator shows as a few hundred millivolts of ripple
 on an idle line. CH2 is the trigger because a frame's first edge is TD- rising; the 50 ns link pulse between frames is
 on TD+ only, which is what a CH1 trigger catches instead.

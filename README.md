@@ -823,3 +823,15 @@ That's a driver change on the PC, so Mark does it himself. Then:
   PASS; cosim 1000 x 400 clocks on seeds 1 and 2 and seed 3 with the IHP SRAM model, every clock identical; whole-chip
   test PASS at NENG=3, NENG=2 and LATE=1. The Tiny Tapeout repository's `sram-macro` branch carries this src with four
   engines at 40 MHz; its main (the submission) is unchanged.
+- 8 Nov 2026 (04:05-05:00): **10 Mbit/s frame on the scope.** Mojo v3, 40 MHz serialiser build (ID 0x0022), Pico running
+  `eth_tx.py` `MODE='full'` (SERDIV 1, half-bit 50 ns), one frame every 10 ms; two 20-minute batches PASS (SERSTAT 0 and CRC
+  register 0x2BDA0853 after every frame). Hantek DSO5102P, CH1 TD+ (hole 34), CH2 TD- (hole 35), 10x, DC, BW limit off;
+  trigger edge CH2 rising 1.5 V, Normal, holdoff 100 us. Widths read from the saved bitmaps (40 pixels a division):
+  `docs/bench/eth_10mbit_scope_1.png` (40 ns/div): first TD- pulse 48 ns (one half-bit), then 102 / 98 ns, TD+ edges
+  within 2 ns of TD- in the opposite sense; `_4.png` (80 ns/div): five preamble periods 1000 ns (200 ns each);
+  `_5.png` (200 ns/div, 5 ns a pixel): 30 widths of 100 ns (preamble) then 15 of 50 ns (the SFD's closing 1s and the
+  all-ones destination address), CH1 and CH2 edges in the same columns; `_6.png` (400 ns/div): 37 widths of 100 ns then 76
+  of 50 ns to the screen edge, both channels: **PASS**, the frame's bit cells at 10 Mbit/s seen by an outside instrument.
+  Scope notes: holdoff is under HORIZ MENU (F4, V0 knob), not TRIG MENU; at 200 ns/div the horizontal position stops
+  near 5.2 us (the readout can go further but the picture no longer moves). An idle screen with S top-centre was the end
+  of a frame batch, not the scope.
