@@ -25,7 +25,7 @@
 const int PIN_CS = 5, PIN_SCK = 18, PIN_MISO = 19, PIN_MOSI = 23, PIN_IRQ = 4, PIN_RX2 = 16, PIN_PULSE = 17;
 // Which board the chip is running on: the chip clock sets the SPI limit (clk/8), the baud dividers and the filter hold.
 //   MachXO3L kit (fpga/machxo3/build/chip.bit): 12 MHz.   Cyclone IV board (fpga/cyclone4): 50 MHz, the ASIC's own speed.
-const float CHIP_HZ = 12e6;
+const float CHIP_HZ = 50e6;
 const uint32_t SPI_HZ = (CHIP_HZ >= 50e6) ? 4000000 : 1000000;   // under clk/8 either way
 const float CHIP_MHZ = CHIP_HZ / 1e6;
 // Filter hold of about 5 us: N=15 with P chosen for the clock (hold = 16 x 2^P clocks; P=2 at 12 MHz, P=4 at 50 MHz)

@@ -835,3 +835,12 @@ That's a driver change on the PC, so Mark does it himself. Then:
   Scope notes: holdoff is under HORIZ MENU (F4, V0 knob), not TRIG MENU; at 200 ns/div the horizontal position stops
   near 5.2 us (the readout can go further but the picture no longer moves). An idle screen with S top-centre was the end
   of a frame batch, not the scope.
+- 8 Nov 2026 (12:40-13:30): **three engines on the Cyclone IV at 50 MHz, regression PASS.** USB Blaster on the board's
+  JTAG header: `jtagconfig` reads ID 0x020F10DD (EP4CE6 die) once the board's power switch is on. `bash fpga/cyclone4/build.sh`
+  from main (v0.3 src, NENG 3, SER0 0, CRC 0): 6,098 of 6,272 LEs (97 %), slow-corner Fmax 51.74 MHz, built in 1 min 50 s;
+  loaded with `quartus_pgm -m jtag` to SRAM only. ESP32 host (COM16, `chip_test` with `CHIP_HZ = 50e6`, SPI 4 MHz), leads
+  as wiring sheet section 5: ID 0x0023; engine A UART at 115200 / 57600 / 19200 received by the ESP32, engine B timed A's
+  bits at 432 / 872 / 2608 clocks (exact); IRQ high then low; pin 15 follows GPIO 17 low/high; glitch filter off: 2 us
+  pulse 138 clocks (2.8 us), 20 us pulse 1028 clocks (20.6 us); filter on (N=15 P=4, 5.1 us): 2 us rejected, 20 us
+  1024 clocks: **PASS (0 problems)**. Two earlier runs failed only the pin-15 checks: the GPIO 17 lead had come out of
+  pin 67 (static levels passed once through a dangling contact, pulses did not).
