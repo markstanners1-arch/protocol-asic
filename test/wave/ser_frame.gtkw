@@ -1,0 +1,62 @@
+[*]
+[*] GTKWave layout for test/wave/ser_frame.vcd: the serialiser sending the chip test's Ethernet frame.
+[*] Open with test/wave/open_ser_frame.bat (or: gtkwave ser_frame.vcd ser_frame.gtkw), GTKWave 4.
+[*] Clock 100 MHz in the test bench (10 ns), SERDIV 0: one half-bit per clock. Times are in picoseconds.
+[*] Opens on the first clocks of the frame (marker at the first word load). Other views (type into From / To):
+[*]   whole recording           2496000000 to 2602125000  the buffer fills over SPI, then empties as the frame goes
+[*]   end of data, CRC, marker  2599300000 to 2600200000  phase 1 -> 2 (CRC) -> 3 (end marker), then idle
+[*]
+[dumpfile] "ser_frame.vcd"
+[timestart] 2588450000
+*-9.000000 2588545000 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+[size] 1600 900
+[pos] -1 -1
+[sst_width] 220
+[signals_width] 230
+[sst_expanded] 1
+[sst_vpaned_height] 260
+@200
+-The clock
+@28
+wave.clk
+@200
+-
+-Host SPI port: the bench loads the count and 34 words
+@28
+wave.cs_n
+wave.sck
+wave.mosi
+@200
+-
+-Engine A
+@24
+wave.engine_pc[4:0]
+wave.fifo_level[6:0]
+@200
+-
+-Serialiser (phase: 0 fill, 1 data, 2 CRC, 3 end marker)
+@24
+wave.phase[1:0]
+@28
+wave.busy
+@24
+wave.words_left[15:0]
+@28
+wave.fifo_pop
+@22
+wave.shift_reg[15:0]
+@24
+wave.bit_count[4:0]
+@28
+wave.half_bit
+wave.line
+@22
+wave.crc[31:0]
+@200
+-
+-The pins: TD+ and TD- (engine pins 8 and 9)
+@28
+wave.td_plus
+wave.td_minus
+[pattern_trace] 1
+[pattern_trace] 0
