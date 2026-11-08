@@ -11,8 +11,7 @@ One pair of wires, polarity-free, 16 V nominal (9.5 to 22.5 V) from a current-li
 in two halves; a 1 is low then high, a 0 high then low. A forward frame (controller to gear) is a start bit (a 1), 16 bits MSB
 first (address byte, then command or level byte), then idle. The gear answers a query with a backward frame of 8 bits,
 starting 2.9 to 9.2 ms after the forward frame ends; silence means "no" (or nobody there). The next forward frame waits
-9.17 ms. So the chip needs one output pin to drive the shorting transistor and one input pin to read the bus level: the
-one-wire end of the bus ladder in `docs/bus_variants.md`, where the engine does all the timing.
+9.17 ms. So the chip needs one output pin to drive the shorting transistor and one input pin to read the bus level, and the engine does all the timing.
 
 ## The interface: Waveshare Pico-DALI2 (decided 4 Nov 2026)
 

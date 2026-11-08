@@ -471,8 +471,7 @@ That's a driver change on the PC, so Mark does it himself. Then:
   is kept at D:\ outside the repo). Fix: installer dropped from the commit and moved to Downloads, `*.exe *.msi *.rar`
   gitignored, nine local commits folded into one and pushed. Lesson: read the whole backup output, not its last line.
 - 4 Nov 2026 (morning): run 41697384154 precheck PASS, so the three-engine chip as it stands is a complete, submittable
-  layout. Morning's bus talk (speed grades, the 400 pF capacitance limit, three- and four-wire variants, fire loops;
-  written up in `docs/bus_variants.md` that afternoon) turned into a "what else can it do" list; Mark's Elegoo kits cover most of it. **First new program: the 4x4 keypad
+  layout. **First new program: the 4x4 keypad
   scanner** `programs/keypad.asm` (16 words): one column pulled low at a time, open drain, so two keys on a row can never
   short two drivers; rows read with pull-ups; the 16-key map is pushed only when it changes, then a 20 ms pause for the
   bounce. `model/test_keypad.py` scans a model keypad (one key, a key bouncing for 5 ms each way, two keys on one row,
@@ -601,20 +600,11 @@ That's a driver change on the PC, so Mark does it himself. Then:
   welcome; teams recommended; **deadline 18 Jan 2027**; **the prize is a tape-out of the "most novel designs"** on the March 2027 CMOS5L shuttle
   (subject to the foundry), chips and dev boards back after fabrication. The final submission form is not published yet (it will appear on the
   competition page closer to the deadline).
-- 4 Nov 2026 (afternoon, write-up): **the three- and four-wire bus talk recorded** in `docs/bus_variants.md`, after a second
-  session could find only the one README line about it. Contents: why I2C stops at a few metres (the 400 pF RC ramp, with
-  the fire loop as the same physics at 100 nF and a few kbit/s, screen earthed at one end); three meanings of "three wire"
-  (split SDA into data-out and data-in for push-pull edges and distance, SMBus alert line, three-wire SPI), all program
-  changes; four wires (both lines split, differential pairs, data plus power, plain SPI); the wire-count ladder;
-  and the split-I2C plan: `programs/i2c_master_split.asm`, about two words changed from the 19-word master, data/clock out
-  on the output-only pins and back on the input-only ones, no Verilog change, a P82B96 at the far end, demo = the AT24C256
-  read over two metres of ribbon that plain I2C fails. Order agreed: identify-the-board set, DALI, then this.
 - 4 Nov 2026 (evening, later): **SRAM macros do get through the TT IHP flow.** A Discord post Mark pasted led to a public
   competition entry (JLNuijens/ttihp-cpu-1-1-uart): 8x4 tiles, four 512x32 IHP SRAM macros, gds + precheck + gl_test +
   viewer all passed on 19 Oct. It needed a substituted power-grid step, its own pdn_cfg.tcl and a hold SDC (details in
   `docs/memory_options.md`). Our 64x16 macro exists in the PDK. The Discord question is now the narrower "is that route
-  accepted on the shuttle". Also: personal notes moved to a gitignored `CLAUDE.local.md`; the 3 Nov layout render saved
-  as `docs/layout/render_3nov_v02_3eng.jpg`; `docs/bus_variants.md` written; 8x4 would change no test for three engines.
+  accepted on the shuttle". Also: the 3 Nov layout render saved as `docs/layout/render_3nov_v02_3eng.jpg`.
 - 4 Nov 2026 (evening, Discord): **the SRAM question is answered without posting.** A search of the Tiny Tapeout Discord
   from Mark's account found Ken Pettit's PRISM entry (kdp1965/ihp-um-janestreet-prism, 8x4, two 512x32 macros, all four
   gds jobs green) and his walkthrough "Dropping a real SRAM macro into your CMOS5L tile": the maintainers whitelisted the
