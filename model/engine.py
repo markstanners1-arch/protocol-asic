@@ -58,6 +58,12 @@ class Config:
     crcpoly: int = 0             # reflected polynomial
     crcinit: int = 0             # start value
     crc_unit: bool = True        # False: built without the CRC unit (engine.v CRC = 0): the register stays 0
+    # v0.4: receive on engine 0 (private design 8 Nov 2026; docs/isa.md when built). The direction itself is engine
+    # state (rx_mode), changed only by a keyed host write while idle; these are the receiver's settings (RXCFG, RXGAP).
+    rx_pin: int = 0              # RXCFG[4:0]: the input pin
+    rx_raw: bool = False         # RXCFG[5]: no preamble hunt, shift from the first taken edge
+    rx_both: bool = True         # RXCFG[6]: sample on both clock edges (else rising only)
+    rxgap: int = 6               # RXGAP: the 3/4-bit threshold in half-clocks; end of frame at twice this
 
     @classmethod
     def for_program(cls, prog, **kw):
@@ -89,11 +95,18 @@ RANGES = {
     "div": (0, M16), "out_val": (0, M32), "out_dir": (0, M32), "sync1": (0, M32), "sync2": (0, M32),
     "crc": (0, M32), "ser_phase": (0, 3), "ser_words": (0, M16), "ser_sh": (0, M16), "ser_bit": (0, 31),
     "ser_half": (0, 1), "ser_div": (0, M16), "ser_skip": (0, 7),
+    "rx_state": (0, 3), "rx_gap": (0, M16), "rx_run": (0, 63), "rx_sh": (0, M16), "rx_bits": (0, 15),
+    "rx_words": (0, 127), "rx_left": (0, 15), "rx_f1": (0, 1), "rx_f2": (0, 1), "rx_r1": (0, 1), "rx_r2": (0, 1), "rx_lv": (0, 1), "rx_last": (0, 1),
 }
 CHECK_RANGES = True
 
 # serialiser phases
 FILL, DATA, CRC, END = 0, 1, 2, 3
+# receiver states
+RX_IDLE, RX_HUNT, RX_DATA, RX_DONE = 0, 1, 2, 3
+RX_WAIT_INDEX = 25              # WAIT index that reads "a received frame is ready"
+RX_LOCK_RUN = 16                # alternating bits needed before the SFD's closing "11" counts
+RX_KEY = 5                      # SERCFG[15:13] must hold this for a write to change the direction (bit 7)
 
 
 class RangeError(Exception):
@@ -151,6 +164,16 @@ class Engine:
         self.ser_div = 0
         self.ser_skip = 0
         self.ser_wskip = False      # the word being sent is one of the crc_skip unwatched words
+        # receiver (engine 0): the direction, the falling-edge sampler, the decoder, the frame status
+        self.rx_mode = False        # False: transmit (the reset state, today's chip); True: receive
+        self.rx_refused = False     # a direction change while busy, or MOV ser in receive mode, was refused
+        self.rx_f1 = self.rx_f2 = 0 # the receive pin at the falling edge (a latch outside), then two rising-edge stages
+        self.rx_r1 = self.rx_r2 = 0 # the receive pin at the rising edge, unfiltered, then two stages (the chip's glitch
+                                    # filter is bypassed: receive never depends on FILTER)
+        self.rx_lv = 0              # the line level after the last sample (kept through an arm or a change)
+        self._rx_reset()
+        self.bpopped = None         # the word a host buffer read took this clock (receive mode)
+        self._accept = False        # a direction change is taken this clock
         # per-clock requests from the instruction to the units
         self._start = None          # MOV ser value
         self._crc_clr = False       # TIME 5 (or a frame start)
@@ -158,7 +181,34 @@ class Engine:
         # coverage counters (for the random tests' report; not state)
         self.events = {"start": 0, "abort": 0, "done": 0, "underrun": 0, "crc_sent": 0, "end_sent": 0,
                        "in_crc": 0, "time_crc": 0, "wait_ser": 0, "pull_busy": 0,
-                       "refill_blocked": 0, "pull_not_ready": 0, "under_not_ready": 0}
+                       "refill_blocked": 0, "pull_not_ready": 0, "under_not_ready": 0,
+                       "rx_change": 0, "rx_refused": 0, "rx_lock": 0, "rx_frame": 0, "rx_over": 0, "rx_bpop": 0}
+
+    def _rx_reset(self, armed=False):
+        """The receiver's decoder and frame status back to the start (the samplers and the direction are kept)."""
+        self.rx_armed = armed
+        self.rx_state = RX_IDLE
+        self.rx_gap = 0             # half-clocks since the last taken (mid-bit) edge
+        self.rx_run = 0             # alternating bits seen while hunting the preamble
+        self.rx_last = 0            # the last bit taken while hunting
+        self.rx_sh = 0
+        self.rx_bits = 0            # bits in rx_sh not yet written
+        self.rx_words = 0           # words written this frame
+        self.rx_left = 0            # bits in the last, partial word (0 = whole words)
+        self.rx_ready = False       # a frame has ended: its words are in the buffer
+        self.rx_over = False        # the buffer was full: words dropped
+
+    @property
+    def rx_idle(self):
+        """Nothing in flight: no frame going out, none coming in (direction changes are allowed only then)."""
+        return not self.ser_busy and self.rx_state not in (RX_HUNT, RX_DATA)
+
+    @property
+    def rxstat(self):
+        """RXSTAT as the host reads it."""
+        return (int(self.rx_ready) | int(self.rx_over) << 1 | int(self.rx_state == RX_DATA) << 2
+                | int(self.rx_refused) << 3 | (self.rx_left & 15) << 4 | (self.rx_words & 127) << 8
+                | int(self.rx_mode) << 15)
 
     # ---- host side ----
     def tx_put(self, word):
@@ -184,6 +234,8 @@ class Engine:
         if self.cfg.ser and n % 32 == SER_WAIT_INDEX:
             self.events["wait_ser"] += 1
             return int(self.ser_busy)
+        if self.cfg.ser and n % 32 == RX_WAIT_INDEX:
+            return int(self.rx_ready)
         return self._pin(n)
 
     def _pins_from(self, base, count):
@@ -228,41 +280,78 @@ class Engine:
         return v
 
     # ---- one system clock ----
-    def clock(self, pins_in=0, push=None, pop=False):
-        """One system clock. Returns the word the host popped, or None."""
+    def clock(self, pins_in=0, push=None, pop=False, pins_fall=None, mode_wr=None, arm=False, bpop=False, pins_rx=None):
+        """One system clock. Returns the word the host popped, or None.
+        pins_fall: the pins at the falling edge before this rising edge (default: pins_in).
+        pins_rx: the pins at this rising edge as the receiver sees them, before the chip's filter (default: pins_in).
+        Engine 0 only: mode_wr = 0 / 1, a keyed SERCFG write asking for transmit / receive; arm = an RXCFG write with
+        the arm bit; bpop = a host read of the buffer (register 0x26) in receive mode (the word is left in self.bpopped)."""
+        c = self.cfg
         if self._push is not None:
             push, self._push = self._push, None
         if self._pop:
             pop, self._pop = True, False
         # host requests are judged on the state at the start of the clock
         tx0 = len(self.txf)
-        mem_fifo = self.cfg.tx_depth == SER_FIFO_DEPTH
+        mem_fifo = c.tx_depth == SER_FIFO_DEPTH
         hv0 = self.tx_hv if mem_fifo else tx0 > 0     # the head word is ready (PULL and the serialiser take it)
         self._tx_ready0, self._tx_popped = hv0, False
-        push_ok = push is not None and tx0 < self.cfg.tx_depth
+        rx0 = c.ser and self.rx_mode                  # receive mode at the start of the clock
+        idle0 = self.rx_idle
+        self._accept = c.ser and mode_wr is not None and idle0   # a direction change taken this clock: it also stops
+        # the serialiser, overriding a MOV ser in the same clock (else MOV ser and the change could cross)
+        push_ok = push is not None and tx0 < c.tx_depth and not rx0      # the host cannot fill the buffer while receiving
         pop_ok = pop and len(self.rxf) > 0
         popped = self.rxf[0] if pop_ok else None
+        self.bpopped = None
         self._start, self._crc_clr, self._crc_in = None, False, None
         if self.div == 0:
-            self.div = self.cfg.clkdiv
+            self.div = c.clkdiv
             self._tick()
         else:
             self.div -= 1
         ser_bit = self._ser_clock(tx0, hv0)
         self._crc_clock(ser_bit)
+        rx_wrote = self._rx_clock()
+        if rx0 and bpop and hv0:                      # the host reads the received frame, head word first
+            self.bpopped = self.txf.popleft()
+            self.events["rx_bpop"] += 1
+            self._tx_popped = True
         if mem_fifo:
-            # the one memory port: a push writes; else, if the head is empty or taken, the next unread word is read
+            # the one memory port: a push or a received word writes; else, if the head is empty or taken, the next
+            # unread word is read
+            port_w = push_ok or rx_wrote
             unread = tx0 - int(hv0)
-            read = not push_ok and (not hv0 or self._tx_popped) and unread > 0
-            if push_ok and (not hv0 or self._tx_popped) and unread > 0:
+            read = not port_w and (not hv0 or self._tx_popped) and unread > 0
+            if port_w and (not hv0 or self._tx_popped) and unread > 0:
                 self.events["refill_blocked"] += 1
             self.tx_hv = True if read else (False if self._tx_popped else hv0)
         if push_ok:
             self.txf.append(push & M16)
         if pop_ok:
             self.rxf.popleft()
-        # synchroniser: the engine sees pins as they were 2 clocks ago
+        # the direction and the arm (engine 0), decided on the state at the start of the clock, taking effect now
+        if c.ser and mode_wr is not None:
+            if idle0:                                 # accepted (the serialiser is idle): a clean start, buffer emptied
+                self.rx_mode = bool(mode_wr)
+                self.txf.clear()
+                self.tx_hv = False
+                self._rx_reset()
+                self.rx_refused = False
+                self.events["rx_change"] += 1
+            else:
+                self.rx_refused = True                # a frame is in flight: refused, nothing changes
+                self.events["rx_refused"] += 1
+        elif c.ser and arm and rx0:                   # arm: empty the buffer and listen for one frame
+            self.txf.clear()
+            self.tx_hv = False
+            self._rx_reset(armed=True)
+            self.rx_refused = False
+        # synchroniser: the engine sees pins as they were 2 clocks ago; the falling-edge sample path is one stage
+        # longer (latch, then two rising-edge stages)
         self.sync2, self.sync1 = self.sync1, pins_in & M32
+        self.rx_f2, self.rx_f1 = self.rx_f1, ((pins_in if pins_fall is None else pins_fall) >> c.rx_pin) & 1
+        self.rx_r2, self.rx_r1 = self.rx_r1, ((pins_in if pins_rx is None else pins_rx) >> c.rx_pin) & 1
         if CHECK_RANGES:
             self.check_ranges()
         return popped
@@ -295,6 +384,12 @@ class Engine:
         """Returns the data bit the serialiser started this clock (for the CRC), or None."""
         c = self.cfg
         if not (c.ser and c.ser_en):
+            return None
+        if self._accept:
+            self._start = 0                              # a direction change: stop, whatever MOV ser asked
+        if self.rx_mode and not self._accept:            # receive mode: the serialiser cannot take the pins
+            if self._start is not None:
+                self.rx_refused = True
             return None
         if self._start is not None:                      # MOV ser: restart with the new count; 0 stops
             if self._start == 0:
@@ -366,6 +461,85 @@ class Engine:
             self.ser_busy = False
             self.events["done"] += 1
         return None
+
+    # ---- the receiver: one system clock (private design 8 Nov 2026) ----
+    def _rx_clock(self):
+        """Two samples of the receive pin per clock, the falling-edge one first (or only the rising one, with the
+        falling slot holding the last level). Returns True if a word was written to the buffer."""
+        c = self.cfg
+        if not (c.ser and self.rx_mode):
+            return False
+        rs = self.rx_r2
+        fs = self.rx_f2 if c.rx_both else self.rx_lv
+        wrote = self._rx_sample(fs)
+        return self._rx_sample(rs) or wrote
+
+    def _rx_sample(self, s):
+        """One half-clock. Manchester: a mid-bit edge carries the bit (rising 1, falling 0); after it, edges are
+        ignored for 3/4 of a bit (RXGAP half-clocks); no taken edge for 1.5 bits ends the frame."""
+        c = self.cfg
+        edge = s != self.rx_lv
+        self.rx_lv = s
+        if not self.rx_armed or self.rx_state == RX_DONE:
+            return False
+        self.rx_gap = min(M16, self.rx_gap + 1)
+        if self.rx_state == RX_IDLE:
+            if edge:                                     # the first edge after idle is taken as a mid-bit edge
+                self.rx_state = RX_DATA if c.rx_raw else RX_HUNT
+                return self._rx_take(s)
+            return False
+        if edge and self.rx_gap >= c.rxgap:
+            return self._rx_take(s)
+        if self.rx_gap >= 2 * c.rxgap:
+            return self._rx_end()
+        return False
+
+    def _rx_take(self, bit):
+        c = self.cfg
+        self.rx_gap = 0
+        if self.rx_state == RX_HUNT:                     # the preamble 1010..., ended by the SFD's "11"
+            if self.rx_run > 0 and bit == self.rx_last:
+                if self.rx_run >= RX_LOCK_RUN and bit == 1:
+                    self.rx_state = RX_DATA              # locked: the next bit is the frame's first
+                    self.events["rx_lock"] += 1
+                    return False
+                self.rx_run = 1
+            else:
+                self.rx_run = min(63, self.rx_run + 1)
+            self.rx_last = bit
+            return False
+        if c.in_right:
+            self.rx_sh = (self.rx_sh >> 1) | (bit << 15)
+        else:
+            self.rx_sh = ((self.rx_sh << 1) | bit) & M16
+        self.rx_bits += 1
+        if self.rx_bits == 16:
+            self.rx_bits = 0
+            return self._rx_write(self.rx_sh)
+        return False
+
+    def _rx_end(self):
+        c = self.cfg
+        if self.rx_state == RX_HUNT:                     # a lone pulse or noise: back to waiting
+            self.rx_state, self.rx_run = RX_IDLE, 0
+            return False
+        wrote = False
+        if self.rx_bits:                                 # a partial last word, its bits brought down to bit 0
+            w = (self.rx_sh >> (16 - self.rx_bits)) if c.in_right else self.rx_sh & ((1 << self.rx_bits) - 1)
+            self.rx_left, self.rx_bits = self.rx_bits, 0
+            wrote = self._rx_write(w)
+        self.rx_ready, self.rx_state = True, RX_DONE
+        self.events["rx_frame"] += 1
+        return wrote
+
+    def _rx_write(self, w):
+        if len(self.txf) >= self.cfg.tx_depth:
+            self.rx_over = True
+            self.events["rx_over"] += 1
+            return False
+        self.txf.append(w & M16)
+        self.rx_words = min(127, self.rx_words + 1)
+        return True
 
     # ---- the CRC unit: one system clock (docs/isa.md, CRC unit) ----
     def _crc_clock(self, ser_bit):
@@ -479,7 +653,8 @@ class Engine:
                     self.events["pull_busy"] += 1
                 if cond and self.osr_count < 16:
                     pass
-                elif not self._tx_ready0 or self.ser_busy:   # while the serialiser is busy the FIFO is its own: PULL finds it empty
+                elif not self._tx_ready0 or self.ser_busy or self.rx_mode:   # while the serialiser is busy, or in
+                    # receive mode, the FIFO is not the program's: PULL finds it empty
                     if self.txf and not self.ser_busy:
                         self.events["pull_not_ready"] += 1
                     if block:

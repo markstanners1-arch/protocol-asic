@@ -7,8 +7,9 @@
 //
 // cosim_in.hex (32-bit hex words):
 //   ntests
-//   per test: ncycles, 32 program words, 22 config words, then per cycle: pins, push, pop
-//   (push = bit 16 valid, bits 15:0 data; pop = bit 0)
+//   per test: ncycles, 32 program words, 26 config words, then per cycle: pins, push, pop, pins_fall, req
+//   (push = bit 16 valid, bits 15:0 data; pop = bit 0; pins_fall = the pins at the falling edge before this clock;
+//   req = [0] keyed direction write, [1] its value, [2] arm, [3] host buffer read)
 // cosim_out.txt: per test "T <n>", then per cycle one line of state (see the $fwrite below).
 
 `timescale 1ns/1ps
@@ -31,6 +32,11 @@ module tb_cosim;
     reg [12:0] cfg_sercfg;
     reg [15:0] cfg_serdiv;
     reg [31:0] cfg_crcpoly, cfg_crcinit;
+    reg [4:0]  cfg_rx_pin;
+    reg        cfg_rx_raw, cfg_rx_both;
+    reg [15:0] cfg_rxgap;
+    reg        rx_fall = 0, rx_rise = 0, mode_wr = 0, mode_val = 0, rx_arm = 0, host_bpop = 0;
+    reg [31:0] pins_fall = 0;
     reg        kind;
     reg        imem_we = 0;
     reg [4:0]  imem_addr = 0;
@@ -46,6 +52,8 @@ module tb_cosim;
     wire [4:0]  pc [0:1], osr_count [0:1], isr_count [0:1], delay [0:1];
     wire [15:0] x [0:1], y [0:1], osr [0:1], isr [0:1], sw [0:1];
     wire        sw_run [0:1], ser_busy [0:1], ser_under [0:1];
+    wire [15:0] host_bpop_data [0:1], rxstat [0:1];
+    wire        buf_ready [0:1], rx_mode [0:1], rx_ready [0:1];
 
     genvar g;
     generate for (g = 0; g < 2; g = g + 1) begin : duts
@@ -62,16 +70,20 @@ module tb_cosim;
             .tx_level(tx_level[g]), .rx_level(rx_level[g]),
             .pins_in(pins_in), .out_val(out_val[g]), .out_dir(out_dir[g]),
             .ser_busy(ser_busy[g]), .ser_under(ser_under[g]), .crc(crc[g]),
+            .cfg_rx_pin(cfg_rx_pin), .cfg_rx_raw(cfg_rx_raw), .cfg_rx_both(cfg_rx_both), .cfg_rxgap(cfg_rxgap),
+            .rx_fall(rx_fall), .rx_rise(rx_rise), .mode_wr(mode_wr), .mode_val(mode_val), .rx_arm(rx_arm), .host_bpop(host_bpop),
+            .host_bpop_data(host_bpop_data[g]), .buf_ready(buf_ready[g]), .rx_mode(rx_mode[g]), .rx_ready(rx_ready[g]),
+            .rxstat(rxstat[g]),
             .pc(pc[g]), .x(x[g]), .y(y[g]), .osr(osr[g]), .osr_count(osr_count[g]), .isr(isr[g]), .isr_count(isr_count[g]),
             .delay(delay[g]), .sw(sw[g]), .sw_run(sw_run[g]));
     end endgenerate
 
     always #5 clk = ~clk;
 
-    reg [31:0] mem [0:2097151];
+    reg [31:0] mem [0:4194303];                   // room for 1000 tests x 800 clocks, or fewer longer ones
     integer p, f, t, ntests, ncycles, i, c;
-    reg [15:0] popped;
-    reg        popped_ok;
+    reg [15:0] popped, bpopped;
+    reg        popped_ok, bpopped_ok;
 
     initial begin
         $readmemh("cosim_in.hex", mem);
@@ -81,7 +93,8 @@ module tb_cosim;
         for (t = 0; t < ntests; t = t + 1) begin
             ncycles = mem[p]; p = p + 1;
             // hold reset, load the program
-            @(negedge clk); rst_n = 0; host_push = 0; host_pop = 0; pins_in = 0;
+            @(negedge clk); rst_n = 0; host_push = 0; host_pop = 0; pins_in = 0; pins_fall = 0; rx_fall = 0;
+            mode_wr = 0; mode_val = 0; rx_arm = 0; host_bpop = 0;
             for (i = 0; i < 32; i = i + 1) begin
                 imem_we = 1; imem_addr = i; imem_wdata = mem[p + i][15:0];
                 @(negedge clk);
@@ -93,7 +106,8 @@ module tb_cosim;
             cfg_in_base = mem[p+12]; cfg_jmp_pin = mem[p+13]; cfg_out_right = mem[p+14]; cfg_in_right = mem[p+15];
             cfg_fault_addr = mem[p+16];
             kind = mem[p+17]; cfg_sercfg = mem[p+18]; cfg_serdiv = mem[p+19]; cfg_crcpoly = mem[p+20]; cfg_crcinit = mem[p+21];
-            p = p + 22;
+            cfg_rx_pin = mem[p+22]; cfg_rx_raw = mem[p+23]; cfg_rx_both = mem[p+24]; cfg_rxgap = mem[p+25];
+            p = p + 26;
             @(negedge clk); @(negedge clk);       // reset sees the config
             rst_n = 1;
             $fwrite(f, "T %0d\n", t);
@@ -101,17 +115,23 @@ module tb_cosim;
                 pins_in = mem[p];
                 host_push = mem[p+1][16]; host_push_data = mem[p+1][15:0];
                 host_pop = mem[p+2][0];
-                p = p + 3;
+                pins_fall = mem[p+3]; rx_fall = pins_fall[cfg_rx_pin];
+                rx_rise = pins_in[cfg_rx_pin];
+                mode_wr = mem[p+4][0]; mode_val = mem[p+4][1]; rx_arm = mem[p+4][2]; host_bpop = mem[p+4][3];
+                p = p + 5;
                 #1;
                 popped_ok = host_pop && (rx_level[kind] != 0);
                 popped = host_pop_data[kind];
+                bpopped_ok = host_bpop && rx_mode[kind] && buf_ready[kind];
+                bpopped = host_bpop_data[kind];
                 @(negedge clk);
                 // pc x y osr osr_count isr isr_count delay sw sw_run pins_out out_dir tx rx popped busy under crc
-                $fwrite(f, "%0d %h %h %h %0d %h %0d %0d %h %0d %h %h %0d %0d %s %0d %0d %h\n",
+                $fwrite(f, "%0d %h %h %h %0d %h %0d %0d %h %0d %h %h %0d %0d %s %0d %0d %h %h %s\n",
                         pc[kind], x[kind], y[kind], osr[kind], osr_count[kind], isr[kind], isr_count[kind], delay[kind],
                         sw[kind], sw_run[kind], out_val[kind], out_dir[kind],
                         tx_level[kind], rx_level[kind], popped_ok ? $sformatf("%h", popped) : "-",
-                        ser_busy[kind], ser_under[kind], crc[kind]);
+                        ser_busy[kind], ser_under[kind], crc[kind], rxstat[kind],
+                        bpopped_ok ? $sformatf("%h", bpopped) : "-");
             end
         end
         $fclose(f);

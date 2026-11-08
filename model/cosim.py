@@ -26,10 +26,12 @@ CRC_UNIT = os.environ.get("CRC", "1") != "0"
 ENV = dict(os.environ, PATH=os.pathsep.join([os.path.join(SUITE, "bin"), os.path.join(SUITE, "lib"), os.environ["PATH"]]))
 CFG_FIELDS = ["clkdiv", "start", "wrap_bottom", "wrap_top", "out_base", "out_count", "set_base", "set_count",
               "side_base", "side_count", "side_opt", "side_dir", "in_base", "jmp_pin", "out_right", "in_right", "fault_addr",
-              "kind", "sercfg", "serdiv", "crcpoly", "crcinit"]     # kind 0 = the serialiser engine (0), 1 = a plain one
-BOOLS = ("side_opt", "side_dir", "out_right", "in_right")
+              "kind", "sercfg", "serdiv", "crcpoly", "crcinit",     # kind 0 = the serialiser engine (0), 1 = a plain one
+              "rx_pin", "rx_raw", "rx_both", "rxgap"]
+BOOLS = ("side_opt", "side_dir", "out_right", "in_right", "rx_raw", "rx_both")
 EVENTS = ["start", "abort", "done", "underrun", "crc_sent", "end_sent", "in_crc", "time_crc", "wait_ser", "pull_busy",
-          "refill_blocked", "pull_not_ready", "under_not_ready"]
+          "refill_blocked", "pull_not_ready", "under_not_ready",
+          "rx_change", "rx_refused", "rx_lock", "rx_frame", "rx_over", "rx_bpop"]
 OPNAMES = ["jmp", "wait", "in", "out", "push/pull", "mov", "set", "time"]
 
 
@@ -81,20 +83,58 @@ def random_test(rnd, ncycles):
     if rnd.random() < 0.75:
         sercfg |= 1                                              # enabled three times in four
     cfg["sercfg"] = sercfg
+    # the receiver (engine 0): a Manchester frame on the receive pin half the time, else whatever the random pins do
+    half = rnd.choice([1, 2, 2, 3, 4])                           # half-bit length in half-clocks
+    cfg.update(rx_pin=rnd.randrange(32), rx_raw=int(rnd.random() < 0.25), rx_both=int(rnd.random() < 0.75),
+               rxgap=rnd.choice([3 * half // 2 if half > 1 else 2, 3 * half // 2 if half > 1 else 2, 0, 1, rnd.randrange(12)]))
+    wave = None
+    focus = os.environ.get("RX_FOCUS")                           # RX_FOCUS=1: always engine 0 receiving a long frame
+    if focus:
+        cfg["kind"], half = 0, 1
+        cfg.update(rxgap=2, rx_raw=0)
+    if cfg["kind"] == 0 and (focus or rnd.random() < 0.5):
+        nbits = 1100 if focus else rnd.choice([8, 30, 80, 300, 1100])
+        bits = [1, 0] * rnd.choice([10, 12] if focus else [4, 10, 12]) + [1, 1] + [rnd.getrandbits(1) for _ in range(nbits)]
+        halves = [0] * rnd.randrange(20, 60)                    # idle low, the frame, TP_IDL, idle
+        for b in bits:
+            halves += [1 - b] * half + [b] * half
+        halves += [1] * (3 * half) + [0] * 200
+        wave = halves
     pins = rnd.getrandbits(32)
     stim = []
     flip = rnd.choice([0.02, 0.1, 0.3])
     push_rate = rnd.choice([0.05, 0.3, 0.3, 0.7])
     push_stop = rnd.choice([ncycles, ncycles, ncycles // 2, 300])   # a host that stops feeding: underruns in long runs
+    to_rx = bool(focus) or rnd.random() < 0.6                        # the host asks for receive early on
+    req_rate = rnd.choice([0.0, 0.005, 0.02])                        # later direction writes and arms, at random
+    bpop_rate = rnd.choice([0.0, 0.05, 0.3])                         # 0: a host that never reads (overruns)
+    if focus:
+        req_rate, bpop_rate = 0.0, rnd.choice([0.0, 0.0, 0.01])
+    rxbit = 1 << cfg["rx_pin"]
     for t in range(ncycles):
         if t >= push_stop:
             push_rate = 0
         for b in range(32):
             if rnd.random() < flip / 8:
                 pins ^= 1 << b
+        pins_fall = pins if rnd.random() < 0.7 else pins ^ (rnd.getrandbits(32) & rnd.getrandbits(32))
+        if wave is not None:
+            i = 2 * t
+            fv, rv = (wave[i] if i < len(wave) else 0), (wave[i + 1] if i + 1 < len(wave) else 0)
+            pins_fall = (pins_fall & ~rxbit) | (rxbit if fv else 0)
+            pins = (pins & ~rxbit) | (rxbit if rv else 0)
         push = (1 << 16) | rnd.getrandbits(16) if rnd.random() < push_rate else 0
         pop = 1 if rnd.random() < 0.3 else 0
-        stim.append((pins, push, pop))
+        req = 0
+        if to_rx and t == 3:
+            req = 1 | 2                                              # keyed write: receive
+        elif to_rx and t == 5:
+            req = 4                                                  # arm
+        elif rnd.random() < req_rate:
+            req = rnd.choice([1, 3, 4, 4])                           # a direction write (either way) or an arm
+        if rnd.random() < bpop_rate:
+            req |= 8
+        stim.append((pins, push, pop, pins_fall, req))
     return prog, cfg, stim
 
 
@@ -105,13 +145,15 @@ def run_model(prog, cfg, stim, events=None):
     c.set_sercfg_word(cfg["sercfg"])
     eng = Engine(prog, c)
     lines = []
-    for pins, push, pop in stim:
-        popped = eng.clock(pins, push=(push & 0xFFFF) if push >> 16 else None, pop=bool(pop))
+    for pins, push, pop, pins_fall, req in stim:
+        popped = eng.clock(pins, push=(push & 0xFFFF) if push >> 16 else None, pop=bool(pop), pins_fall=pins_fall,
+                           mode_wr=((req >> 1) & 1) if req & 1 else None, arm=bool(req & 4), bpop=bool(req & 8))
         lines.append(f"{eng.pc} {eng.x:04x} {eng.y:04x} {eng.osr:04x} {eng.osr_count} {eng.isr:04x} "
                      f"{eng.isr_count} {eng.delay} {eng.sw:04x} {int(eng.sw_run)} {eng.pins_out:08x} "
                      f"{eng.out_dir:08x} {len(eng.txf)} {len(eng.rxf)} "
                      f"{'-' if popped is None else format(popped, '04x')} "
-                     f"{int(eng.ser_busy)} {int(eng.ser_under)} {eng.crc:08x}")
+                     f"{int(eng.ser_busy)} {int(eng.ser_under)} {eng.crc:08x} {eng.rxstat:04x} "
+                     f"{'-' if eng.bpopped is None else format(eng.bpopped, '04x')}")
     if events is not None:
         for k in EVENTS:
             events[k] += 1 if eng.events[k] else 0
@@ -130,6 +172,7 @@ def run_verilog(tests):
     vvp = os.path.join(BUILD, "tb_cosim.vvp")
     srcs = [os.environ.get("ENGINE_V", os.path.join(ROOT, "src", "engine.v")),
             os.environ.get("SER_V", os.path.join(ROOT, "src", "serialiser.v")),
+            os.environ.get("RX_V", os.path.join(ROOT, "src", "receiver.v")),
             os.environ.get("CRC_V", os.path.join(ROOT, "src", "crc32.v")),
             os.path.join(ROOT, "src", "prog_mem.v"), os.path.join(ROOT, "src", "fifo_mem.v"),
             os.path.join(ROOT, "test", "tb_cosim.v")]
@@ -153,7 +196,7 @@ def run_verilog(tests):
     return out
 
 
-HEAD = "pc x    y    osr  oc isr  ic dl sw   r pins_out out_dir  tx rx pop  busy under crc"
+HEAD = "pc x    y    osr  oc isr  ic dl sw   r pins_out out_dir  tx rx pop  busy under crc      rxst bpop"
 
 
 def main():
@@ -185,7 +228,7 @@ def main():
                         print(f"  verilog{' ' if mlines[k] == vlines[i][k] else '*'}{vlines[i][k]}")
                     pc_before = int(mlines[cyc - 1].split()[0]) if cyc else cfg["start"]
                     print(f"instruction at pc {pc_before}: {disasm(prog[pc_before])}")
-                    print("pins / push / pop this clock:", [hex(v) for v in stim[cyc]])
+                    print("pins / push / pop / pins_fall / req this clock:", [hex(v) for v in stim[cyc]])
                 break
     total = ntests * ncycles
     print("tests reaching: " + ", ".join(f"{k} {v}" for k, v in events.items()))

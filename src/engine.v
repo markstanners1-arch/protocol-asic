@@ -66,6 +66,23 @@ module engine #(
     output wire        ser_under,
     output wire [31:0] crc,
 
+    // receiver (SER = 1 only): settings, the falling-edge sample of the receive pin, the host's requests, the status
+    input  wire [4:0]  cfg_rx_pin,        // RXCFG[4:0]
+    input  wire        cfg_rx_raw,        // RXCFG[5]
+    input  wire        cfg_rx_both,       // RXCFG[6]
+    input  wire [15:0] cfg_rxgap,
+    input  wire        rx_fall,           // the receive pin at the last falling edge of clk (a latch outside)
+    input  wire        rx_rise,           // the receive pin at the rising edge, before the chip's glitch filter
+    input  wire        mode_wr,           // keyed SERCFG write: direction = mode_val
+    input  wire        mode_val,
+    input  wire        rx_arm,            // RXCFG write with the arm bit
+    input  wire        host_bpop,         // host read of the buffer (register 0x26) in receive mode
+    output wire [15:0] host_bpop_data,    // the buffer's head word
+    output wire        buf_ready,         // ... and it is valid (a buffer read takes it this clock)
+    output wire        rx_mode,
+    output wire        rx_ready,
+    output wire [15:0] rxstat,
+
     // engine state, visible for testing
     output reg  [4:0]  pc,
     output reg  [15:0] x,
@@ -140,9 +157,16 @@ module engine #(
     assign tx_level      = {{(6-TAW){1'b0}}, tx_cnt};
     assign rx_level      = rx_cnt;
     assign host_pop_data = rxm[rx_rd];
-    wire   host_push_ok  = host_push && !tx_full;
+    wire   host_push_ok  = host_push && !tx_full && !rx_mode;      // the host cannot fill the buffer in receive mode
     wire   host_pop_ok   = host_pop  && (rx_cnt != 3'd0);
-    wire   tx_pop        = tx_pop_eng | ser_pop;
+    wire   bpop_ok       = host_bpop && rx_mode && tx_ready;       // the host reads a received word
+    wire   tx_pop        = tx_pop_eng | ser_pop | bpop_ok;
+    wire        rcv_wr;                 // the receiver writes a word into the buffer this clock
+    wire [15:0] rcv_wdata;
+    wire        rcv_accept;             // a direction change taken this clock
+    wire        rcv_clear;              // an accepted direction change or an arm: empty the buffer
+    assign host_bpop_data = tx_head;
+    assign buf_ready      = tx_ready;
 
     generate if (TXDEPTH == 64) begin : tx_mem
         // One-port memory (src/fifo_mem.v: flip-flops, or the IHP block with USE_SRAM) behind a head register.
@@ -153,13 +177,14 @@ module engine #(
         reg  [15:0] hold;
         wire [15:0] mq;
         wire [TAW:0] unread = tx_cnt - {{TAW{1'b0}}, tx_hv};
-        wire        we = rst_n && host_push_ok;
-        wire        re = rst_n && !host_push_ok && (!tx_hv || tx_pop) && (unread != {(TAW+1){1'b0}});
-        fifo_mem txmem (.clk(clk), .we(we), .re(re), .addr(we ? tx_wr : tx_rd), .wdata(host_push_data), .rdata(mq));
+        wire        we = rst_n && (host_push_ok || rcv_wr);    // a host push, or a received word (never both)
+        wire        re = rst_n && !we && (!tx_hv || tx_pop) && (unread != {(TAW+1){1'b0}});
+        fifo_mem txmem (.clk(clk), .we(we), .re(re), .addr(we ? tx_wr : tx_rd), .wdata(rcv_wr ? rcv_wdata : host_push_data),
+                        .rdata(mq));
         assign tx_head  = rd_last ? mq : hold;
         assign tx_ready = tx_hv;
         always @(posedge clk) begin
-            if (!rst_n) begin
+            if (!rst_n || rcv_clear) begin
                 tx_rd <= 0; tx_wr <= 0; tx_cnt <= 0; tx_hv <= 1'b0; rd_last <= 1'b0;
             end else begin
                 if (we) tx_wr <= tx_wr + 1'b1;
@@ -200,7 +225,8 @@ module engine #(
             .clk(clk), .rst_n(rst_n),
             .cfg_en(cfg_sercfg[0]), .cfg_manch(cfg_sercfg[1]), .cfg_endm(cfg_sercfg[3]), .cfg_crcap(cfg_sercfg[4]),
             .cfg_crccpl(cfg_sercfg[5]), .cfg_skip(cfg_sercfg[12:10]), .cfg_serdiv(cfg_serdiv), .cfg_out_right(cfg_out_right),
-            .start(ser_start), .start_count(ser_count),
+            .start(rcv_accept || (ser_start && !rx_mode)),             // receive mode: MOV ser refused; a direction
+            .start_count(rcv_accept ? 16'd0 : ser_count),              // change stops the serialiser (count 0)
             .tx_cnt(tx_level), .tx_full(tx_full), .tx_ready(tx_ready), .tx_head(tx_head), .tx_pop(ser_pop),
             .crc(crc), .crc_clr(ser_crc_clr), .crc_step(ser_crc_step), .crc_bit(ser_crc_bit),
             .busy(ser_busy), .under(ser_under), .own(ser_own), .line(ser_line));
@@ -227,8 +253,29 @@ module engine #(
         wire _unused_crc = &{cfg_crcpoly, cfg_crcinit, crc_clr_time, ser_crc_clr, crc_ser_mode, ser_crc_step, in_step,
                              ser_crc_bit, in_bit, 1'b0};
     end endgenerate
-    // what WAIT sees: the pins, except index 24 on the serialiser's engine = busy
-    wire [31:0] wait_src = SER ? {sync2[31:25], ser_busy, sync2[23:0]} : sync2;
+    // ---- the receiver (engine 0, with the 64-word buffer)
+    generate if (SER && TXDEPTH == 64) begin : with_rx
+        wire        r_over, r_locked, r_refused, r_idle;
+        wire [3:0]  r_left;
+        wire [6:0]  r_words;
+        receiver u_rx (
+            .clk(clk), .rst_n(rst_n),
+            .cfg_raw(cfg_rx_raw), .cfg_both(cfg_rx_both), .cfg_in_right(cfg_in_right), .cfg_rxgap(cfg_rxgap),
+            .rise_in(rx_rise), .fall_in(rx_fall),
+            .mode_wr(mode_wr), .mode_val(mode_val), .arm(rx_arm), .start_req(ser_start && cfg_sercfg[0]),
+            .ser_busy(ser_busy), .buf_full(tx_full),
+            .rx_mode(rx_mode), .refused(r_refused), .wr(rcv_wr), .wdata(rcv_wdata), .clear(rcv_clear),
+            .ready(rx_ready), .over(r_over), .locked(r_locked), .left(r_left), .words(r_words), .idle(r_idle),
+            .accept(rcv_accept));
+        assign rxstat = {rx_mode, r_words, r_left, r_refused, r_locked, r_over, rx_ready};
+        wire _unused_rx = &{r_idle, 1'b0};
+    end else begin : no_rx
+        assign rx_mode = 1'b0; assign rx_ready = 1'b0; assign rxstat = 16'd0;
+        assign rcv_wr = 1'b0; assign rcv_wdata = 16'd0; assign rcv_clear = 1'b0; assign rcv_accept = 1'b0;
+        wire _unused_rx = &{cfg_rx_pin, cfg_rx_raw, cfg_rx_both, cfg_rxgap, rx_fall, rx_rise, mode_wr, mode_val, rx_arm, 1'b0};
+    end endgenerate
+    // what WAIT sees: the pins, except index 24 on the serialiser's engine = busy, 25 = a received frame is ready
+    wire [31:0] wait_src = SER ? {sync2[31:26], rx_ready, ser_busy, sync2[23:0]} : sync2;
 
     // ------------------------------------------------------------------ working values for one step
     // (combinational: every one is assigned at the top of the always @(*) block)
@@ -375,7 +422,7 @@ module engine #(
                         end
                     end else begin
                         if (a[6] && osr_count < 5'd16) begin
-                        end else if (!tx_ready || ser_busy) begin   // while the serialiser is busy the FIFO is its own
+                        end else if (!tx_ready || ser_busy || rx_mode) begin   // serialiser busy or receive mode: not the program's
                             if (a[5]) stall = 1'b1;
                             else begin n_osr = x; n_osr_count = 0; end
                         end else begin

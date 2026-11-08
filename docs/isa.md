@@ -130,7 +130,8 @@ Stall until the pin is at `level`. Pin = `index` if `rel = 0`, else `in_base + i
 On engine 0, pin number 24 (whether from `index` or `in_base + index`, modulo 32) is the serialiser's busy flag
 instead of a pin: `wait 0, ser` stalls until the frame has gone out. On engines 1 and 2 number 24 is a pin as before
 (it reads 0 on the chip), so `wait 0, ser` passes at once there and `wait 1, ser` never does. The timeout works as
-for a pin.
+for a pin. Likewise on engine 0 number 25 is the receiver's frame-ready flag (v0.4): `wait 1, 25` stalls until a
+received frame is in the buffer.
 If `timeout = 1`: on each tick spent waiting, if `y == 0` jump to `fault_addr` (the WAIT is abandoned,
 treated as a completed jump, so its delay applies); otherwise `y -= 1`. Load Y with the timeout in ticks beforehand.
 
@@ -229,6 +230,39 @@ Phases: FILL, DATA, CRC, END. State visible to programs: `ser_busy` (`WAIT` 24, 
   0 at the end of the clock in which the last half-bit ends. `WAIT` 24, `MOV status` and PULL see `ser_busy` as it was
   at the start of the clock, like the FIFO levels.
 - **Flags.** `ser_under` stays set until the next `MOV ser` with a non-zero count.
+
+## Receiver (v0.4; engine 0 only)
+
+Engine 0 sends or receives, one at a time (half duplex). The receiver decodes Manchester from one input pin into the same
+64-word buffer the serialiser sends from. Checked against the model (`model/engine.py`, `model/test_receive.py`) every
+clock by `model/cosim.py`.
+
+- **Direction.** Engine state, transmit after reset (and whenever the engine is stopped, since a stopped engine is held
+  in reset). A SERCFG write changes it only if bits `[15:13]` are `101` (the key); bit 7 is then the direction (1 receive,
+  0 transmit). The change is taken only when idle: the serialiser not busy and no frame coming in. Otherwise it is
+  refused, nothing changes, and RXSTAT's refused flag is set. A change that is taken empties the buffer, resets the
+  receiver and stops the serialiser, even if `MOV ser` executes in the same clock. SERCFG bit 7 reads back the direction
+  in force.
+- **Interlocks in receive mode.** `MOV ser` does nothing and sets the refused flag; host writes to the buffer (0x26) are
+  dropped; `PULL` finds the buffer empty (the received words are the host's).
+- **Arm.** An RXCFG write with bit 7 set empties the buffer, clears the status and listens for one frame.
+- **Sampling.** Two samples of the receive pin per clock: the level at the falling edge of the clock (a latch outside the
+  engine), then the level at the rising edge, in that order, both through flip-flops matched so they stay in time
+  order. Both bypass the chip's glitch filter: receive does not depend on FILTER, which stays as set for the other pins.
+  With RXCFG `[6]` clear only the rising-edge sample is used. Time is counted in half-clocks.
+- **Decoding.** An edge at least RXGAP half-clocks after the last taken edge is taken as a mid-bit edge: rising = 1,
+  falling = 0. Edges sooner than that are bit boundaries and are ignored. No taken edge for 2 x RXGAP half-clocks ends the
+  frame. The first edge after idle is taken. RXGAP is 3/4 of a bit: 6 for 10 Mbit/s at 40 MHz, 3 x (SERDIV + 1) for the
+  serialiser's own rate.
+- **Framing.** Hunting: 16 or more alternating bits ended by two 1s (the Ethernet preamble and SFD) lock; the next bit is
+  the first of the frame. A lone pulse, or a run that stops, returns to idle. Raw mode (RXCFG `[5]`): no hunt, bits are
+  kept from the first taken edge.
+- **Words.** Bits shift into a 16-bit register, bit 0 first with `in_right`, bit 15 first without; every 16 bits the word
+  is written to the buffer. At the end of the frame a partial word is written with its bits brought down to bit 0, and
+  their number is kept in RXSTAT. A word that finds the buffer full is dropped and sets overrun. The frame is then
+  ready (`WAIT` 25, RXSTAT bit 0, the chip's IRQ) until the next arm or direction change.
+- **Measured on the model** (10 Mbit/s, 40 MHz, random clock phase): with both clock edges every frame is right with each
+  edge moved by up to +-7 ns; with the rising edge only, any jitter fails.
 
 ## Assembly language
 

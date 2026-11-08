@@ -21,8 +21,12 @@ module tb_chip;
     reg sda_slave_low = 0;             // the bench's I2C slave pulling SDA (uio[1]) low for an ACK
     reg scl_slave_low = 0;             // ... and stretching the clock (holding SCL, uio[0], low)
     wire [7:0] uio_in = ((uio_out & uio_oe) | ~uio_oe) & ~{6'd0, sda_slave_low, scl_slave_low};
+    wire rx_pad;                       // the receive pin's pad; the bench's falling-edge flip-flop stands in for the latch
+    reg  rx_fall = 0;
+    always @(negedge clk) rx_fall <= rx_pad;
     protocol_chip #(.NENG(NENG), .SER0(SER0), .CRC(CRC), .TXDEPTH0(TXDEPTH0)) dut (.ui_in({ui_hi, mosi, sck, cs_n}), .uo_out(uo_out), .uio_in(uio_in),
-                       .uio_out(uio_out), .uio_oe(uio_oe), .ena(1'b1), .clk(clk), .rst_n(rst_n));
+                       .uio_out(uio_out), .uio_oe(uio_oe), .ena(1'b1), .clk(clk), .rst_n(rst_n),
+                       .rx_pad(rx_pad), .rx_fall(rx_fall));
     wire miso = uo_out[0];
     wire irq  = uo_out[1];
 
@@ -37,7 +41,7 @@ module tb_chip;
         case (a)
             6'h22, 6'h23, 6'h25: sweep_mask = 16'h7FFF;
             6'h24:               sweep_mask = 16'h3FFF;
-            6'h2B:               sweep_mask = 16'h1FFF;
+            6'h2B:               sweep_mask = 16'h1F7F;   // [7] reads the direction in force (transmit here)
             default:             sweep_mask = 16'hFFFF;
         endcase
     endfunction
@@ -472,6 +476,77 @@ module tb_chip;
             spi_begin({1'b0, 3'd0, 6'd0, 6'h26}); spi_word(16'd1, d); spi_word(16'haaaa, d); spi_end;   // a one-word frame clears it
             repeat (200) @(posedge clk);
             read_reg(0, 6'h28, st); check("A STATUS after the next frame: flag cleared", st[15:14], 2'b00);
+
+            // receive (8 Nov 2026): engine A switched to receive by a keyed SERCFG write, a frame driven onto engine pin
+            // 16 (ui_in[4]) at half-bit 2 clocks with half-clock precision, read back through register 0x26
+            write_reg(0, 6'h29, 16'h004F);                              // the filter ON (N=15, P=4: 256 clocks): receive
+                                                                        // bypasses it, so the frame must still arrive
+            write_reg(0, 6'h24, 16'd2 | (16'd1 << 11) | (16'd1 << 12));  // MISC: in_right too (Ethernet is LSB first)
+            read_reg(0, 6'h2B, w); check("SERCFG [7]: transmit in force", w[7], 1'b0);
+            write_reg(0, 6'h2B, sc | 16'h0080);                         // bit 7 without the key: no change
+            read_reg(0, 6'h2B, w); check("SERCFG [7] after a write without the key: still transmit", w[7], 1'b0);
+            write_reg(0, 6'h2B, sc | 16'hA080);                         // key 101 in [15:13], bit 7 = receive
+            read_reg(0, 6'h2B, w); check("SERCFG [7] after the keyed write: receive in force", w[7], 1'b1);
+            read_reg(0, 6'h2B, w); check("SERCFG's other bits kept", w & 16'h1F7F, sc & 16'h1F7F);
+            read_reg(0, 6'h36, w); check("RXSTAT: receive mode, nothing yet", w, 16'h8000);
+            read_reg(0, 6'h35, w); check("RXGAP default 6 half-clocks", w, 16'd6);
+            write_reg(0, 6'h26, 16'h1234);                              // the host cannot fill the buffer in receive mode
+            read_reg(0, 6'h33, w); check("receive mode: a host write to 0x26 refused (level 0)", w[6:0], 7'd0);
+            write_reg(0, 6'h34, 16'd16 | 16'h0040 | 16'h0080);          // pin 16, both edges, arm
+            read_reg(0, 6'h34, w); check("RXCFG read back (the arm bit is not kept)", w, 16'd16 | 16'h0040);
+            @(posedge clk); #2;
+            ui_hi[1] = 0; #200;
+            // every odd bit's edges 5 ns late, so some edges are first seen by the falling-edge sample and some by the
+            // rising-edge one: the two sample paths must line up to the half-clock for this frame to decode
+            for (j = 0; j < 72; j = j + 1)
+                for (k = 0; k < 8; k = k + 1) begin
+                    ui_hi[1] = ~want[j][k]; #20;
+                    ui_hi[1] =  want[j][k];
+                    if (k % 2) #15; else #25;
+                end
+            ui_hi[1] = 1; #60; ui_hi[1] = 0;
+            repeat (100) @(posedge clk);
+            read_reg(0, 6'h36, w); check("RXSTAT after the frame: receive mode, 32 words, ready", w, 16'hA001);
+            check("IRQ high: a frame is ready", {15'd0, irq}, 1);
+            bad = 0;
+            for (j = 0; j < 32; j = j + 1) begin
+                read_reg(0, 6'h26, w);
+                if (w !== {want[8 + 2 * j + 1], want[8 + 2 * j]}) begin
+                    if (!bad) $display("FAIL: received word %0d = %h, expected %h", j, w, {want[8 + 2 * j + 1], want[8 + 2 * j]});
+                    errors = errors + 1; bad = 1;
+                end
+            end
+            if (!bad) $display("ok:   all 32 received words read back through 0x26: destination address to FCS");
+            read_reg(0, 6'h26, w); check("0x26 with the buffer empty reads 0", w, 0);
+            // a change while a frame is coming in is refused
+            write_reg(0, 6'h34, 16'd16 | 16'h0040 | 16'h0080);          // arm again
+            @(posedge clk); #2;
+            for (j = 0; j < 4; j = j + 1)
+                for (k = 0; k < 8; k = k + 1) begin
+                    ui_hi[1] = ~want[j][k]; #20;
+                    ui_hi[1] =  want[j][k]; #20;
+                end
+            fork
+                begin
+                    for (j = 4; j < 72; j = j + 1)
+                        for (k = 0; k < 8; k = k + 1) begin
+                            ui_hi[1] = ~want[j][k]; #20;
+                            ui_hi[1] =  want[j][k]; #20;
+                        end
+                    ui_hi[1] = 1; #60; ui_hi[1] = 0;
+                end
+                begin
+                    write_reg(0, 6'h2B, sc | 16'hA000);                 // keyed: back to transmit, mid-frame
+                    read_reg(0, 6'h36, w); check("mid-frame keyed change: refused flag, still receive", {w[15], w[3]}, 2'b11);
+                end
+            join
+            repeat (100) @(posedge clk);
+            read_reg(0, 6'h36, w); check("the frame still arrives complete (ready, 32 words)", {w[15], w[14:8], w[0]}, {1'b1, 7'd32, 1'b1});
+            write_reg(0, 6'h2B, sc | 16'hA000);                         // idle now: back to transmit
+            read_reg(0, 6'h2B, w); check("idle: keyed change back to transmit", w[7], 1'b0);
+            read_reg(0, 6'h36, w); check("RXSTAT after the change: all clear", w, 0);
+            write_reg(0, 6'h29, 0);
+            check("IRQ low again (the received frame was dropped with the buffer)", {15'd0, irq}, 0);
             write_reg(0, 6'h20, 0);
         end
 
