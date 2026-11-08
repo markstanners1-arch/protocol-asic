@@ -101,6 +101,28 @@ def spi_mode0(data, half_us=0.5, gap_us=20.0):
     return [(sck | (mosi << 1) | (cs << 2), us) for sck, mosi, cs, us in st]
 
 
+def led_1wire(pixels, t0h, t0l, t1h, t1l, byte_gap=0.0, pixel_gap=0.0, reset=300.0, frames=2, pins=1):
+    """One-wire LED data: each bit a high pulse (short 0, long 1) then the rest of the bit low, MSB first; byte_gap and
+    pixel_gap lengthen the low after a byte's or a pixel's last bit (the SP107E's firmware pauses: 1.4 us and 2.9 us
+    lows measured 8 Nov 2026); a reset low between frames. pins > 1 puts the same signal on several pins (mirrored)."""
+    one = (1 << pins) - 1
+    segs = [(0, reset)]
+    for _ in range(frames):
+        for pi, px in enumerate(pixels):
+            for bi, byte in enumerate(px):
+                for k in range(7, -1, -1):
+                    b = (byte >> k) & 1
+                    hi, lo = (t1h, t1l) if b else (t0h, t0l)
+                    if k == 0:
+                        lo += pixel_gap if bi == len(px) - 1 else byte_gap
+                    segs += [(one, hi), (0, lo)]
+        segs.append((0, reset))
+    return segs
+
+
+SP107E = dict(t0h=0.36, t0l=0.85, t1h=0.885, t1l=0.36, byte_gap=0.55, pixel_gap=2.0)
+RAINBOW = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (0x55, 0xAA, 0x0F), (0xF0, 0x33, 0xCC), (0x81, 0x7E, 0x18)]
+
 CASES = [
     # name, segments, tick us, {pin: expected kind}, expected extra check
     ("UART 115200 'Hello, world'", uart("Hello, world\r\n", 115200), 0.1, {0: "uart"}, ("baud", 0, 115200)),
@@ -119,12 +141,21 @@ CASES = [
     ("I2C 100 kHz, three writes", i2c([[0xA0, 0x00, 0x12, 0x34], [0xA0, 0x10, 0x55], [0xD0, 0x00]] * 2), 0.5,
      {0: "clock_idle_high"}, ("i2c", 0, 1)),
     ("SPI mode 0, 1 MHz", spi_mode0([0x9F, 0x00, 0x00, 0x00, 0xA5, 0x3C] * 4), 0.05, {0: "clock_idle_low"}, ("spi", 0, 2)),
+    # one-wire LED data, measured at the chip clock (40 MHz: 0.025 us), as identify.py's second pass does
+    # its 0-bits are 1.21 us and 1-bits 1.245 us (scope, 8 Nov), 3 ones in 24: the signal's own average is 824 kbit/s
+    ("SP107E as measured: WS2811, red 0x70", led_1wire([(0x70, 0, 0)] * 8, **SP107E), 0.025, {0: "led_1wire"},
+     ("bit_rate", 0, 824000)),
+    ("WS2812B rainbow, half the bits 1", led_1wire(RAINBOW, 0.4, 0.85, 0.8, 0.45), 0.025, {0: "led_1wire"},
+     ("bit_rate", 0, 800000)),
+    ("WS2811 slow mode 400 kbit/s", led_1wire(RAINBOW, 0.5, 2.0, 1.2, 1.3), 0.025, {0: "led_1wire"}, ("bit_rate", 0, 400000)),
+    ("SP107E pair: DAT and CLK mirrored", led_1wire([(0x70, 0, 0)] * 8, pins=2, **SP107E), 0.025,
+     {0: "led_1wire", 1: "led_1wire"}, ("led_pair", 0, 1)),
 ]
 
 ok = True
 for name, segs, tick, want, extra in CASES:
     lv = expand(segs, tick)
-    npins = 3 if "SPI" in name else 2 if "I2C" in name else 1
+    npins = 3 if "SPI" in name else 2 if ("I2C" in name or "pair" in name) else 1
     results = {}
     for pin in range(npins):
         lows, highs = measure(lv, pin, tick)
@@ -132,7 +163,7 @@ for name, segs, tick, want, extra in CASES:
     good = all(results[p][0] == k for p, k in want.items())
     if extra:
         key, pin, val = extra
-        if key in ("i2c", "spi"):
+        if key in ("i2c", "spi", "led_pair"):
             buses = ic.pair_up(results)
             good &= any(b[0] == key and b[1] == pin and (val is None or b[2] == val) for b in buses)
         else:
@@ -142,7 +173,7 @@ for name, segs, tick, want, extra in CASES:
     print("%-34s %s" % (name, "ok" if good else "WRONG"))
     for p in sorted(results):
         print("    pin %d: %-16s %s" % (p, results[p][0], results[p][1]))
-    if extra and extra[0] in ("i2c", "spi"):
+    if extra and extra[0] in ("i2c", "spi", "led_pair"):
         for b in ic.pair_up(results):
             print("    bus: " + b[3])
 print("PASS" if ok else "FAIL")

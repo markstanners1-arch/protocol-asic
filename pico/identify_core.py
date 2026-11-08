@@ -55,7 +55,7 @@ def _spread(v):
 
 
 def classify_pin(high_frac, lows, highs):
-    """Returns (kind, text, info). kind: quiet_high, quiet_low, quiet_mixed, ir_nec, onewire, manchester, uart,
+    """Returns (kind, text, info). kind: quiet_high, quiet_low, quiet_mixed, ir_nec, onewire, led_1wire, manchester, uart,
     clock_idle_high, clock_idle_low, clock_free, data."""
     n = len(lows) + len(highs)
     info = {"lows": len(lows), "highs": len(highs), "low_med": _median(lows)}
@@ -81,6 +81,9 @@ def classify_pin(high_frac, lows, highs):
         tiny = [w for w in lows if w <= 15]            # write-1 / read slots: no UART has these beside 480 us lows
         if reset and len(tiny) >= 2 and len(reset) <= len(lows) // 3 + 1:
             return "onewire", "1-Wire (480 us reset pulses, short time slots)", info
+    led = _led_one_wire(idle_high, lows, highs, info)
+    if led:
+        return led
     t = base_unit(allw)
     info["t_us"] = t
     # Manchester: every pulse inside a frame is T or 2T (long idle gaps between frames are left out)
@@ -122,6 +125,57 @@ def _uart(idle_high, lows, info):
         return "uart", "UART, %d baud%s, idles high (start bit %.2f us)" % (
             baud, "" if std else " (not a standard rate)", tl), info
     return None
+
+
+def _two_groups(v, min_gap=1.4):
+    """Split values at the largest ratio between neighbours (sorted): (short group, long group), or None if no ratio
+    of at least min_gap. Each group must hold at least 2 values."""
+    s = sorted(v)
+    best, at = 0.0, -1
+    for i in range(1, len(s) - 2):              # leave at least 2 on each side
+        if s[i] > 0:
+            r = s[i + 1] / s[i]
+            if r > best:
+                best, at = r, i
+    if at < 0 or best < min_gap:
+        return None
+    return s[:at + 1], s[at + 1:]
+
+
+def _led_one_wire(idle_high, lows, highs, info):
+    """One-wire LED data (WS2811, WS2812B, SK6812 type): idles low; every bit is one high pulse, short for 0 and long
+    for 1, so the highs form two tight groups (ratio 1.5-4) and a long high is always followed by a short low: the share
+    of long highs equals the share of short lows. Bit time 1-2.8 us (800 or 400 kbit/s). Gaps between bytes, pixels
+    and frames are left out of the lows. A Manchester line idling low at these rates would also fit; none common does."""
+    if idle_high or len(highs) < 16 or len(lows) < 16:
+        return None
+    hi = [w for w in highs if w <= 2.0]
+    if len(hi) < 0.9 * len(highs) or min(hi) < 0.1:
+        return None
+    g = _two_groups(hi)
+    if not g:
+        return None
+    h0, h1 = g
+    t0, t1 = _median(h0), _median(h1)
+    if not (1.5 <= t1 / t0 <= 4.0 and _spread(h0) <= 1.4 and _spread(h1) <= 1.4):
+        return None
+    bit_lows = [w for w in lows if w <= 1.3 * (t0 + t1)]
+    gl = _two_groups(bit_lows)
+    if not gl:
+        return None
+    l0, l1 = gl                                 # l0 short lows (after a 1), l1 long lows (after a 0)
+    period = ((t1 + _median(l0)) + (t0 + _median(l1))) / 2
+    if not 1.0 <= period <= 2.8:
+        return None
+    share_long_high = len(h1) / len(hi)
+    share_short_low = len(l0) / len(bit_lows)
+    if abs(share_long_high - share_short_low) > 0.15:
+        return None
+    rate = 1e3 / period                          # kbit/s
+    info.update({"t0_us": t0, "t1_us": t1, "bit_us": period, "bit_rate": int(rate * 1000 + 0.5)})
+    kind = "800 kbit/s (WS2812B, SK6812, WS2811 fast)" if rate >= 600 else "400 kbit/s (WS2811 slow mode)"
+    return "led_1wire", "one-wire LED data, %s: bit %.2f us, 0 = %.2f us high, 1 = %.2f us high, idles low" % (
+        kind, period, t0, t1), info
 
 
 def _split_idle(widths):
@@ -169,6 +223,13 @@ def pair_up(results):
         out.append(("spi", c, cs[0] if cs else None, "SPI likely: SCK pin %d (%s), chip select %s, data among pins %s" % (
             c, _hz(results[c][2]["freq_hz"]), ("pin %d" % cs[0]) if cs else "not seen",
             ", ".join(str(p) for p in data) or "none seen")))
+    leds = sorted(p for p, r in results.items() if r[0] == "led_1wire")
+    for i, a in enumerate(leds):
+        for b in leds[i + 1:]:
+            ra, rb = results[a][2], results[b][2]
+            if abs(ra["bit_us"] - rb["bit_us"]) <= 0.03 * ra["bit_us"] and abs(ra["t1_us"] - rb["t1_us"]) <= 0.1 * ra["t1_us"]:
+                out.append(("led_pair", a, b, "pins %d and %d carry matching LED data: likely one signal on both "
+                            "(a spare data line, or two strips fed the same)" % (a, b)))
     quiet_h = sorted(p for p, r in results.items() if r[0] == "quiet_high")
     if len(quiet_h) >= 2 and not clocks_h:
         out.append(("idle_pair", quiet_h[0], quiet_h[1],
