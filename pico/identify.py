@@ -87,6 +87,8 @@ def levels():
 # ---- 3. pulses
 def pulses(pins, name, clkdiv, ms):
     """One engine per pin, all running together; returns {pin: [widths in us]}."""
+    """One engine per pin, all running together; returns {pin: (raw tick counts, us per tick)}. Counts stay whole numbers
+    (a float is a heap object in MicroPython) and at most MAXN are kept per pin."""
     tick_us = (clkdiv + 1) * 1e6 / CHIP_HZ
     for e, p in enumerate(pins):
         setup(e, name, p, clkdiv)
@@ -97,12 +99,25 @@ def pulses(pins, name, clkdiv, ms):
     while time.ticks_diff(time.ticks_ms(), t0) < ms:
         for e, p in enumerate(pins):
             if chip.read(e, R_STATUS) & 0x70:
-                got[p].append(chip.read(e, R_RX) * tick_us)
+                v = chip.read(e, R_RX)
+                if len(got[p]) < MAXN:
+                    got[p].append(v)
     for e in range(len(pins)):
         chip.stop(e)
-    return got
+    return {p: (got[p], tick_us) for p in pins}
 
 
+def us(entry):
+    counts, tick = entry
+    return [c * tick for c in counts]
+
+
+def shortest_us(p):
+    c = low[p][0] + high[p][0]
+    return min(c) * low[p][1] if c else None
+
+
+MAXN = 300
 lv = levels()
 coarse = round(CHIP_HZ / 1e6) - 1
 low, high = {}, {}
@@ -110,14 +125,16 @@ for i in range(0, len(PINS), neng):
     group = PINS[i:i + neng]
     low.update(pulses(group, "measure_pulse", coarse, WINDOW_MS))
     high.update(pulses(group, "measure_high", coarse, WINDOW_MS))
-fast = [p for p in PINS if (low[p] + high[p]) and min(low[p] + high[p]) < 50]
+fast = [p for p in PINS if shortest_us(p) is not None and shortest_us(p) < 50]
 for i in range(0, len(fast), neng):                # again at the chip clock: 16-bit counts saturate at 65535 ticks
     group = fast[i:i + neng]
     low.update(pulses(group, "measure_pulse", 0, WINDOW_MS))
     high.update(pulses(group, "measure_high", 0, WINDOW_MS))
 
-# ---- 4. classify
-results = {p: ic.classify_pin(lv[p], low[p], high[p]) for p in PINS}
+# ---- 4. classify, one pin at a time so only one pin's widths are ever floats
+results = {}
+for p in PINS:
+    results[p] = ic.classify_pin(lv[p], us(low[p]), us(high[p]))
 print("\nPer pin (%d ms per polarity%s):" % (WINDOW_MS, "; pins %s measured again at the chip clock" % fast if fast else ""))
 for p in PINS:
     k, text, info = results[p]
