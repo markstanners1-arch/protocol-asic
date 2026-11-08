@@ -898,3 +898,47 @@ That's a driver change on the PC, so Mark does it himself. Then:
   data; the Hantek read 1.205-1.247 us, 0.36 us and 0.885 us, and decoded red 0x70 0x00 0x00 per LED (WS2811, RGB order;
   `docs/bench/sp107e_*.png`). With 5.1 kOhm instead of 10 kOhm the high was only 2.29 V (the IO Shield pulls engine pins
   15-19 down at about 9 kOhm) and the chip read both widths about 30 ns short.
+- 8 Nov 2026 (branch `receive`): **receive on engine 0, half duplex: the serialiser run backwards** (docs/isa.md
+  "Receiver", docs/host_port.md 0x26, 0x2B [7], 0x34-0x36). New `src/receiver.v`: two samples of the receive pin per clock
+  (the level at the falling edge from a latch in the wrapper, then the rising edge), both taken before the glitch filter
+  with flip-flops matched so they stay in time order; a mid-bit edge carries the bit (rising 1), edges sooner than RXGAP
+  half-clocks are bit boundaries, 2 x RXGAP without one ends the frame; preamble lock on 16 alternating bits and the SFD's
+  "11"; words into engine 0's 64-word buffer, read by the host from 0x26; WAIT 25 and IRQ for frame ready. The direction
+  is engine state: changed only by a SERCFG write with the key 101 in [15:13], only when idle (else refused and flagged),
+  every change empties the buffer, resets the receiver and stops the serialiser; reset and a stopped engine give transmit;
+  MOV ser, host writes to 0x26 and PULL are blocked in receive mode. Proof: `model/test_receive.py` (loopback from the
+  serialiser model at SERDIV 0 and 1; jitter, 20 random-phase frames per step: both clock edges right up to +-7 ns per
+  edge, rising edge only fails at 1 ns; every switch rule; a link pulse ignored; overrun keeps 64 words; the 3/4-bit
+  threshold exact to the half-clock); `model/cosim.py` with receive stimulus (Manchester frames, random direction writes,
+  arms and buffer reads; `RX_FOCUS=1` for long frames and overruns): 3 x 400,000, 750,000 long and 2 x 750,000 focused
+  clocks, every clock identical, flip-flop memory and IHP SRAM model; it found a real hole (MOV ser in the clock a change
+  to receive was taken left the serialiser running in receive mode; fixed: the change also stops it) and a test now pins
+  it; `test/tb_chip.v`: a frame driven onto engine pin 16 with edges at both clock phases, received with the glitch filter
+  fully on (0x4F), all 32 words read back through 0x26, RXSTAT and IRQ checked, a keyed change mid-frame refused, a write
+  without the key ignored: PASS at NENG 2, 3, 4 (CRC 0), LATE=1 and the kit build. Planted bugs caught: model 6 (edge
+  direction, threshold off by one, change allowed mid-frame, buffer not emptied, falling-edge sample ignored, the
+  same-clock MOV ser), chip 7 (falling path stuck or one stage short, rising path through the filter or one stage short,
+  no key check, IRQ, 0x26 read). Local Tiny Tapeout layout (four engines, CRC 0, IHP `sg13cmos5l_dlhq_1` latch in the
+  wrapper, a false path to its input, antenna repair after detailed routing set to diodes only with up to 10 rounds):
+  route DRC, KLayout DRC, LVS and antenna 0, setup +6.29 ns and hold +0.124 ns worst, 45.7 % utilisation (44.9 % before),
+  gate-level test PASS. Cyclone IV serialiser build with the receiver: 5,487 LEs (87 %), 43.88 MHz on the 40 MHz clock.
+- 8 Nov 2026 (branch `duplex`): **full duplex on engine 0, and a hardware preamble.** SERCFG [8:7] is now a keyed,
+  idle-only mode: 00 transmit, 01 receive (each with the whole 64-word buffer), 10 full duplex: the buffer split into a
+  16-word transmit ring (memory words 0-15) and a 48-word receive ring (16-63), each with its own pointers, count and head
+  register; a received word waits in a one-word hold register; the one memory port takes turns (host write, held word,
+  transmit head refill, receive head refill). Received words are read from the new RXDATA 0x37. SERCFG [9]: the serialiser
+  sends seven 0x55 and the SFD itself (not fed to the CRC), so the host sends a frame from the destination address on.
+  Proof: model (engine A sends an Ethernet frame through its 16-word ring while catching it on its own pin into the 48-word
+  ring, all 32 words, SERDIV 0 and 1; host push limit at 10 Mbit/s measured: a word every 140 clocks keeps a 30-word frame
+  going, 160 underruns); cosim 400,000 clocks with flip-flop memory, IHP SRAM and no CRC units, 750,000 focused clocks on
+  each memory, every clock identical, full duplex in 291 tests (held words, both heads refilled, 168 overruns in the
+  focused run); chip test with a loopback wire from TD+ to engine pin 16: full duplex with the hardware preamble, the
+  host feeding the ring by its level, all 32 words read back through 0x37: PASS at NENG 2, 3, 4 (CRC 0), LATE=1 and the
+  kit build; 7 planted bugs caught (SERCFG [8] ignored, 0x37 read, transmit ring not capped, held word over a push,
+  receive ring not wrapping at 48, both heads refilled at once, preamble without the SFD's closing 1). Local Tiny Tapeout
+  layout: route DRC, KLayout DRC, LVS and antenna 0, setup +7.08 ns, hold +0.151 ns, 46.5 % utilisation, gate-level test
+  PASS. Cyclone IV serialiser build: 5,702 LEs (91 %), 43.74 MHz. **Bench, Mojo v3** (40 MHz, 85 % of slices, 42.3 MHz;
+  a jumper from TD+, hole 34, to engine pin 19, hole 74, checked first by `pico/jumper_check.py`): `pico/fdx_loop.py`:
+  10 Mbit/s, hardware preamble, 14 words and the CRC unit's FCS sent and received back at once, all 16 words right; a full
+  Ethernet frame at 20 kbit/s with the Pico topping up the ring (never above 16), no underrun, all 32 words right; a keyed
+  change while sending refused and flagged, a write without the key ignored, the change back taken when idle: PASS.

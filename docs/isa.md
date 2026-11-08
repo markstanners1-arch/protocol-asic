@@ -130,7 +130,8 @@ Stall until the pin is at `level`. Pin = `index` if `rel = 0`, else `in_base + i
 On engine 0, pin number 24 (whether from `index` or `in_base + index`, modulo 32) is the serialiser's busy flag
 instead of a pin: `wait 0, ser` stalls until the frame has gone out. On engines 1 and 2 number 24 is a pin as before
 (it reads 0 on the chip), so `wait 0, ser` passes at once there and `wait 1, ser` never does. The timeout works as
-for a pin.
+for a pin. Likewise on engine 0 number 25 is the receiver's frame-ready flag (v0.4): `wait 1, 25` stalls until a
+received frame is in the buffer.
 If `timeout = 1`: on each tick spent waiting, if `y == 0` jump to `fault_addr` (the WAIT is abandoned,
 treated as a completed jump, so its delay applies); otherwise `y -= 1`. Load Y with the timeout in ticks beforehand.
 
@@ -229,6 +230,51 @@ Phases: FILL, DATA, CRC, END. State visible to programs: `ser_busy` (`WAIT` 24, 
   0 at the end of the clock in which the last half-bit ends. `WAIT` 24, `MOV status` and PULL see `ser_busy` as it was
   at the start of the clock, like the FIFO levels.
 - **Flags.** `ser_under` stays set until the next `MOV ser` with a non-zero count.
+- **Hardware preamble** (v0.4, SERCFG `[9]`). After FILL the serialiser sends 64 bits before the first word's bits:
+  1 0 1 0 ... 1 0 1 1 in time order (seven 0x55 and the SFD 0xD5, LSB first), Manchester-coded like data. They are not
+  fed to the CRC. The host then sends the frame from the destination address on (4 words fewer).
+
+## Receiver and full duplex (v0.4; engine 0 only)
+
+Engine 0 has three modes: **transmit** (the reset state: the serialiser and the whole 64-word buffer), **receive**
+(the receiver and the whole buffer) and **full duplex** (both at once: the buffer split into a 16-word transmit ring and
+a 48-word receive ring). The receiver decodes Manchester from one input pin. Checked against the model (`model/engine.py`, `model/test_receive.py`) every
+clock by `model/cosim.py`.
+
+- **Mode.** Engine state, transmit after reset (and whenever the engine is stopped, since a stopped engine is held in
+  reset). A SERCFG write changes it only if bits `[15:13]` are `101` (the key); then `[8]` = 1 asks for full duplex,
+  else `[7]` = 1 receive, 0 transmit. The change is taken only when idle: the serialiser not busy and no frame coming
+  in. Otherwise it is refused, nothing changes, and RXSTAT's refused flag is set. A change that is taken empties the
+  buffer (both rings), resets the receiver and stops the serialiser, even if `MOV ser` executes in the same clock.
+  SERCFG `[8:7]` read back the mode in force.
+- **Full duplex.** The transmit ring is memory words 0-15 (the serialiser, PULL and host writes to 0x26 use it as the
+  whole buffer is used in transmit mode, a 16-word FIFO), the receive ring words 16-63 (48 words). Each ring has its own
+  pointers, count and head register. A received word goes first into a one-word hold register. The one memory port
+  takes turns each clock: a host write, else the held word, else the transmit head's refill, else the receive head's
+  refill. A received word that finds the hold occupied and the port taken, or the ring full, is dropped and sets
+  overrun. A frame longer than 16 words is sent while the host keeps the ring topped up (the serialiser starts when
+  the ring is full); at 10 Mbit/s and 40 MHz the model keeps a 30-word frame going with a word pushed every 140 clocks.
+- **Interlocks in receive mode** (not full duplex). `MOV ser` does nothing and sets the refused flag; host writes to the buffer (0x26) are
+  dropped; `PULL` finds the buffer empty (the received words are the host's).
+- **Arm.** An RXCFG write with bit 7 set empties the received words (the buffer in receive mode, the receive ring in
+  full duplex, where sending carries on), clears the status and listens for one frame.
+- **Sampling.** Two samples of the receive pin per clock: the level at the falling edge of the clock (a latch outside the
+  engine), then the level at the rising edge, in that order, both through flip-flops matched so they stay in time
+  order. Both bypass the chip's glitch filter: receive does not depend on FILTER, which stays as set for the other pins.
+  With RXCFG `[6]` clear only the rising-edge sample is used. Time is counted in half-clocks.
+- **Decoding.** An edge at least RXGAP half-clocks after the last taken edge is taken as a mid-bit edge: rising = 1,
+  falling = 0. Edges sooner than that are bit boundaries and are ignored. No taken edge for 2 x RXGAP half-clocks ends the
+  frame. The first edge after idle is taken. RXGAP is 3/4 of a bit: 6 for 10 Mbit/s at 40 MHz, 3 x (SERDIV + 1) for the
+  serialiser's own rate.
+- **Framing.** Hunting: 16 or more alternating bits ended by two 1s (the Ethernet preamble and SFD) lock; the next bit is
+  the first of the frame. A lone pulse, or a run that stops, returns to idle. Raw mode (RXCFG `[5]`): no hunt, bits are
+  kept from the first taken edge.
+- **Words.** Bits shift into a 16-bit register, bit 0 first with `in_right`, bit 15 first without; every 16 bits the word
+  is written to the buffer. At the end of the frame a partial word is written with its bits brought down to bit 0, and
+  their number is kept in RXSTAT. A word that finds the buffer full is dropped and sets overrun. The frame is then
+  ready (`WAIT` 25, RXSTAT bit 0, the chip's IRQ) until the next arm or direction change.
+- **Measured on the model** (10 Mbit/s, 40 MHz, random clock phase): with both clock edges every frame is right with each
+  edge moved by up to +-7 ns; with the rising edge only, any jitter fails.
 
 ## Assembly language
 

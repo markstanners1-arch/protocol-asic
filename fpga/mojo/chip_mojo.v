@@ -65,7 +65,12 @@ module chip_mojo #(
     protocol_chip #(.NENG(NENG), .SER0(SER0), .CRC(CRC), .TXDEPTH0(TXDEPTH0)) chip (
         .ui_in({ui_hi, mosi, sck, cs_n}), .uo_out(uo_out),
         .uio_in(uio), .uio_out(uio_out), .uio_oe(uio_oe),
-        .ena(1'b1), .clk(clk), .rst_n(chip_rst_n));
+        .ena(1'b1), .clk(clk), .rst_n(chip_rst_n),
+        .rx_pad(rx_pad), .rx_fall(rx_fall));
+    // the receive pin's falling-edge sample (on the ASIC a latch; here a falling-edge flip-flop)
+    wire rx_pad;
+    reg  rx_fall = 1'b0;
+    always @(negedge clk) rx_fall <= rx_pad;
 
     genvar i;
     generate for (i = 0; i < 8; i = i + 1) begin : t
