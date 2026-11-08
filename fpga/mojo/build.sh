@@ -29,7 +29,7 @@ G="$G $MOJO"
 S="$HERE/../../src"
 if [ "$TOP" = chip_mojo ]; then
     UCF="$HERE/chip.ucf"
-    SRCS="$S/chip.v $S/cluster.v $S/host_spi.v $S/engine.v $S/serialiser.v $S/crc32.v $S/prog_mem.v $S/glitch_filter.v $HERE/chip_mojo.v"
+    SRCS="$S/chip.v $S/cluster.v $S/host_spi.v $S/engine.v $S/serialiser.v $S/crc32.v $S/prog_mem.v $S/fifo_mem.v $S/glitch_filter.v $HERE/chip_mojo.v"
     GEN="-generics {$(echo $G)}"
 else
     NAME="$TOP"; UCF="$HERE/$TOP.ucf"; SRCS="$HERE/$TOP.v"; GEN=""; G=""

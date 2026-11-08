@@ -823,6 +823,38 @@ That's a driver change on the PC, so Mark does it himself. Then:
   PASS; cosim 1000 x 400 clocks on seeds 1 and 2 and seed 3 with the IHP SRAM model, every clock identical; whole-chip
   test PASS at NENG=3, NENG=2 and LATE=1. The Tiny Tapeout repository's `sram-macro` branch carries this src with four
   engines at 40 MHz; its main (the submission) is unchanged.
+- 5 Nov 2026 (night): **engine 0's TX FIFO on a one-port memory** (branch `fifo-macro`). New `src/fifo_mem.v`: 64 x 16,
+  reads on the clock, flip-flops by default, IHP's `RM_IHPSG13_1P_64x16_c2` with `+define+USE_SRAM` (as `prog_mem.v`).
+  `src/engine.v` (TXDEPTH = 64): write pointer, read pointer, 7-bit count, head-valid flip-flop and a 16-bit head register
+  (captured on the clock after each read); a host push writes the memory and has the port; on a clock without a push an
+  empty or departing head is refilled. PULL and the serialiser take the head only (`src/serialiser.v` input `tx_ready`).
+  Engines 1 and 2 keep the 4-word flip-flop FIFO. Timing rule in `docs/isa.md`, "Engine 0's TX FIFO": a word pushed into
+  the empty FIFO in clock k is ready from k + 2 when k + 1 has no push (k + 1 before); each further push clock delays it
+  one more; levels unchanged in meaning. `model/engine.py` mirrors it (`tx_hv`). Proofs: cosim 1000 x 400 at seeds 11,
+  12, 13 (flip-flops) and 14, 15 (`USE_SRAM=1`, IHP model), every clock identical; 130 x 5000 at seeds 21, 22, 23 (6
+  serialiser underruns reached), identical. Coverage counters added: refill blocked by a push (261-297 tests per 1000),
+  PULL with words in the FIFO but no head ready (38-48). Planted bugs: refill skipped on the clock after a blocked refill,
+  caught in 27 of 1000 tests (PULL one clock late); read given priority over the write, caught in 122 (wrong word on the
+  serialiser's pin). `test/run_chip.sh` PASS at NENG=3, NENG=2, LATE=1, Ethernet frame decoded. `model/test_serialiser.py`
+  PASS: new check 8 (PULL takes a word pushed into the empty FIFO in clock 2, clock 3 after two consecutive pushes, clock
+  1 on a 4-word FIFO); check 4's 66-word underrun case now leaves one clock after the count push and requires every push
+  accepted (it pushed 65 words in consecutive clocks, the 65th refused). `./run.sh test` PASS. yosys, three engines,
+  flip-flop build: 22,576 -> 22,328 cells, 4,472 -> 4,500 flip-flops; `USE_SRAM` build: 18,905 -> 16,223 cells, 2,888 ->
+  1,876 flip-flops, 3 -> 4 SRAM blocks. Mojo `ser clk40`: 3,943 LUTs (68 %), 1,168 slices (81 %), 1,144 registers, 76 LUTs
+  as memory, timing met at 40 MHz (minimum period 19.343 ns); not loaded. Source lists: `fifo_mem.v` added to
+  `model/cosim.py`, `test/run_chip.sh`, `fpga/mojo/build.sh`, `fpga/machxo3/build.sh`, `fpga/cyclone4/chip_c4.qsf`.
+- 7 Nov 2026 (branch `engine-regs`): **ASIC build without CRC units.** Layout runs 8-11 (TT branch `sram-macro`) failed in
+  detailed routing: shorts inside the program-store macros, LVS and KLayout DRC errors. Local LibreLane (WSL Ubuntu,
+  LibreLane 3.1.0.dev4, tt-support-tools 9d13ff3) reproduced GitHub run 9 exactly (311 of 311 final metrics). Partial
+  runs to global routing, four engines with the macros in columns: Metal3 83.9 % used, 2,749 overflow; with `CRC = 0`
+  (the existing switch): 76.1 %, 42 overflow, utilisation 48.5 -> 42.8 %, flip-flops 2,222 -> 1,834. Metal3 is the only
+  horizontal signal layer (Metal2 and Metal4 vertical). Without the CRC unit, an Ethernet frame is sent with the FCS as the
+  last two FIFO words and SERCFG CRC append off (docs/isa.md, CRC unit). New: `crc_unit` in `model/engine.py`, `CRC=0`
+  in `model/cosim.py` and `tb_cosim.v`; `test/tb_chip.v` sends the frame with the host's FCS when `CRC = 0` and checks the
+  same 72 bytes on the pair. Proofs: model tests PASS; cosim 1000 x 400 with `CRC=0` at seeds 11, 12 and 13 (`USE_SRAM=1`),
+  and seed 14 with the CRC unit, every clock identical; `test/run_chip.sh` PASS at CRC=0 with NENG=4, NENG=4 LATE=1, NENG=3,
+  NENG=2; CRC=1 with NENG=4 and NENG=3 LATE=1; the kit build. Planted bugs: `crc` reading 1 without the unit (cosim FAIL
+  in 200 of 200 tests; chip test FAIL on the CRC read); the host's FCS one byte wrong (chip test FAIL at byte 70).
 - 8 Nov 2026 (04:05-05:00): **10 Mbit/s frame on the scope.** Mojo v3, 40 MHz serialiser build (ID 0x0022), Pico running
   `eth_tx.py` `MODE='full'` (SERDIV 1, half-bit 50 ns), one frame every 10 ms; two 20-minute batches PASS (SERSTAT 0 and CRC
   register 0x2BDA0853 after every frame). Hantek DSO5102P, CH1 TD+ (hole 34), CH2 TD- (hole 35), 10x, DC, BW limit off;

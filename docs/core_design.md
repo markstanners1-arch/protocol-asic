@@ -163,8 +163,9 @@ protocol_chip  (src/chip.v)        NENG = 3 (engines per cluster, 1-4), NCLUSTER
   synchronisers + glitch_filter    the 13 real inputs, one chip-wide FILTER setting (register 0x29)
   ID register (0x2A)               chip-wide, unchanged: [7:4] spec version 2, [3:0] engines
   cluster[0..NCLUSTER-1]  (src/cluster.v)    NENG, NSLOT = 4, NPIN = 32
-    setting registers              one set per populated engine (0x20-0x25, 0x27, 0x28); a slot past NENG-1 is absent
-    engine[0..NENG-1]  (src/engine.v)        the cell: program store, x/y, ISR/OSR, FIFOs, stopwatch, WAIT, side-set
+    eng_slot[0..NENG-1]            one per populated engine; a slot past NENG-1 is absent
+      setting registers + read mux the engine's own registers (0x20-0x25, 0x2B-0x30) and its read-back word
+      engine  (src/engine.v)       the cell: program store, x/y, ISR/OSR, FIFOs, stopwatch, WAIT, side-set
     pin bank                       NPIN pin numbers seen by every engine; mux and "lowest engine wins" arbitration
     irq                            OR of the engines' RX-FIFO-not-empty
   pins                             cluster 0's bank to the package: 0-7 uio, 8-13 uo_out[7:2], 15-19 ui_in[7:3]
@@ -183,6 +184,14 @@ protocol_chip  (src/chip.v)        NENG = 3 (engines per cluster, 1-4), NCLUSTER
   IHP SRAM store, every clock identical; whole-chip test PASS at `NENG=3`, `NENG=2` and `LATE=1`, plus five new checks
   on cluster numbers 1, 2 and 63; two planted bugs in `cluster.v` (engine 1's pin bank rotated by 8; CLKDIV taken from
   the mirrored slot) each failed the whole-chip test at its first measurement.
+
+- Registers per slot (branch `engine-regs`, 6 Nov 2026): each `eng_slot` holds its engine's setting registers and
+  picks its own read-back word by address; the cluster then picks one 16-bit word by engine number. Signals shared
+  between slots: write and pop strobes, engine number, address, write data, the pin bank, and per slot one read word
+  and the RX-not-empty flag. Proof of no behaviour change: cosim 400,000 clocks with each memory, every clock
+  identical; whole-chip test PASS at `NENG=4`, `3`, `2`, `LATE=1` and the kit build; a new register sweep (a different
+  value in every setting register of every slot and one past the last, all read back) passes on the old and new
+  cluster; five planted bugs in `cluster.v` each fail the whole-chip test.
 
 ## Serialiser and CRC unit (5 Nov 2026, ISA v0.3)
 
@@ -203,8 +212,16 @@ Engine 0 has a **bit-cell serialiser** (`src/serialiser.v`) and a 64-word TX FIF
 | CRC unit, per engine | 32-bit shift register with an XOR per bit under a gated polynomial (the reflected form), fed by IN or by the serialiser | 32 |
 | CRC settings, per engine | CRCPOLY and CRCINIT, 32 bits each | 64 |
 
-Engine 0's TX FIFO is 64 x 16 flip-flops (engines 1 and 2 keep 4 words), so a minimum Ethernet frame (34 words with
+Engine 0's TX FIFO is 64 x 16 (engines 1 and 2 keep 4 words of flip-flops), so a minimum Ethernet frame (34 words with
 the preamble; the FCS comes from the CRC unit) is in the chip before its first bit goes out.
+
+Engine 0's TX FIFO is a one-port memory (`src/fifo_mem.v`: 64 x 16 flip-flops by default, IHP's
+`RM_IHPSG13_1P_64x16_c2` with `+define+USE_SRAM`, both reading on the clock) behind an arbiter and a head register: a
+6-bit write pointer, a 6-bit read pointer, a 7-bit count and a head-valid flip-flop. A host push writes the memory and
+has the port; on a clock without a push, an empty or departing head is refilled from the memory. PULL and the
+serialiser take the head. The head word is captured into a 16-bit register on the clock after each read, so it does
+not depend on the memory output holding between reads. Exact timing: `docs/isa.md`, "Engine 0's TX FIFO". The FPGA
+builds use the flip-flop memory.
 
 The FPGA wrappers take the parameters `SER0`, `CRC` and `TXDEPTH0` (`src/chip.v`). The MachXO3L kit and the Cyclone IV
 board build with `SER0 = 0, CRC = 0, TXDEPTH0 = 4`: the v0.2 engines (MOV ser and TIME 5 do nothing, IN source 7 and

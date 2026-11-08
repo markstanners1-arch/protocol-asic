@@ -83,7 +83,7 @@ The program memory behaves like IHP's SRAM block whichever cells build it: one p
 
 Within one system clock, everything is decided from the state at the **start** of that clock:
 - The host's push into the TX FIFO is accepted only if the FIFO was not full at the start of the clock.
-  The word becomes visible to the engine from the next clock.
+  On engines 1 and 2 the word becomes visible to the engine from the next clock; on engine 0, see below.
 - The host's pop from the RX FIFO is accepted only if it was not empty at the start of the clock;
   the host gets the word that was at the head.
 - The engine's PULL / PUSH and `MOV status` see the FIFO levels at the start of the clock, and so does the serialiser.
@@ -91,6 +91,24 @@ Within one system clock, everything is decided from the state at the **start** o
 - While the serialiser is busy (from `MOV ser` until the frame ends) the TX FIFO is the serialiser's: a program PULL
   finds it empty (a blocking PULL stalls, a non-blocking one loads X), whatever the level. The serialiser's own pull and
   a host push in the same clock both happen.
+
+### Engine 0's TX FIFO (64 words)
+
+A one-port memory (64 x 16, reads on the clock: `src/fifo_mem.v`, flip-flops, or IHP's `RM_IHPSG13_1P_64x16_c2` with
+`+define+USE_SRAM`) behind a **head register**, which holds the oldest word. PULL and the serialiser take the head only.
+Each clock, decided from the state at the start of the clock:
+- An accepted host push writes the memory. The memory does one access per clock; a write has priority over a read.
+- If there is no accepted host push, the head is empty or is taken this clock, and the memory holds a word not yet in
+  the head, that word is read into the head. It is the head from the next clock.
+- So a word pushed in clock k into an empty FIFO is ready from clock k + 2 when clock k + 1 has no host push (one clock
+  later than on engines 1 and 2); each further clock with a host push delays it one clock more. After the head is taken
+  in a clock with a host push, the next word is ready one clock later than after one taken in a clock without.
+- While the head is empty, PULL and the serialiser see the FIFO as empty, whatever the level: a blocking PULL stalls,
+  a non-blocking one loads `x`; the serialiser waits in FILL and underruns in DATA (see Serialiser).
+- The level (STATUS and SERSTAT, `MOV status` `[3:0]`, the full check on host pushes) counts every word in the FIFO,
+  the head included.
+- The host port completes at most one word per 16 SPI clocks, so it never pushes in two consecutive clocks: on the chip
+  a read waits at most one clock behind a push.
 
 ## Reserved encodings (defined, so random programs are a fair test)
 
@@ -133,8 +151,8 @@ Destinations: 0 pins (`n` pins from `out_base`); 1 x; 2 y; 3 nothing; 4 pin dire
 **4 PUSH / PULL** `[7] 1 = pull, [6] if-full / if-empty, [5] block`.
 PUSH: if `[6]` and `isr_count < 16`, do nothing. Else RX FIFO full: stall if block, else do nothing.
 Otherwise push `isr`, then `isr = 0`, `isr_count = 0`.
-PULL: if `[6]` and `osr_count < 16`, do nothing. Else TX FIFO empty **or the serialiser busy**: stall if block, else
-`osr = x`. Otherwise `osr` = popped word, `osr_count = 0`.
+PULL: if `[6]` and `osr_count < 16`, do nothing. Else TX FIFO empty (engine 0: no head word ready, see "Host and FIFO
+timing") **or the serialiser busy**: stall if block, else `osr = x`. Otherwise `osr` = popped word, `osr_count = 0`.
 
 **5 MOV** `[7:5] dst, [4:3] op, [2:0] src`.
 Destinations: 0 pins (from `out_base`); 1 x; 2 y; 3 ser (the serialiser: start a frame of that many words, 0 stops
@@ -156,6 +174,11 @@ On every tick, a running stopwatch adds 1 **before** the instruction executes, s
 gives exactly the number of ticks from the `time start` to the capture.
 
 ## CRC unit (v0.3; every engine)
+
+**Built only where the build asks for it (`CRC = 1`).** The ASIC build has no CRC unit (7 Nov 2026): `crc` reads 0,
+CRCPOLY, CRCINIT and CRC read 0, `IN` source 7 shifts in zeros and `TIME 5` does nothing. SERCFG `[4]` (CRC append)
+then appends 32 zeros (ones if `[5]`), so an Ethernet frame is sent with the FCS computed by the host as the last two
+FIFO words and `[4]` off. The encodings are unchanged.
 
 A 32-bit register `crc`, right-shifting (reflected) form. One step with bit `b`:
 `crc = (crc >> 1) ^ (crcpoly if (crc & 1) ^ b else 0)`. A polynomial and start value with zero upper halves stay a
@@ -184,11 +207,12 @@ Phases: FILL, DATA, CRC, END. State visible to programs: `ser_busy` (`WAIT` 24, 
   already in progress. `src = 0`: `ser_busy = 0` (abort: the pins are released at once, words left in the FIFO stay).
   With enable 0, or on engines 1 and 2, `MOV ser` does nothing.
 - **FILL.** The serialiser waits, busy but not driving the pins, until the TX FIFO holds at least the word count or is
-  full (64). Then, in that clock, it pulls the first word and starts its first bit. So the host may push the count and
+  full (64), and its head word is ready (see "Engine 0's TX FIFO"). Then, in that clock, it pulls the first word and starts its first bit. So the host may push the count and
   the words in one burst at any speed: nothing goes out until the whole frame is in. Underrun cannot happen in FILL.
 - **DATA.** Bits go out from the shift register, bit 0 first with `out_right`, bit 15 first without; a new bit every
-  two half-bits. When the last bit of a word has had its two half-bits: if words remain and the FIFO holds one, the next
-  word is pulled in that clock (no gap on the line); if words remain and the FIFO is empty, **underrun**: `ser_busy =
+  two half-bits. When the last bit of a word has had its two half-bits: if words remain and the FIFO's head word is ready, the
+  next word is pulled in that clock (no gap on the line); if words remain and no head word is ready (the FIFO is empty,
+  or its next word was pushed into an empty FIFO in the clock before), **underrun**: `ser_busy =
   0`, `ser_under = 1`, pins released, the count abandoned; if none remain, on to CRC (SERCFG `[4]`), else END (`[3]`),
   else idle (`ser_busy = 0`).
 - **CRC.** 32 bits of the CRC register, read live as each is sent: bit 0 first with `out_right`, bit 31 first without,
