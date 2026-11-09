@@ -84,7 +84,18 @@ if MODE == "leads":
     chip.write(ENG_A, R_INCFG, 0)
     chip.write(ENG_A, R_SERCFG, 0)
     t0 = time.ticks_ms()
-    for v, what in ((1, "TD+ HIGH, TD- LOW"), (2, "TD+ LOW,  TD- HIGH"), (0, "both LOW")):
+    steps = ((1, "TD+ HIGH, TD- LOW"), (2, "TD+ LOW,  TD- HIGH"), (0, "both LOW"))
+    try:
+        STEP                                    # one step only, left held after the script ends (meter at leisure)
+        v, what = steps[STEP - 1]
+        chip.stop(ENG_A)
+        chip.load_program(ENG_A, [0xC083, 0xC000 | v, 0x0002])
+        chip.start(ENG_A)
+        print("  step %d held: %s (until the next run)" % (STEP, what))
+        raise SystemExit
+    except NameError:
+        pass
+    for v, what in steps:
         chip.stop(ENG_A)
         chip.load_program(ENG_A, [0xC083, 0xC000 | v, 0x0002])
         chip.start(ENG_A)
@@ -162,6 +173,14 @@ check("CRCINIT read back", (chip.read(ENG_A, R_CRCINIT_HI) << 16) | chip.read(EN
 chip.start(ENG_A)
 time.sleep_ms(2)
 check("engine A running, serialiser idle (STATUS [8], [14], [15])", chip.read(ENG_A, R_STATUS) & 0xC100, 0x0100)
+if FRAMES == 0 and MODE != "dali":
+    print("  no frames: engine A left running, a link pulse every 16 ms (until the next run)")
+    raise SystemExit
+try:
+    LEAD_MS                                     # link pulses only for this long first (a network card relinks)
+except NameError:
+    LEAD_MS = 0
+time.sleep_ms(LEAD_MS)
 
 burst = bytearray(2 + 2 * (1 + len(words)))
 c = Chip.cmd(False, ENG_A, R_TX)
