@@ -30,8 +30,7 @@ Mark Stanners and Claude (Anthropic). The Tiny Tapeout project is
 
 | Build | Cells | Utilisation | Setup slack (slow corner) | Hold slack (fast corner) | Checks |
 |---|---|---|---|---|---|
-| Tiny Tapeout main: four engines, serialiser | 24,785 + 5 SRAM macros | 44.9 % | +6.39 ns | +0.145 ns | DRC, LVS, antenna 0; gate-level test and precheck pass |
-| With the receiver and full duplex (TT branch `rx-duplex`; local LibreLane run) | 25,457 + 5 SRAM macros | 46.5 % | +7.08 ns | +0.151 ns | route DRC, KLayout DRC, LVS, antenna 0; gate-level test pass |
+| Tiny Tapeout main: four engines, serialiser, receiver and full duplex | 25,457 + 5 SRAM macros | 46.5 % | +7.08 ns | +0.151 ns | route DRC, KLayout DRC, LVS, antenna 0; gate-level test and precheck pass |
 
 The local LibreLane flow (WSL Ubuntu, LibreLane 3.1.0.dev4, the Tiny Tapeout support tools) reproduces GitHub's runs
 metric for metric.

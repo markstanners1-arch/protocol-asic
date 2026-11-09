@@ -41,13 +41,12 @@ what the chip is, its layout, verification and bench results. Specs: `docs/core_
   `pnr.sdc` and the SRAM model; re-copy after changes. A gds run starts on every push (~2.5 h with precheck): read it
   with ONE `gh run view`, never watch or poll.
 
-## State (8 Nov 2026)
-- **Chip on Tiny Tapeout main** (36a3545): four engines without CRC units, IHP SRAM macros for the program stores and
-  engine 0's 64-word TX FIFO, 40 MHz, ID 0x0024. Layout clean: 24,785 cells, 44.9 % utilisation, hold +0.145 ns at
-  the fast corner (hold-fix target 0.15 ns), DRC/LVS/antenna 0, gate-level test and precheck pass.
-- **Design main** adds receive and full duplex on engine 0 (Manchester receiver, keyed mode in SERCFG [8:7], 16/48-word
-  rings, RXDATA 0x37, hardware preamble), proven by model, cosim, chip test, planted bugs and on the Mojo
-  (`pico/fdx_loop.py`). TT branch `rx-duplex` carries it (receive pin latch `sg13cmos5l_dlhq_1` in the wrapper,
-  `test/rtl_cells.v` for the RTL test); TT main moves to it when its gds run is clean.
+## State (9 Nov 2026)
+- **Chip on Tiny Tapeout main** (a994a97, = design main's src): four engines without CRC units, IHP SRAM macros for
+  the program stores and engine 0's 64-word TX FIFO, 40 MHz, ID 0x0024, with receive and full duplex on engine 0
+  (Manchester receiver, keyed mode in SERCFG [8:7], 16/48-word rings, RXDATA 0x37, hardware preamble; receive pin latch
+  `sg13cmos5l_dlhq_1` in the wrapper, `test/rtl_cells.v` for the RTL test). Layout clean: 25,457 cells, 46.5 %
+  utilisation, setup +7.08 ns, hold +0.151 ns at the fast corner (hold-fix target 0.15 ns), DRC/LVS/antenna 0,
+  gate-level test and precheck pass. Proven by model, cosim, chip test, planted bugs and on the Mojo (`pico/fdx_loop.py`).
 - Host port and ISA v0.4 (docs/isa.md). Bench wiring in `docs/bench_wiring.md`. A Hantek DSO5102P oscilloscope is on
   the bench for scope captures.

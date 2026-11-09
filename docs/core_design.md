@@ -32,7 +32,7 @@ The same `src/` builds every version; the wrappers set the parameters of `protoc
 
 | Build | Engines | Engine 0 serialiser, receiver, 64-word buffer | CRC units | Memories | Clock | ID |
 |---|---|---|---|---|---|---|
-| Tiny Tapeout, IHP CMOS5L, 6x4 tiles (`tt_um_gosforth_protocol_emu`) | 4 (A-D) | serialiser and buffer; the receiver on the TT branch `rx-duplex` | no | IHP SRAM macros | 40 MHz | 0x0024 |
+| Tiny Tapeout, IHP CMOS5L, 6x4 tiles (`tt_um_gosforth_protocol_emu`) | 4 (A-D) | serialiser, buffer and receiver | no | IHP SRAM macros | 40 MHz | 0x0024 |
 | `src/chip.v` defaults (the whole-chip test's default) | 3 | yes | yes | flip-flops | | 0x0023 |
 | MachXO3L Starter Kit, `fpga/machxo3/build.sh` | 2 | no (4-word TX FIFOs) | no | flip-flops | 12 MHz | 0x0022 |
 | MachXO3L, `build.sh ser` | 1 | yes | yes | flip-flops | 12 MHz | 0x0021 |
