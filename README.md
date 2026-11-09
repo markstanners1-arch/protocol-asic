@@ -50,6 +50,7 @@ against real devices; "model" means proven on the Python model only.
 | `i2c_sniff` | 29 | passive I2C monitor | bench |
 | `spi_master` | 14 | SPI mode 0 | bench |
 | `onewire` | 22 | Dallas 1-Wire master: reset and presence, byte send and receive in timed slots | bench |
+| `lcd1602` | 28 | HD44780 character display (LCD 1602), 4-bit, write only: power-on sequence, instructions and characters on six output pins | model |
 | `keypad` | 16 | 4x4 keypad scanner with debounce | bench |
 | `ir_nec`, `ir_tx` | 29, 31 | NEC infra-red decode; transmit with a 38 kHz carrier made in software | bench |
 | `eth_tx`, `ser_tx` | 16, 5 | Ethernet frames with link pulses; one serialiser frame per count | bench |
@@ -65,7 +66,7 @@ LED data and others) and pairs wires into buses) and `esp32/` (Arduino sketch
 
 - **Python model** (`model/engine.py`), written from `docs/isa.md`, is the reference. Model tests run each program
   against model partner devices (`model/i2c_slave.py`, `model/spi_slave.py`, simulated UART, keypad, infra-red,
-  DALI and identification targets, and the serialiser's output decoded back): `model/test_*.py`.
+  DALI and identification targets, a DS18B20 (`model/ds18b20.py`), an HD44780 display (`model/hd44780.py`), and the serialiser's output decoded back): `model/test_*.py`.
 - **Side-by-side random test**: `python model/cosim.py 1000 400 <seed>` runs 1000 random programs for 400 clocks on the
   Verilog and on the model and compares every pin and register on every clock; `USE_SRAM=1` uses IHP's SRAM model,
   `CRC=0` the Tiny Tapeout build, `RX_FOCUS=1` concentrates on the receiver and full duplex. Every change is run on both
