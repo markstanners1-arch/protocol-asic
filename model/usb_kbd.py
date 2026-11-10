@@ -26,6 +26,7 @@ Everything it checks on the host goes in .errors:
   - DATA0 after SETUP, DATA1 in a status stage, no contention (the bench reports that)
   - a good DATA we sent is ACKed; a bad one is not
 """
+import bisect
 import random
 import usb_line as U
 from usb_line import J, K, SE0, SE1
@@ -57,17 +58,21 @@ STRINGS = {0: bytes([4, 3, 0x09, 0x04]), 1: string_desc("ProtocolASIC"), 2: stri
 
 class Tx:
     """A packet on the wire from a sender with bit time p (clocks), starting at ts (clock, fractional), D- `skew`
-    clocks behind D+. levels(t) gives (D+, D-) at clock t, or None outside the packet."""
+    clocks behind D+, every symbol boundary moved by up to +-jitter clocks (rnd). levels(t) gives (D+, D-) at clock t,
+    or None outside the packet."""
 
-    def __init__(self, symbols, ts, p, skew=0.0):
+    def __init__(self, symbols, ts, p, skew=0.0, jitter=0.0, rnd=None):
         self.syms, self.ts, self.p, self.skew = list(symbols), ts, p, skew
-        self.end = ts + len(self.syms) * p + max(0.0, skew)
-        self.eop_j = ts + (len(self.syms) - 1) * p          # the SE0-to-J change
+        n = len(self.syms)
+        self.bounds = [ts + i * p + ((rnd.uniform(-jitter, jitter) if jitter and 0 < i < n else 0.0))
+                       for i in range(n + 1)]
+        self.end = self.bounds[-1] + max(0.0, skew)
+        self.eop_j = self.bounds[n - 1]                     # the SE0-to-J change
 
     def _sym(self, x):
-        i = int((x - self.ts) // self.p)
-        if i < 0:
+        if x < self.bounds[0]:
             return J
+        i = bisect.bisect_right(self.bounds, x) - 1
         return self.syms[min(i, len(self.syms) - 1)]
 
     def levels(self, t):
@@ -97,8 +102,12 @@ class UsbKeyboard:
         self.release = None             # the host's EOP J began here: watching for it to let go
         self.last_activity = None       # None until the first bus reset
         self.tx = None                  # our packet on the wire
-        self.awaiting = None            # ("data", pid, ep, deadline) after a SETUP / OUT, ("hs", good, deadline)
+        self.awaiting = None            # ("data", pid, ep, deadline) after a SETUP / OUT, ("hs", good, kind, deadline)
         self.leds = None
+        self.ack_windows = []           # the host's ACKs: bit times from our EOP's SE0-to-J to their SYNC
+        self.last_eop_dev = -1e9
+        self.tx_info = None
+        self.attached = True
         self._reset_state()
 
     # ---- state
@@ -248,6 +257,7 @@ class UsbKeyboard:
                     self.err(f"a good DATA answered with {U.PID_NAMES.get(pid, pid)}, not ACK")
             else:
                 w = (t0 - self.last_eop_dev) / self.pn
+                self.ack_windows.append(w)
                 if not 2 <= w <= 7.5:
                     self.err(f"ACK {w:.2f} bit times after our EOP")
                 if not a[1]:

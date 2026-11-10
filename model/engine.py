@@ -68,6 +68,10 @@ class Config:
     rx_raw: bool = False         # RXCFG[5]: no preamble hunt, shift from the first taken edge
     rx_both: bool = True         # RXCFG[6]: sample on both clock edges (else rising only)
     rxgap: int = 6               # RXGAP: the 3/4-bit threshold in half-clocks; end of frame at twice this
+                                 # (USB mode: one bit in clocks)
+    # low-speed USB on engine 0 (private design private/usb_ls.md, 10 Nov 2026; model only so far)
+    usb: bool = False            # USBCFG[0]: USB mode of the serialiser and receiver, in force in full duplex
+    serfrac: int = 0             # SERFRAC [7:0]: 256ths of a clock added to each half-bit (every serialiser mode)
 
     @classmethod
     def for_program(cls, prog, **kw):
@@ -108,6 +112,9 @@ RANGES = {
     "ser_half": (0, 1), "ser_div": (0, M16), "ser_skip": (0, 7), "ser_pre": (0, 64),
     "rx_state": (0, 3), "rx_gap": (0, M16), "rx_run": (0, 63), "rx_sh": (0, M16), "rx_bits": (0, 15),
     "rx_words": (0, 2047), "rx_left": (0, 15), "rx_f1": (0, 1), "rx_f2": (0, 1), "rx_r1": (0, 1), "rx_r2": (0, 1), "rx_lv": (0, 1), "rx_last": (0, 1),
+    "ser_acc": (0, 255), "usb_lvl": (0, 1), "usb_ones": (0, 6), "rx_m1": (0, 1), "rx_m2": (0, 1), "usb_rlast": (0, 1),
+    "usb_rones": (0, 6), "usb_nbits": (0, 255), "usb_pid": (0, 255), "usb_crc": (0, M16), "usb_stat": (0, M16),
+    "usb_pkts": (0, 3),
 }
 CHECK_RANGES = True
 
@@ -120,6 +127,8 @@ RX_LOCK_RUN = 16                # alternating bits needed before the SFD's closi
 RX_KEY = 5                      # SERCFG[15:13] must hold this for a write to change the mode ([8:7])
 MODE_TX, MODE_RX, MODE_FDX = 0, 1, 2   # engine 0's mode: transmit, receive, full duplex
 FDX_TX_WORDS, FDX_RX_WORDS = 16, 48     # full duplex: the 64-word buffer split into two rings
+USB_EOP_J = 4                   # USB mode: the END phase's half-bits 0-3 are SE0, 4-5 J; the receiver listens from 4
+USB_CRC16_RESIDUE = 0xB001      # the fixed CRC16 checker's register after a good DATA packet (0x800D unreflected)
 
 
 def fdx_split(depth):
@@ -183,6 +192,17 @@ class Engine:
         self.ser_skip = 0
         self.ser_wskip = False      # the word being sent is one of the crc_skip unwatched words
         self.ser_pre = 0            # preamble bits still to send before the first word's bits (hardware preamble)
+        self.ser_acc = 0            # SERFRAC accumulator: a carry makes that half-bit one clock longer
+        # USB mode, transmit: the NRZI level (0 J, 1 K), the 1s in a row, the bit on the line is a stuff bit, the last
+        # word sends its low byte only
+        self.usb_lvl, self.usb_ones, self.usb_stuff, self.usb_odd = 0, 0, False, False
+        # USB mode, receive: D- synchroniser, the last symbol (0 J, 1 K), 1s in a row, data bits so far, the PID, the
+        # fixed CRC16 checker, stuff error, SE1 or a bad end, SE0 seen (waiting for J); the latched USBSTAT [7:0] and
+        # [15:10], the "ACK it" flag (status bit 10), packets received (USBSTAT [15:14])
+        self.rx_m1 = self.rx_m2 = 0
+        self.usb_rlast, self.usb_rones, self.usb_nbits, self.usb_pid, self.usb_crc = 0, 0, 0, 0, 0xFFFF
+        self.usb_serr = self.usb_bad = self.usb_eop = False
+        self.usb_stat, self.usb_ack, self.usb_pkts = 0, False, 0
         # receiver (engine 0): the direction, the falling-edge sampler, the decoder, the frame status
         self.mode = MODE_TX         # transmit (the reset state), receive, or full duplex
         self.rxb = deque()          # full duplex: the receive ring (the transmit ring is txf)
@@ -249,6 +269,27 @@ class Engine:
         return (int(self.rx_ready) | int(self.rx_over) << 1 | int(self.rx_state == RX_DATA) << 2
                 | int(self.rx_refused) << 3 | (self.rx_left & 15) << 4 | min(127, self.rx_words) << 8
                 | int(self.rx_on) << 15)
+
+    @property
+    def usb_on(self):
+        """USB mode in force: engine 0, USBCFG[0], full duplex."""
+        return self.cfg.ser and self.cfg.usb and self.mode == MODE_FDX
+
+    @property
+    def usbstat(self):
+        """USBSTAT (0x3B): the last received packet ([3:0] PID, [4] PID check good, [5] CRC16 good, [6] stuff error,
+        [7] not whole bytes, SE1 or a bad end, [13:10] bytes saturating at 15, [15:14] packets received) and the line
+        now ([9] D+, [8] D-: 01 J, 00 SE0, 10 K)."""
+        if not self.cfg.ser:
+            return 0
+        return self.usb_stat | self.rx_r2 << 9 | self.rx_m2 << 8
+
+    @property
+    def dirs_out(self):
+        """The pin directions: the program's, with D+ and D- driven while the serialiser owns them in USB mode."""
+        if self.usb_on and self.ser_own:
+            return self._write(self.out_dir, self.cfg.out_base, 2, 3)
+        return self.out_dir
 
     @property
     def serlevel(self):
@@ -321,10 +362,20 @@ class Engine:
             return b if self.ser_half else b ^ 1         # first half = the inverse, second half = the bit
         return b
 
+    def usb_pins(self):
+        """USB mode: (D+, D-) while the serialiser owns them: K (1, 0) or J (0, 1) by the NRZI level; the EOP SE0 for
+        half-bits 0-3 of the END phase, J for 4-5."""
+        if self.ser_phase == END:
+            return (0, 0) if self.ser_bit < USB_EOP_J else (0, 1)
+        return (1, 0) if self.usb_lvl else (0, 1)
+
     @property
     def pins_out(self):
         if not self.ser_own:
             return self.out_val
+        if self.usb_on:
+            dp, dm = self.usb_pins()
+            return self._write(self._write(self.out_val, self.cfg.out_base, 1, dp), self.cfg.out_base + 1, 1, dm)
         line = self.ser_line()
         v = self._write(self.out_val, self.cfg.out_base, 1, line)
         if self.cfg.diff:
@@ -446,6 +497,7 @@ class Engine:
         self.sync2, self.sync1 = self.sync1, pins_in & M32
         self.rx_f2, self.rx_f1 = self.rx_f1, ((pins_in if pins_fall is None else pins_fall) >> c.rx_pin) & 1
         self.rx_r2, self.rx_r1 = self.rx_r1, ((pins_in if pins_rx is None else pins_rx) >> c.rx_pin) & 1
+        self.rx_m2, self.rx_m1 = self.rx_m1, ((pins_in if pins_rx is None else pins_rx) >> ((c.rx_pin + 1) % 32)) & 1
         if CHECK_RANGES:
             self.check_ranges()
         return popped
@@ -463,17 +515,34 @@ class Engine:
                 raise RangeError(f"FIFO word {w!r} outside 0 .. 65535")
 
     # ---- the serialiser: one system clock (docs/isa.md, Serialiser) ----
-    def _ser_load(self, first=False):
+    def _ser_reload(self):
+        """The next half-bit's length less one: SERDIV, one clock more when the SERFRAC accumulator carries."""
+        s = self.ser_acc + (self.cfg.serfrac & 0xFF)
+        self.ser_acc = s & 0xFF
+        return min(M16, self.cfg.serdiv + (s >> 8))
+
+    def _usb_bit(self, b):
+        """USB mode: a data bit starts: NRZI (a 0 changes the level) and the count of 1s for stuffing."""
+        if b == 0:
+            self.usb_lvl ^= 1
+        self.usb_ones = self.usb_ones + 1 if b else 0
+
+    def _ser_load(self, first=False, div=None):
         """Pull the next word of the frame into the shift register and start its first bit. Returns the first bit
         (None if it is not fed to the CRC now: a skipped word, or the first word behind a hardware preamble)."""
         c = self.cfg
         self.ser_sh = self.txf.popleft()
         self._tx_popped = True
         self.ser_words -= 1
-        self.ser_bit, self.ser_half, self.ser_div, self.ser_phase = 0, 0, c.serdiv, DATA
+        self.ser_bit, self.ser_half, self.ser_phase = 0, 0, DATA
+        self.ser_div = self._ser_reload() if div is None else div
         self.ser_wskip = self.ser_skip > 0
         if self.ser_skip > 0:
             self.ser_skip -= 1
+        if self.usb_on:                                  # USB: the first bit of the word, no CRC unit
+            self.ser_pre = 0
+            self._usb_bit(self.ser_sh & 1 if c.out_right else (self.ser_sh >> 15) & 1)
+            return None
         if first:                                        # a frame's first word: the preamble counter is set
             self.ser_pre = 64 if c.pre else 0            # afresh (an aborted frame leaves nothing behind)
             if c.pre:
@@ -499,21 +568,34 @@ class Engine:
                 self.ser_busy, self.ser_under, self.ser_phase = True, False, FILL
                 self.ser_words, self.ser_skip = self._start, c.crc_skip
                 self._crc_clr = True
+                self.ser_acc = 0
                 self.events["start"] += 1
+                if self.usb_on:                          # [7:0] bytes, [15] keep-alive (the EOP alone)
+                    nbytes = 0 if self._start & 0x8000 else self._start & 0xFF
+                    self.ser_words, self.usb_odd = (nbytes + 1) // 2, bool(nbytes & 1)
+                    self.usb_lvl, self.usb_ones, self.usb_stuff = 0, 0, False
+                    self.rx_armed, self.rx_state = False, RX_IDLE      # the receiver sleeps while we send
             return None
         if not self.ser_busy:
             return None
         if self.ser_phase == FILL:                       # waiting for the whole frame to be in the FIFO
+            if self.usb_on and self.ser_words == 0:      # USB keep-alive: the EOP alone
+                self.ser_phase, self.ser_bit, self.ser_div = END, 0, self._ser_reload()
+                self.events["end_sent"] += 1
+                return None
             if (tx0 >= self.ser_words or tx0 == self._cap0) and hv0:
                 return self._ser_load(first=True)
             return None
         if self.ser_div != 0:                            # inside a half-bit
             self.ser_div -= 1
             return None
-        self.ser_div = c.serdiv                          # a half-bit boundary
+        self.ser_div = self._ser_reload()                # a half-bit boundary
         if self.ser_phase == END:
             if self.ser_bit < END_HALF_BITS - 1:
                 self.ser_bit += 1
+                if self.usb_on and self.ser_bit == USB_EOP_J:   # our EOP's J: the receiver listens (the ring kept)
+                    self._rx_reset(armed=True)
+                    self.usb_eop = False
             else:
                 self.ser_busy = False
                 self.events["done"] += 1
@@ -522,6 +604,8 @@ class Engine:
             self.ser_half = 1
             return None
         self.ser_half = 0                                # a bit boundary
+        if self.usb_on and self.ser_phase == DATA:
+            return self._usb_boundary(hv0)
         if self.ser_phase == DATA and self.ser_pre:     # a preamble bit has ended
             self.ser_pre -= 1
             if self.ser_pre == 0:                        # the first word's first bit starts now
@@ -539,7 +623,7 @@ class Engine:
                 return None if self.ser_wskip else b
             if self.ser_words > 0:                       # the word is done: the next one
                 if hv0:
-                    return self._ser_load()
+                    return self._ser_load(div=self.ser_div)
                 self.ser_busy, self.ser_under = False, True
                 self.events["underrun"] += 1
                 if tx0:
@@ -565,6 +649,35 @@ class Engine:
             self.events["done"] += 1
         return None
 
+    def _usb_boundary(self, hv0):
+        """USB mode, a bit boundary in the DATA phase: a stuff bit after six 1s, else the next bit, the next word (its
+        low byte only if it is the last of an odd count), or the EOP."""
+        c = self.cfg
+        if self.usb_ones == 6:                           # a stuff bit: a 0, the shift register held
+            self.usb_stuff, self.usb_ones = True, 0
+            self.usb_lvl ^= 1
+            return None
+        self.usb_stuff = False
+        last = 7 if (self.usb_odd and self.ser_words == 0) else 15
+        if self.ser_bit < last:
+            self.ser_bit += 1
+            if c.out_right:
+                self.ser_sh >>= 1
+                b = self.ser_sh & 1
+            else:
+                self.ser_sh = (self.ser_sh << 1) & M16
+                b = (self.ser_sh >> 15) & 1
+            self._usb_bit(b)
+        elif self.ser_words > 0:
+            if hv0:
+                return self._ser_load(div=self.ser_div)
+            self.ser_busy, self.ser_under = False, True
+            self.events["underrun"] += 1
+        else:
+            self.ser_phase, self.ser_bit = END, 0        # the EOP
+            self.events["end_sent"] += 1
+        return None
+
     # ---- the receiver: one system clock (private design 8 Nov 2026) ----
     def _rx_clock(self):
         """Two samples of the receive pin per clock, the falling-edge one first (or only the rising one, with the
@@ -572,6 +685,8 @@ class Engine:
         c = self.cfg
         if not (c.ser and self.rx_on):
             return False
+        if self.usb_on:
+            return self._usb_rx_clock()
         rs = self.rx_r2
         fs = self.rx_f2 if c.rx_both else self.rx_lv
         wrote = self._rx_sample(fs)
@@ -634,6 +749,99 @@ class Engine:
         self.rx_ready, self.rx_state = True, RX_DONE
         self.events["rx_frame"] += 1
         return wrote
+
+    # ---- the receiver's USB mode: one sample a clock, D+ and D- (private/usb_ls.md, section 3) ----
+    def _usb_rx_clock(self):
+        """A D+ edge sets the bit-phase counter to half a bit; at 0 the pair is sampled and the counter set to one bit
+        (RXGAP clocks). Returns True if a word was written (never in full duplex: words go to the hold register)."""
+        c = self.cfg
+        dp, dm = self.rx_r2, self.rx_m2
+        edge = dp != self.rx_lv
+        self.rx_lv = dp
+        if not self.rx_armed or self.rx_state == RX_DONE:
+            return False
+        if self.rx_state == RX_IDLE:
+            if edge:                                     # leaving J: SYNC's first K
+                self.rx_state, self.rx_run, self.usb_rlast = RX_HUNT, 0, 0
+                self.rx_gap = c.rxgap >> 1
+            return False
+        if edge:
+            self.rx_gap = c.rxgap >> 1
+            return False
+        if self.rx_gap:
+            self.rx_gap -= 1
+            return False
+        self.rx_gap = max(0, c.rxgap - 1)
+        return self._usb_sample(dp, dm)
+
+    def _usb_sample(self, dp, dm):
+        c = self.cfg
+        sym = {(0, 1): 0, (1, 0): 1}.get((dp, dm))       # 0 J, 1 K, None SE0 or SE1
+        if self.rx_state == RX_HUNT:                     # SYNC: three or more 0s, then a 1
+            if sym is None:
+                self.rx_state, self.rx_run = RX_IDLE, 0
+                return False
+            bit = int(sym == self.usb_rlast)
+            self.usb_rlast = sym
+            if bit == 0:
+                self.rx_run = min(63, self.rx_run + 1)
+            elif self.rx_run >= 3:
+                self.rx_state = RX_DATA
+                self.events["rx_lock"] += 1
+                self.usb_rones, self.usb_nbits, self.usb_pid, self.usb_crc = 1, 0, 0, 0xFFFF
+                self.usb_serr = self.usb_bad = self.usb_eop = False
+                self.rx_sh, self.rx_bits = 0, 0
+            else:
+                self.rx_state, self.rx_run = RX_IDLE, 0
+            return False
+        if self.usb_eop:                                 # SE0 seen: the first other sample ends the packet
+            if (dp, dm) == (0, 0):
+                return False
+            self._usb_end(good_j=(sym == 0))
+            return False
+        if (dp, dm) == (0, 0):                           # SE0: the EOP; any partial word is written
+            self.usb_eop = True
+            if self.rx_bits:
+                w = (self.rx_sh >> (16 - self.rx_bits)) if c.in_right else self.rx_sh & ((1 << self.rx_bits) - 1)
+                self.rx_left, self.rx_bits = self.rx_bits, 0
+                return self._rx_write(w)
+            return False
+        if sym is None:                                  # SE1
+            self.usb_bad = True
+            return False
+        bit = int(sym == self.usb_rlast)
+        self.usb_rlast = sym
+        if self.usb_rones == 6:                          # the stuff bit: dropped; a 1 here is seven 1s
+            if bit:
+                self.usb_serr = True
+            self.usb_rones = 0
+            return False
+        self.usb_rones = self.usb_rones + 1 if bit else 0
+        self.rx_sh = (self.rx_sh >> 1) | (bit << 15) if c.in_right else ((self.rx_sh << 1) | bit) & M16
+        self.usb_nbits = min(255, self.usb_nbits + 1)
+        if self.usb_nbits == 8:
+            self.usb_pid = (self.rx_sh >> 8) & 0xFF if c.in_right else self.rx_sh & 0xFF
+        elif self.usb_nbits > 8:                         # the fixed CRC16 checker, from the bit after the PID
+            self.usb_crc = crc_step(self.usb_crc, 0xA001, bit) & M16
+        self.rx_bits += 1
+        if self.rx_bits == 16:
+            self.rx_bits = 0
+            return self._rx_write(self.rx_sh)
+        return False
+
+    def _usb_end(self, good_j):
+        """The packet has ended: USBSTAT and the ACK-it flag latched, the frame ready (WAIT 25)."""
+        nb, pid = self.usb_nbits, self.usb_pid
+        pid_ok = nb >= 8 and (pid >> 4) == ((pid & 15) ^ 15)
+        crc_ok = nb >= 24 and self.usb_crc == USB_CRC16_RESIDUE
+        bad = nb % 8 != 0 or self.usb_bad or not good_j
+        self.usb_pkts = (self.usb_pkts + 1) & 3
+        self.usb_stat = ((pid & 15) | int(pid_ok) << 4 | int(crc_ok) << 5 | int(self.usb_serr) << 6 | int(bad) << 7
+                         | min(15, nb // 8) << 10 | self.usb_pkts << 14)
+        self.usb_ack = pid_ok and (pid & 15) in (0x3, 0xB) and crc_ok and not self.usb_serr and not bad
+        self.usb_eop = False
+        self.rx_ready, self.rx_state = True, RX_DONE
+        self.events["rx_frame"] += 1
 
     def _rx_write(self, w):
         if self.mode == MODE_FDX:                     # full duplex: into the hold register, then the receive ring
@@ -782,7 +990,8 @@ class Engine:
             v = {0: lambda: self._pins_from(c.in_base, 16), 1: lambda: self.x, 2: lambda: self.y,
                  3: lambda: 0, 4: lambda: self.sw,
                  5: lambda: (min(len(self.txf), 15) | ((len(self.rxf) & 15) << 4)
-                             | int(self.ser_busy) << 8 | int(self.ser_under) << 9),
+                             | int(self.ser_busy) << 8 | int(self.ser_under) << 9
+                             | int(self.usb_on and self.usb_ack) << 10),
                  6: lambda: self.isr, 7: lambda: self.osr}[src]()
             if mop == 1:   v = ~v & M16
             elif mop == 2: v = _bitrev16(v)
