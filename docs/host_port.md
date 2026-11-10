@@ -54,7 +54,7 @@ while the host clocks out anything (zeros).
 | 0x23 | OUTCFG | R/W | [4:0] out_base, [9:5] out_count (0-16), [14:10] set_base |
 | 0x24 | MISC | R/W | [2:0] set_count, [7:3] side_base, [9:8] side_count, [10] side_opt, [11] out_right, [12] in_right, [13] side_dir (side-set writes pin directions) |
 | 0x25 | INCFG | R/W | [4:0] in_base, [9:5] jmp_pin, [14:10] fault_addr |
-| 0x26 | TXFIFO | W (R) | push a word to the engine (dropped if the FIFO is full: check STATUS). Engine 0's FIFO holds 64 words, the others 4. **Engine 0 in receive mode:** reads take the received words in order (0 when none); writes are dropped |
+| 0x26 | TXFIFO | W (R) | push a word to the engine (dropped if the FIFO is full: check STATUS). Engine 0's FIFO holds 1024 words (64 on the FPGA serialiser builds), the others 4. **Engine 0 in receive mode:** reads take the received words in order (0 when none); writes are dropped |
 | 0x27 | RXFIFO | R | pop a word from the engine (reads 0 if empty) |
 | 0x28 | STATUS | R | [2:0] TX level **saturating at 7** (the exact level is in 0x33), [6:4] RX level, [8] running, [13:9] pc, [14] serialiser busy, [15] serialiser underrun (engines 1-3: 0) |
 | 0x29 | FILTER | R/W | **chip-wide** (any engine number reaches it): input glitch filter, [3:0] N, [7:4] P; a new input level must hold for N+1 ticks of 2^P clocks (docs/input_filter.md). 0 = shortest (about 1 clock) |
@@ -64,11 +64,13 @@ while the host clocks out anything (zeros).
 | 0x2D, 0x2E | CRCPOLY lo, hi | R/W | the CRC unit's polynomial, reflected form (Ethernet 0xEDB88320, Modbus 0xA001) |
 | 0x2F, 0x30 | CRCINIT lo, hi | R/W | the CRC unit's start value (Ethernet 0xFFFFFFFF, Modbus 0xFFFF) |
 | 0x31, 0x32 | CRC lo, hi | R | the CRC register now (the running value, not complemented) |
-| 0x33 | SERSTAT | R | [6:0] TX FIFO level (0-64), [8] serialiser busy, [9] serialiser underrun |
+| 0x33 | SERSTAT | R | [6:0] TX FIFO level **saturating at 127** (the exact level is in 0x38), [8] serialiser busy, [9] serialiser underrun |
 | 0x34 | RXCFG | R/W | **engine 0 only** (v0.4): [4:0] receive pin, [5] raw (no preamble hunt), [6] sample on both clock edges; writing [7] = 1 arms the receiver for one frame (empties the buffer; [7] is not kept) |
 | 0x35 | RXGAP | R/W | **engine 0 only**: 3/4 of a bit in half-clocks (reset 6: 10 Mbit/s at 40 MHz); no edge for twice this ends a frame |
-| 0x36 | RXSTAT | R | **engine 0 only**: [0] frame ready, [1] overrun, [2] in a frame (locked), [3] refused (a mode change or MOV ser was refused), [7:4] bits in a partial last word, [14:8] words received, [15] the receiver on (receive or full duplex) |
+| 0x36 | RXSTAT | R | **engine 0 only**: [0] frame ready, [1] overrun, [2] in a frame (locked), [3] refused (a mode change or MOV ser was refused), [7:4] bits in a partial last word, [14:8] words received **saturating at 127** (the exact count is in 0x39), [15] the receiver on (receive or full duplex) |
 | 0x37 | RXDATA | R | **engine 0 only**: in receive or full duplex, reads take the received words in order (0 when none) |
+| 0x38 | SERLEVEL | R | [10:0] the TX FIFO level, exact (0-1024; in full duplex the transmit ring's, 0-512) |
+| 0x39 | RXWORDS | R | **engine 0 only**: [10:0] words received this frame, exact (reads 0 on the other engines) |
 
 Unlisted registers read 0 and ignore writes. Registers 0x2B-0x30 are settings like 0x21-0x25: change them while the
 engine is stopped. The serialiser (docs/isa.md, "Serialiser") is started by the program, not the host: the host pushes
@@ -77,17 +79,17 @@ a word count and then that many words into engine 0's TX FIFO, in one burst, and
 `programs/eth_tx.asm` is the Ethernet case.
 
 Receive (v0.4, engine 0): with the engine running, set MISC `in_right` for LSB-first data, RXGAP for the rate, then write SERCFG with the key and bit 7 set (`sercfg | 0xA080`) and read SERCFG back to see receive in force.
-Write RXCFG with the pin, bit 6 and the arm bit; when RXSTAT bit 0 (or IRQ) rises, read RXSTAT [14:8] words from 0x26.
+Write RXCFG with the pin, bit 6 and the arm bit; when RXSTAT bit 0 (or IRQ) rises, read RXWORDS (0x39) words from 0x26.
 Arm again for the next frame. `sercfg | 0xA000` returns to transmit once idle. The IRQ pin also rises while a received
 frame is ready. The receiver bypasses the glitch filter, so FILTER can stay set for the other pins.
 
 Full duplex (v0.4, engine 0): `sercfg | 0xA100` (with `[9]` set for the hardware preamble), read SERCFG [8:7] back as
-10, arm with RXCFG as above. Send as in transmit mode, but the transmit ring holds 16 words: push while SERSTAT's level
-is under 16 (a longer frame starts when the ring is full and must be topped up as it goes). Read received words from
+10, arm with RXCFG as above. Send as in transmit mode, but the transmit ring holds 512 words (16 on the 64-word builds): push
+while SERLEVEL is under that (a longer frame starts when the ring is full and must be topped up as it goes). Read received words from
 0x37.
 
 Builds without the serialiser (the default FPGA builds: `SER0 = 0`, 4-word TX FIFOs; `docs/core_design.md`, "Builds")
-read 0 at 0x2B, 0x2C and 0x34-0x37 and have STATUS bits 14-15 at 0 (SERSTAT still gives the TX FIFO level). Builds without CRC units (`CRC = 0`, the Tiny Tapeout chip
+read 0 at 0x2B, 0x2C, 0x34-0x37 and 0x39 and have STATUS bits 14-15 at 0 (SERSTAT still gives the TX FIFO level). Builds without CRC units (`CRC = 0`, the Tiny Tapeout chip
 among them) read 0 at 0x2D-0x32. The ID register's layout is the same in every build. All settings reset to 0 (engines stopped) when the chip resets.
 Change settings while an engine is stopped; they are applied when RUN goes to 1.
 

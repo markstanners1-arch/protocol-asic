@@ -10,9 +10,10 @@ on every system clock. Keep it plain and literal; speed doesn't matter, clarity 
   Convenience: eng.tx_put(word) / eng.rx_get() queue a host push / pop for the next clock.
   Host FIFO timing follows docs/isa.md: decided from the state at the start of the clock.
 
-Engine 0 (Config.ser = True) carries the bit-cell serialiser and a 64-word TX FIFO; every engine carries a
-32-bit CRC unit (docs/isa.md, "Serialiser" and "CRC unit"). The 64-word TX FIFO is a one-port memory behind a head
-register (docs/isa.md, "Host and FIFO timing"): tx_hv says the head word, txf[0], is ready for PULL and the serialiser.
+Engine 0 (Config.ser = True) carries the bit-cell serialiser and a deep TX FIFO (Config.ser_depth words: 1024 on the
+Tiny Tapeout chip, 64 on the FPGA builds); every engine carries a 32-bit CRC unit (docs/isa.md, "Serialiser" and
+"CRC unit"). The deep TX FIFO is a one-port memory behind a head register (docs/isa.md, "Host and FIFO timing"):
+tx_hv says the head word, txf[0], is ready for PULL and the serialiser.
 """
 from collections import deque
 from dataclasses import dataclass
@@ -20,7 +21,8 @@ from dataclasses import dataclass
 M16 = 0xFFFF
 M32 = 0xFFFFFFFF
 FIFO_DEPTH = 4                  # RX FIFO, and the TX FIFO of an engine without the serialiser
-SER_FIFO_DEPTH = 64             # TX FIFO of the engine with the serialiser
+SER_FIFO_DEPTH = 64             # TX FIFO of the engine with the serialiser on the FPGA builds (Config.ser_depth)
+ASIC_SER_DEPTH = 1024           # ... and on the Tiny Tapeout chip (8x4 tiles, 10 Nov 2026)
 SER_WAIT_INDEX = 24             # WAIT index that reads "serialiser busy"
 END_HALF_BITS = 6               # end-of-frame marker: the line held high for this many half-bits
 
@@ -46,6 +48,7 @@ class Config:
     fault_addr: int = 0
     # v0.3: the serialiser (engine 0 only: ser = True) and the CRC unit (every engine)
     ser: bool = False            # this engine has the serialiser and the deep TX FIFO
+    ser_depth: int = SER_FIFO_DEPTH   # the deep TX FIFO's words: 64 or 1024
     ser_en: bool = False         # SERCFG[0]: MOV ser starts a frame (else it does nothing)
     manch: bool = False          # SERCFG[1]: Manchester (else NRZ)
     diff: bool = False           # SERCFG[2]: out_base + 1 carries the inverse
@@ -74,7 +77,12 @@ class Config:
 
     @property
     def tx_depth(self):
-        return SER_FIFO_DEPTH if self.ser else FIFO_DEPTH
+        return self.ser_depth if self.ser else FIFO_DEPTH
+
+    @property
+    def fdx_split(self):
+        """Full duplex: the buffer's words for the transmit ring and the receive ring (16 + 48, or half and half)."""
+        return fdx_split(self.ser_depth)
 
     def sercfg_word(self):
         """SERCFG as the host writes it (docs/host_port.md)."""
@@ -99,7 +107,7 @@ RANGES = {
     "crc": (0, M32), "ser_phase": (0, 3), "ser_words": (0, M16), "ser_sh": (0, M16), "ser_bit": (0, 31),
     "ser_half": (0, 1), "ser_div": (0, M16), "ser_skip": (0, 7), "ser_pre": (0, 64),
     "rx_state": (0, 3), "rx_gap": (0, M16), "rx_run": (0, 63), "rx_sh": (0, M16), "rx_bits": (0, 15),
-    "rx_words": (0, 127), "rx_left": (0, 15), "rx_f1": (0, 1), "rx_f2": (0, 1), "rx_r1": (0, 1), "rx_r2": (0, 1), "rx_lv": (0, 1), "rx_last": (0, 1),
+    "rx_words": (0, 2047), "rx_left": (0, 15), "rx_f1": (0, 1), "rx_f2": (0, 1), "rx_r1": (0, 1), "rx_r2": (0, 1), "rx_lv": (0, 1), "rx_last": (0, 1),
 }
 CHECK_RANGES = True
 
@@ -112,6 +120,11 @@ RX_LOCK_RUN = 16                # alternating bits needed before the SFD's closi
 RX_KEY = 5                      # SERCFG[15:13] must hold this for a write to change the mode ([8:7])
 MODE_TX, MODE_RX, MODE_FDX = 0, 1, 2   # engine 0's mode: transmit, receive, full duplex
 FDX_TX_WORDS, FDX_RX_WORDS = 16, 48     # full duplex: the 64-word buffer split into two rings
+
+
+def fdx_split(depth):
+    """Full duplex rings (transmit, receive): 16 + 48 of 64 words; half and half of a larger buffer (512 + 512)."""
+    return (FDX_TX_WORDS, FDX_RX_WORDS) if depth == 64 else (depth // 2, depth - depth // 2)
 
 
 class RangeError(Exception):
@@ -148,7 +161,7 @@ class Engine:
         self.out_val = 0
         self.out_dir = 0
         self.txf = deque()
-        self.tx_hv = False          # 64-word FIFO: the head register holds txf[0]
+        self.tx_hv = False          # deep FIFO: the head register holds txf[0]
         self._tx_ready0 = self._tx_popped = False
         self.rxf = deque()
         self.sync1 = self.sync2 = 0
@@ -194,7 +207,7 @@ class Engine:
                        "in_crc": 0, "time_crc": 0, "wait_ser": 0, "pull_busy": 0,
                        "refill_blocked": 0, "pull_not_ready": 0, "under_not_ready": 0,
                        "rx_change": 0, "rx_refused": 0, "rx_lock": 0, "rx_frame": 0, "rx_over": 0, "rx_bpop": 0,
-                       "fdx": 0, "fdx_held": 0, "fdx_both": 0}
+                       "fdx": 0, "fdx_held": 0, "fdx_both": 0, "tx_full": 0}
 
     def _rx_reset(self, armed=False):
         """The receiver's decoder and frame status back to the start (the samplers and the direction are kept)."""
@@ -205,7 +218,7 @@ class Engine:
         self.rx_last = 0            # the last bit taken while hunting
         self.rx_sh = 0
         self.rx_bits = 0            # bits in rx_sh not yet written
-        self.rx_words = 0           # words written this frame
+        self.rx_words = 0           # words written this frame (saturating at twice the buffer, less one)
         self.rx_left = 0            # bits in the last, partial word (0 = whole words)
         self.rx_ready = False       # a frame has ended: its words are in the buffer
         self.rx_over = False        # the buffer was full: words dropped
@@ -222,8 +235,8 @@ class Engine:
 
     @property
     def tx_cap(self):
-        """Words the transmit buffer holds: 16 in full duplex, else the whole buffer."""
-        return FDX_TX_WORDS if (self.cfg.ser and self.mode == MODE_FDX) else self.cfg.tx_depth
+        """Words the transmit buffer holds: the transmit ring in full duplex, else the whole buffer."""
+        return self.cfg.fdx_split[0] if (self.cfg.ser and self.mode == MODE_FDX) else self.cfg.tx_depth
 
     @property
     def rx_idle(self):
@@ -234,8 +247,18 @@ class Engine:
     def rxstat(self):
         """RXSTAT as the host reads it."""
         return (int(self.rx_ready) | int(self.rx_over) << 1 | int(self.rx_state == RX_DATA) << 2
-                | int(self.rx_refused) << 3 | (self.rx_left & 15) << 4 | (self.rx_words & 127) << 8
+                | int(self.rx_refused) << 3 | (self.rx_left & 15) << 4 | min(127, self.rx_words) << 8
                 | int(self.rx_on) << 15)
+
+    @property
+    def serlevel(self):
+        """SERLEVEL (0x38) as the host reads it: the TX FIFO level, unsaturated (SERSTAT [6:0] stops at 127)."""
+        return len(self.txf)
+
+    @property
+    def rxwords(self):
+        """RXWORDS (0x39): the words received this frame, unsaturated (RXSTAT [14:8] stops at 127)."""
+        return self.rx_words if self.cfg.ser else 0
 
     # ---- host side ----
     def tx_put(self, word):
@@ -323,7 +346,7 @@ class Engine:
             pop, self._pop = True, False
         # host requests are judged on the state at the start of the clock
         tx0 = len(self.txf)
-        mem_fifo = c.tx_depth == SER_FIFO_DEPTH
+        mem_fifo = c.ser                              # the deep FIFO: a one-port memory behind a head register
         hv0 = self.tx_hv if mem_fifo else tx0 > 0     # the head word is ready (PULL and the serialiser take it)
         self._tx_ready0, self._tx_popped = hv0, False
         rx0 = c.ser and self.mode == MODE_RX          # receive mode at the start of the clock
@@ -387,6 +410,8 @@ class Engine:
             self.tx_hv = True if read else (False if self._tx_popped else hv0)
         if push_ok:
             self.txf.append(push & M16)
+            if len(self.txf) == cap0:
+                self.events["tx_full"] += 1                # (coverage) the host filled the transmit buffer
         if pop_ok:
             self.rxf.popleft()
         # the direction and the arm (engine 0), decided on the state at the start of the clock, taking effect now
@@ -430,7 +455,8 @@ class Engine:
             v = getattr(self, name)
             if not (isinstance(v, int) and lo <= v <= hi):
                 raise RangeError(f"{name} = {v!r} is outside {lo} .. {hi} (pc {self.pc}, tick {self.ticks})")
-        if not (len(self.txf) <= self.tx_cap and len(self.rxf) <= FIFO_DEPTH and len(self.rxb) <= FDX_RX_WORDS):
+        if not (len(self.txf) <= self.tx_cap and len(self.rxf) <= FIFO_DEPTH and len(self.rxb) <= self.cfg.fdx_split[1]
+                and self.rx_words <= 2 * self.cfg.ser_depth - 1):
             raise RangeError(f"FIFO over depth: tx {len(self.txf)} rx {len(self.rxf)}")
         for w in list(self.txf) + list(self.rxf):
             if not 0 <= w <= M16:
@@ -612,19 +638,19 @@ class Engine:
     def _rx_write(self, w):
         if self.mode == MODE_FDX:                     # full duplex: into the hold register, then the receive ring
             held = self.rx_hold is not None
-            if len(self.rxb) + int(held) >= FDX_RX_WORDS or (held and not self._hold_free):
+            if len(self.rxb) + int(held) >= self.cfg.fdx_split[1] or (held and not self._hold_free):
                 self.rx_over = True
                 self.events["rx_over"] += 1
                 return False
             self._new_hold = w & M16
-            self.rx_words = min(127, self.rx_words + 1)
+            self.rx_words = min(2 * self.cfg.ser_depth - 1, self.rx_words + 1)
             return False
         if len(self.txf) >= self.cfg.tx_depth:
             self.rx_over = True
             self.events["rx_over"] += 1
             return False
         self.txf.append(w & M16)
-        self.rx_words = min(127, self.rx_words + 1)
+        self.rx_words = min(2 * self.cfg.ser_depth - 1, self.rx_words + 1)
         return True
 
     # ---- the CRC unit: one system clock (docs/isa.md, CRC unit) ----

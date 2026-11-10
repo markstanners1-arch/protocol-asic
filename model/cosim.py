@@ -7,7 +7,8 @@ The first disagreement is reported with the program listing and the clocks aroun
     python model/cosim.py [tests] [cycles] [seed]      (defaults 500 300 1)
 
 Environment: USE_SRAM=1 uses IHP's SRAM block model for the memories; CRC=0 builds both engines without the CRC
-unit (the ASIC build, 7 Nov 2026) and the model to match.
+unit (the ASIC build, 7 Nov 2026) and the model to match; TXDEPTH0=64 gives engine 0 the FPGA builds' 64-word buffer
+(default 1024, the Tiny Tapeout chip). Runs of 20,000 clocks or more also send frames longer than 1024 words.
 """
 import os
 import random
@@ -23,6 +24,7 @@ from engine import Engine, Config  # noqa: E402
 SUITE = r"D:\Tools\oss-cad-suite"
 BUILD = os.path.join(ROOT, "test", "build")
 CRC_UNIT = os.environ.get("CRC", "1") != "0"
+TXDEPTH0 = int(os.environ.get("TXDEPTH0", "1024"))
 ENV = dict(os.environ, PATH=os.pathsep.join([os.path.join(SUITE, "bin"), os.path.join(SUITE, "lib"), os.environ["PATH"]]))
 CFG_FIELDS = ["clkdiv", "start", "wrap_bottom", "wrap_top", "out_base", "out_count", "set_base", "set_count",
               "side_base", "side_count", "side_opt", "side_dir", "in_base", "jmp_pin", "out_right", "in_right", "fault_addr",
@@ -31,7 +33,7 @@ CFG_FIELDS = ["clkdiv", "start", "wrap_bottom", "wrap_top", "out_base", "out_cou
 BOOLS = ("side_opt", "side_dir", "out_right", "in_right", "rx_raw", "rx_both")
 EVENTS = ["start", "abort", "done", "underrun", "crc_sent", "end_sent", "in_crc", "time_crc", "wait_ser", "pull_busy",
           "refill_blocked", "pull_not_ready", "under_not_ready",
-          "rx_change", "rx_refused", "rx_lock", "rx_frame", "rx_over", "rx_bpop", "fdx", "fdx_held", "fdx_both"]
+          "rx_change", "rx_refused", "rx_lock", "rx_frame", "rx_over", "rx_bpop", "fdx", "fdx_held", "fdx_both", "tx_full"]
 OPNAMES = ["jmp", "wait", "in", "out", "push/pull", "mov", "set", "time"]
 
 
@@ -95,7 +97,11 @@ def random_test(rnd, ncycles):
         cfg["kind"], half = 0, 1
         cfg.update(rxgap=2, rx_raw=0)
     if cfg["kind"] == 0 and (focus or rnd.random() < 0.5):
-        nbits = 1100 if focus else rnd.choice([8, 30, 80, 300, 1100])
+        long_run = ncycles >= 20000                              # long runs: frames past the 512-word ring and 1024
+        if focus:
+            nbits = rnd.choice([12144, 17000]) if long_run else 1100   # 12144 bits: a full 1518-byte frame
+        else:
+            nbits = rnd.choice([8, 30, 80, 300, 1100] + ([17000, 17000] if long_run else []))
         bits = [1, 0] * rnd.choice([10, 12] if focus else [4, 10, 12]) + [1, 1] + [rnd.getrandbits(1) for _ in range(nbits)]
         halves = [0] * rnd.randrange(20, 60)                    # idle low, the frame, TP_IDL, idle
         for b in bits:
@@ -144,6 +150,7 @@ def random_test(rnd, ncycles):
 def run_model(prog, cfg, stim, events=None):
     c = Config(**{k: (bool(v) if k in BOOLS else v) for k, v in cfg.items() if k not in ("kind", "sercfg")})
     c.ser = (cfg["kind"] == 0)
+    c.ser_depth = TXDEPTH0
     c.crc_unit = CRC_UNIT
     c.set_sercfg_word(cfg["sercfg"])
     eng = Engine(prog, c)
@@ -157,7 +164,7 @@ def run_model(prog, cfg, stim, events=None):
                      f"{eng.out_dir:08x} {len(eng.txf)} {len(eng.rxf)} "
                      f"{'-' if popped is None else format(popped, '04x')} "
                      f"{int(eng.ser_busy)} {int(eng.ser_under)} {eng.crc:08x} {eng.rxstat:04x} "
-                     f"{'-' if eng.bpopped is None else format(eng.bpopped, '04x')} {len(eng.rxb)} {int(eng.rx_hold is not None)}")
+                     f"{'-' if eng.bpopped is None else format(eng.bpopped, '04x')} {len(eng.rxb)} {int(eng.rx_hold is not None)} {eng.rxwords}")
     if events is not None:
         for k in EVENTS:
             events[k] += 1 if eng.events[k] else 0
@@ -178,13 +185,15 @@ def run_verilog(tests):
             os.environ.get("SER_V", os.path.join(ROOT, "src", "serialiser.v")),
             os.environ.get("RX_V", os.path.join(ROOT, "src", "receiver.v")),
             os.environ.get("CRC_V", os.path.join(ROOT, "src", "crc32.v")),
-            os.path.join(ROOT, "src", "prog_mem.v"), os.path.join(ROOT, "src", "fifo_mem.v"),
+            os.path.join(ROOT, "src", "prog_mem.v"), os.environ.get("FIFO_V", os.path.join(ROOT, "src", "fifo_mem.v")),
             os.path.join(ROOT, "test", "tb_cosim.v")]
-    flags = [] if CRC_UNIT else ["-Ptb_cosim.CRC=0"]
+    flags = ([] if CRC_UNIT else ["-Ptb_cosim.CRC=0"]) + [f"-Ptb_cosim.TXD={TXDEPTH0}"]
     if os.environ.get("USE_SRAM"):          # the real IHP SRAM block, with IHP's own simulation model
         flags += ["-DUSE_SRAM", "-DFUNCTIONAL"]
         srcs += [os.path.join(ROOT, "pdk", "RM_IHPSG13_1P_64x16_c2.v"),
-                 os.path.join(ROOT, "pdk", "RM_IHPSG13_1P_core_behavioral.v")]
+                 os.path.join(ROOT, "pdk", "RM_IHPSG13_1P_core_behavioral.v"),
+                 os.path.join(ROOT, "pdk", "RM_IHPSG13_1P_1024x16_c2_bm_bist.v"),
+                 os.path.join(ROOT, "pdk", "RM_IHPSG13_1P_core_behavioral_bm_bist.v")]
     subprocess.run([os.path.join(SUITE, "bin", "iverilog.exe"), "-g2012", *flags, "-o", vvp, *srcs],
                    check=True, env=ENV)
     subprocess.run([os.path.join(SUITE, "bin", "vvp.exe"), "-n", vvp], check=True, cwd=BUILD, env=ENV,
@@ -200,7 +209,7 @@ def run_verilog(tests):
     return out
 
 
-HEAD = "pc x    y    osr  oc isr  ic dl sw   r pins_out out_dir  tx rx pop  busy under crc      rxst bpop rb held"
+HEAD = "pc x    y    osr  oc isr  ic dl sw   r pins_out out_dir  tx rx pop  busy under crc      rxst bpop rb held rxw"
 
 
 def main():
@@ -240,7 +249,7 @@ def main():
           f"(Verilog {t1 - t0:.0f} s, model {time.time() - t1:.0f} s): "
           + ("PASS, every clock identical" if fails == 0 else f"FAIL in {fails} tests")
           + ("  [IHP SRAM]" if os.environ.get("USE_SRAM") else "  [flip-flop memory]")
-          + ("" if CRC_UNIT else "  [no CRC unit]"))
+          + ("" if CRC_UNIT else "  [no CRC unit]") + f"  [engine 0 buffer {TXDEPTH0} words]")
     return 1 if fails else 0
 
 

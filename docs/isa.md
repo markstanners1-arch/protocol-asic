@@ -1,7 +1,8 @@
 # Engine instruction set, v0.4
 
-v0.3 is v0.2 plus the serialiser, the CRC unit and a 64-word TX FIFO on engine 0; v0.4 adds receive, full duplex and
-the hardware preamble on engine 0.
+v0.3 is v0.2 plus the serialiser, the CRC unit and a deep TX FIFO on engine 0; v0.4 adds receive, full duplex and
+the hardware preamble on engine 0. Engine 0's buffer is 1024 words in `src/` (`TXDEPTH0`, the Tiny Tapeout build from
+10 Nov 2026) and 64 words on the FPGA serialiser builds; the rules are the same for both.
 
 The exact rules. The Python model (`model/engine.py`) and the Verilog are both built from
 this page, so if they disagree, this page says which one is wrong. Change it here first.
@@ -18,7 +19,7 @@ this page, so if they disagree, this page says which one is wrong. Change it her
 | `sw`, `sw_run` | 16, 1 | stopwatch count and its run flag |
 | `div` | 16 | clock divider count |
 | `out_val`, `out_dir` | 32 each | the engine's pin output levels and directions (1 = drive) |
-| TX FIFO, RX FIFO | 4 x 16 each | to and from the host; **engine 0's TX FIFO is 64 x 16** |
+| TX FIFO, RX FIFO | 4 x 16 each | to and from the host; **engine 0's TX FIFO is 1024 x 16 (64 x 16 on the FPGA builds)** |
 | `crc` | 32 | the CRC unit's register (every engine) |
 | serialiser, receiver | | engine 0 only: `ser_busy`, `ser_under`, phase, word count, shift register, bit and half-bit counters, divider, skip counter (section "Serialiser"); the mode and the receiver (section "Receiver and full duplex") |
 
@@ -95,10 +96,10 @@ Within one system clock, everything is decided from the state at the **start** o
   finds it empty (a blocking PULL stalls, a non-blocking one loads X), whatever the level. The serialiser's own pull and
   a host push in the same clock both happen.
 
-### Engine 0's TX FIFO (64 words)
+### Engine 0's TX FIFO (1024 or 64 words)
 
-A one-port memory (64 x 16, reads on the clock: `src/fifo_mem.v`, flip-flops, or IHP's `RM_IHPSG13_1P_64x16_c2` with
-`+define+USE_SRAM`) behind a **head register**, which holds the oldest word. PULL and the serialiser take the head only.
+A one-port memory (1024 x 16 or 64 x 16, reads on the clock: `src/fifo_mem.v`, flip-flops, or with `+define+USE_SRAM`
+IHP's `RM_IHPSG13_1P_1024x16_c2_bm_bist` or `RM_IHPSG13_1P_64x16_c2`) behind a **head register**, which holds the oldest word. PULL and the serialiser take the head only.
 Each clock, decided from the state at the start of the clock:
 - An accepted host push writes the memory. The memory does one access per clock; a write has priority over a read.
 - If there is no accepted host push, the head is empty or is taken this clock, and the memory holds a word not yet in
@@ -108,8 +109,8 @@ Each clock, decided from the state at the start of the clock:
   in a clock with a host push, the next word is ready one clock later than after one taken in a clock without.
 - While the head is empty, PULL and the serialiser see the FIFO as empty, whatever the level: a blocking PULL stalls,
   a non-blocking one loads `x`; the serialiser waits in FILL and underruns in DATA (see Serialiser).
-- The level (STATUS and SERSTAT, `MOV status` `[3:0]`, the full check on host pushes) counts every word in the FIFO,
-  the head included.
+- The level (STATUS saturating at 7, SERSTAT at 127, SERLEVEL exact, `MOV status` `[3:0]` at 15, the full check on
+  host pushes) counts every word in the FIFO, the head included.
 - The host port completes at most one word per 16 SPI clocks, so it never pushes in two consecutive clocks: on the chip
   a read waits at most one clock behind a push.
 
@@ -239,9 +240,9 @@ Phases: FILL, DATA, CRC, END. State visible to programs: `ser_busy` (`WAIT` 24, 
 
 ## Receiver and full duplex (v0.4; engine 0 only)
 
-Engine 0 has three modes: **transmit** (the reset state: the serialiser and the whole 64-word buffer), **receive**
-(the receiver and the whole buffer) and **full duplex** (both at once: the buffer split into a 16-word transmit ring and
-a 48-word receive ring). The receiver decodes Manchester from one input pin. Checked against the model (`model/engine.py`, `model/test_receive.py`) every
+Engine 0 has three modes: **transmit** (the reset state: the serialiser and the whole buffer), **receive**
+(the receiver and the whole buffer) and **full duplex** (both at once: the buffer split into a 512-word transmit ring
+and a 512-word receive ring; 16 + 48 on the 64-word builds). The receiver decodes Manchester from one input pin. Checked against the model (`model/engine.py`, `model/test_receive.py`) every
 clock by `model/cosim.py`.
 
 - **Mode.** Engine state, transmit after reset (and whenever the engine is stopped, since a stopped engine is held in
@@ -250,13 +251,16 @@ clock by `model/cosim.py`.
   in. Otherwise it is refused, nothing changes, and RXSTAT's refused flag is set. A change that is taken empties the
   buffer (both rings), resets the receiver and stops the serialiser, even if `MOV ser` executes in the same clock.
   SERCFG `[8:7]` read back the mode in force.
-- **Full duplex.** The transmit ring is memory words 0-15 (the serialiser, PULL and host writes to 0x26 use it as the
-  whole buffer is used in transmit mode, a 16-word FIFO), the receive ring words 16-63 (48 words). Each ring has its own
+- **Full duplex.** The transmit ring is memory words 0 to T - 1 (the serialiser, PULL and host writes to 0x26 use it
+  as the whole buffer is used in transmit mode, a T-word FIFO), the receive ring the words from T up: T = 512 of 1024
+  words (512 + 512), T = 16 of 64 (16 + 48). Each ring has its own
   pointers, count and head register. A received word goes first into a one-word hold register. The one memory port
   takes turns each clock: a host write, else the held word, else the transmit head's refill, else the receive head's
   refill. A received word that finds the hold occupied and the port taken, or the ring full, is dropped and sets
-  overrun. A frame longer than 16 words is sent while the host keeps the ring topped up (the serialiser starts when
-  the ring is full); at 10 Mbit/s and 40 MHz the model keeps a 30-word frame going with a word pushed every 140 clocks.
+  overrun. A frame longer than the transmit ring is sent while the host keeps the ring topped up (the serialiser
+  starts when the ring is full); at 10 Mbit/s and 40 MHz the model keeps a 30-word frame going through the 16-word ring
+  with a word pushed every 140 clocks, and a full-size 1518-byte frame (759 words) through the 512-word ring with a word
+  pushed and one read every 128 clocks (`model/test_buffer1024.py`).
 - **Interlocks in receive mode** (not full duplex). `MOV ser` does nothing and sets the refused flag; host writes to the buffer (0x26) are
   dropped; `PULL` finds the buffer empty (the received words are the host's).
 - **Arm.** An RXCFG write with bit 7 set empties the received words (the buffer in receive mode, the receive ring in
@@ -274,7 +278,8 @@ clock by `model/cosim.py`.
   kept from the first taken edge.
 - **Words.** Bits shift into a 16-bit register, bit 0 first with `in_right`, bit 15 first without; every 16 bits the word
   is written to the buffer. At the end of the frame a partial word is written with its bits brought down to bit 0, and
-  their number is kept in RXSTAT. A word that finds the buffer full is dropped and sets overrun. The frame is then
+  their number is kept in RXSTAT. The words written are counted (RXWORDS, 0x39; RXSTAT `[14:8]` saturates at 127).
+  A word that finds the buffer full is dropped and sets overrun. The frame is then
   ready (`WAIT` 25, RXSTAT bit 0, the chip's IRQ) until the next arm or direction change.
 - **Measured on the model** (10 Mbit/s, 40 MHz, random clock phase): with both clock edges every frame is right with each
   edge moved by up to +-7 ns; with the rising edge only, any jitter fails.

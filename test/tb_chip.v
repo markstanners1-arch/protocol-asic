@@ -11,7 +11,8 @@ module tb_chip;
     parameter NENG = 3;                // engines in the chip under test (3 = ASIC and Cyclone; 2 = the kit): -P tb_chip.NENG=2
     parameter SER0 = 1;                // engine 0 has the serialiser (0 = the kit's default build: the serialiser checks
     parameter CRC  = 1;                //   become "its registers read 0"); CRC units present
-    parameter TXDEPTH0 = 64;           // engine 0's TX FIFO depth
+    parameter TXDEPTH0 = 1024;         // engine 0's TX FIFO depth (1024 the ASIC, 64 the FPGA serialiser builds)
+    localparam FDX_TX = (TXDEPTH0 == 64) ? 16 : TXDEPTH0 / 2;   // full duplex: the transmit ring
     reg clk = 0; always #5 clk = ~clk;
     reg rst_n = 0;
     reg cs_n = 1, sck = 0, mosi = 0;
@@ -466,13 +467,24 @@ module tb_chip;
             if (!bad) $display("ok:   all 72 bytes decoded from the pair: preamble, SFD, header, payload, FCS");
             for (j = 0; j < 6; j = j + 1) if (td_hist[2 * nbits + j] !== 1'b1) bad = 1;
             check("TP_IDL: the last 6 half-bits high", {15'd0, bad}, 0);
-            // underrun: a count of 65 with 64 words supplied; the serialiser starts when the FIFO is full and runs dry
+            // underrun: a count of TXDEPTH0 + 1 with TXDEPTH0 words supplied; the serialiser starts when the FIFO is full
+            // and runs dry. With 1024 words, SERSTAT's level stops at 127 and SERLEVEL (0x38) gives it exactly.
             spi_begin({1'b0, 3'd0, 6'd0, 6'h26});
-            spi_word(16'd65, d);
-            for (j = 0; j < 64; j = j + 1) spi_word(fw[j % 34], d);
+            spi_word(TXDEPTH0[15:0] + 16'd1, d);
+            for (j = 0; j < (TXDEPTH0 > 127 ? 300 : TXDEPTH0); j = j + 1) spi_word(fw[j % 34], d);
             spi_end;
-            repeat (64 * 32 + 200) @(posedge clk);
-            read_reg(0, 6'h28, st); check("A STATUS after 64 of 65 words: underrun, not busy", st[15:14], 2'b10);
+            if (TXDEPTH0 > 127) begin
+                repeat (200) @(posedge clk);
+                read_reg(0, 6'h33, w);  check("A SERSTAT with 300 words waiting: level saturated at 127, busy", w, 16'h017F);
+                read_reg(0, 6'h38, w);  check("A SERLEVEL: exactly 300 words waiting", w, 16'd300);
+                read_reg(0, 6'h28, st); check("A STATUS: level saturated at 7", {13'd0, st[2:0]}, 7);
+                spi_begin({1'b0, 3'd0, 6'd0, 6'h26});
+                for (j = 300; j < TXDEPTH0; j = j + 1) spi_word(fw[j % 34], d);
+                spi_end;
+            end
+            repeat (TXDEPTH0 * 32 + 200) @(posedge clk);
+            read_reg(0, 6'h28, st); check("A STATUS after all the words but one: underrun, not busy", st[15:14], 2'b10);
+            read_reg(0, 6'h38, w);  check("A SERLEVEL: FIFO empty", w, 0);
             read_reg(0, 6'h33, w);  check("A SERSTAT: underrun bit, FIFO empty", w, 16'h0200);
             check("pair released after the underrun", {14'd0, uo_out[3:2]}, 0);
             spi_begin({1'b0, 3'd0, 6'd0, 6'h26}); spi_word(16'd1, d); spi_word(16'haaaa, d); spi_end;   // a one-word frame clears it
@@ -509,6 +521,8 @@ module tb_chip;
             ui_hi[1] = 1; #60; ui_hi[1] = 0;
             repeat (100) @(posedge clk);
             read_reg(0, 6'h36, w); check("RXSTAT after the frame: receive mode, 32 words, ready", w, 16'hA001);
+            read_reg(0, 6'h39, w); check("RXWORDS: 32", w, 16'd32);
+            read_reg(1, 6'h39, w); check("B RXWORDS reads 0 (no receiver)", w, 0);
             check("IRQ high: a frame is ready", {15'd0, irq}, 1);
             bad = 0;
             for (j = 0; j < 32; j = j + 1) begin
@@ -567,11 +581,11 @@ module tb_chip;
             k = 0;
             for (j = 4; j < 4 + nw; j = j + 1) begin
                 read_reg(0, 6'h33, w);
-                while (w[6:0] >= 7'd16) begin repeat (200) @(posedge clk); read_reg(0, 6'h33, w); end
+                while (w[6:0] >= FDX_TX) begin repeat (200) @(posedge clk); read_reg(0, 6'h33, w); end
                 if (w[6:0] > k) k = w[6:0];
                 write_reg(0, 6'h26, fw[j]);
             end
-            check("full duplex: the transmit ring never reported above 16", {9'd0, k[6:0]} <= 16, 1);
+            check("full duplex: the transmit ring never reported above its size", {9'd0, k[6:0]} <= FDX_TX, 1);
             st = 16'h4000;
             for (j = 0; j < 400 && st[14]; j = j + 1) begin repeat (500) @(posedge clk); read_reg(0, 6'h28, st); end
             check("full duplex: frame sent, not busy, no underrun", {14'd0, st[15:14]}, 0);

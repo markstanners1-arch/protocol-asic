@@ -30,7 +30,7 @@ On the Tiny Tapeout demo board the host is the board's RP2040. On the bench it i
 The same `src/` builds every version; the wrappers set the parameters of `protocol_chip` (`src/chip.v`). Register 0x2A
 (ID) reads `[7:4]` the spec version (2) and `[3:0]` the number of engines.
 
-| Build | Engines | Engine 0 serialiser, receiver, 64-word buffer | CRC units | Memories | Clock | ID |
+| Build | Engines | Engine 0 serialiser, receiver, buffer (1024 words in `src/`, 64 on the FPGAs) | CRC units | Memories | Clock | ID |
 |---|---|---|---|---|---|---|
 | Tiny Tapeout, IHP CMOS5L, 6x4 tiles (`tt_um_gosforth_protocol_emu`) | 4 (A-D) | serialiser, buffer and receiver | no | IHP SRAM macros | 40 MHz | 0x0024 |
 | `src/chip.v` defaults (the whole-chip test's default) | 3 | yes | yes | flip-flops | | 0x0023 |
@@ -61,7 +61,7 @@ serialiser, CRC and receive registers read 0. A build without CRC units is descr
      |  | ENGINE A  |  | ENGINE B  |  | ENGINE C  |  | ENGINE D  |    |   each engine: its own 32-word
      |  | serialiser|  |           |  |           |  |           |    |   program memory, 4-word TX and
      |  | receiver  |  |           |  |           |  |           |    |   RX FIFOs; engine 0 (A): a
-     |  +-----+-----+  +-----+-----+  +-----+-----+  +-----+-----+    |   64-word TX buffer
+     |  +-----+-----+  +-----+-----+  +-----+-----+  +-----+-----+    |   1024-word TX buffer
      |        +--------------+------+-------+--------------+          |
      |                      pin bank: 32 pin numbers,                 |
      |                      the lowest engine driving a pin wins      |
@@ -90,7 +90,7 @@ known time: protocol timing is counted, not hoped for.
 | Delay counter | 5 bits: stretches any instruction by up to 31 extra ticks | 5 |
 | Stopwatch | 16-bit up-counter, started, stopped and captured by instructions | 16 |
 | Program memory | 32 x 16, one port, reads on the clock (section "Memory") | |
-| TX and RX FIFOs | 4 x 16 each, to and from the host (engine 0's TX: 64 x 16) | |
+| TX and RX FIFOs | 4 x 16 each, to and from the host (engine 0's TX: 1024 x 16; 64 x 16 on the FPGA builds) | |
 | Instruction decoder | gates and muxes | |
 
 ## Instruction set
@@ -175,8 +175,8 @@ protocol_chip  (src/chip.v)        NENG (engines per cluster, 1-4; default 3, 4 
 
 ## Serialiser, receiver and CRC unit
 
-Engine 0 has a **bit-cell serialiser** (`src/serialiser.v`), a **Manchester receiver** (`src/receiver.v`) and a 64-word
-buffer; every engine in a build with `CRC = 1` has a **CRC unit** (`src/crc32.v`). Exact rules: `docs/isa.md`, sections
+Engine 0 has a **bit-cell serialiser** (`src/serialiser.v`), a **Manchester receiver** (`src/receiver.v`) and a 1024-word
+buffer (64 on the FPGA builds); every engine in a build with `CRC = 1` has a **CRC unit** (`src/crc32.v`). Exact rules: `docs/isa.md`, sections
 "Serialiser", "Receiver and full duplex" and "CRC unit"; registers: `docs/host_port.md`.
 
 | Block | What it is | Flip-flops |
@@ -193,15 +193,16 @@ buffer; every engine in a build with `CRC = 1` has a **CRC unit** (`src/crc32.v`
 | CRC unit, per engine | 32-bit shift register with an XOR per bit under a gated polynomial (the reflected form), fed by IN or by the serialiser | 32 |
 | CRC settings, per engine | CRCPOLY and CRCINIT, 32 bits each | 64 |
 
-Engine 0's TX FIFO is 64 x 16 (the other engines have 4 words of flip-flops), so a minimum Ethernet frame (34 words with
-the preamble; 30 with the hardware preamble) is in the chip before its first bit goes out.
+Engine 0's TX FIFO is 1024 x 16 (the other engines have 4 words of flip-flops), so a full-size Ethernet frame (1518
+bytes, 759 words with the hardware preamble) is in the chip before its first bit goes out, and one arriving is held
+whole. The 64-word FPGA builds hold a minimum frame (34 words with the preamble; 30 with the hardware preamble).
 
-Engine 0's buffer is a one-port memory (`src/fifo_mem.v`) behind an arbiter and a head register: a 6-bit write pointer,
-a 6-bit read pointer, a 7-bit count and a head-valid flip-flop. A host push writes the memory and has the port; on a
+Engine 0's buffer is a one-port memory (`src/fifo_mem.v`) behind an arbiter and a head register: a 10-bit write pointer,
+a 10-bit read pointer, an 11-bit count and a head-valid flip-flop (6-bit pointers at 64 words). A host push writes the memory and has the port; on a
 clock without a push, an empty or departing head is refilled from the memory. PULL and the serialiser take the head.
 The head word is captured into a 16-bit register on the clock after each read, so it does not depend on the memory
-output holding between reads. In full duplex the same memory is split into a 16-word transmit ring and a 48-word
-receive ring, each with its own pointers, count and head register. Exact timing: `docs/isa.md`, "Engine 0's TX FIFO"
+output holding between reads. In full duplex the same memory is split into a 512-word transmit ring and a 512-word
+receive ring (16 + 48 at 64 words), each with its own pointers, count and head register. Exact timing: `docs/isa.md`, "Engine 0's TX FIFO"
 and "Receiver and full duplex".
 
 ## Memory
@@ -209,11 +210,12 @@ and "Receiver and full duplex".
 Every memory is one port and reads on the clock, like IHP's SRAM block, whichever cells build it:
 
 - `src/prog_mem.v`: each engine's program store, 32 x 16.
-- `src/fifo_mem.v`: engine 0's 64-word buffer, 64 x 16.
+- `src/fifo_mem.v`: engine 0's buffer, 1024 x 16 (64 x 16 on the FPGA serialiser builds).
 
 By default both are flip-flops. With `+define+USE_SRAM` each is IHP's single-port block **`RM_IHPSG13_1P_64x16_c2`**
 (64 words x 16 bits, 236.80 x 64.36 um = 15,240 um2, one-cycle read, `A_DLY` tied high; the program store uses 32 of its
-64 words). The engine presents the next instruction's address every clock, so the clocked read is invisible to
+64 words); engine 0's 1024-word buffer is **`RM_IHPSG13_1P_1024x16_c2_bm_bist`** (236.80 x 336.46 um = 79,675 um2,
+its write mask tied to all ones and its test port unused). The engine presents the next instruction's address every clock, so the clocked read is invisible to
 programs (`docs/isa.md`, "Program memory"). The Tiny Tapeout build defines `USE_SRAM` and carries five macros: one
 program store per engine and engine 0's buffer. The FPGA builds use flip-flops.
 

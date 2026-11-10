@@ -2,8 +2,9 @@
 // the engine's full state after every clock to cosim_out.txt. model/cosim.py writes the input,
 // runs the Python model on the same tests and compares the two, line by line.
 //
-// Two engines are driven with the same stimulus: dut0 with the serialiser and the 64-word TX FIFO (engine 0 of the
-// chip), dut1 without (engines 1 and 2); each test's `kind` word says which one's state is written out.
+// Two engines are driven with the same stimulus: dut0 with the serialiser and the TXD-word TX FIFO (engine 0 of the
+// chip: 1024 words on the Tiny Tapeout chip, 64 on the FPGA builds), dut1 without (engines 1 to 3); each test's `kind`
+// word says which one's state is written out.
 //
 // cosim_in.hex (32-bit hex words):
 //   ntests
@@ -18,6 +19,7 @@
 
 module tb_cosim;
     parameter CRC = 1;                  // 0: both engines built without the CRC unit (model/cosim.py, CRC=0)
+    parameter TXD = 1024;               // engine 0's buffer: 1024 or 64 words (model/cosim.py, TXDEPTH0)
     reg clk = 0;
     reg rst_n = 0;
 
@@ -48,7 +50,7 @@ module tb_cosim;
     reg [31:0] pins_in = 0;
 
     wire [15:0] host_pop_data [0:1];
-    wire [6:0]  tx_level [0:1];
+    wire [10:0] tx_level [0:1];
     wire [2:0]  rx_level [0:1];
     wire [31:0] out_val [0:1], out_dir [0:1], crc [0:1];
     wire [4:0]  pc [0:1], osr_count [0:1], isr_count [0:1], delay [0:1];
@@ -57,11 +59,11 @@ module tb_cosim;
     wire [15:0] host_bpop_data [0:1], rxstat [0:1];
     wire        buf_ready [0:1], rx_ready [0:1], rx_held [0:1];
     wire [1:0]  mode_o [0:1];
-    wire [5:0]  rb_level [0:1];
+    wire [10:0] rb_level [0:1], rx_words [0:1];
 
     genvar g;
     generate for (g = 0; g < 2; g = g + 1) begin : duts
-        engine #(.SER(g == 0 ? 1 : 0), .TXDEPTH(g == 0 ? 64 : 4), .CRC(CRC)) dut (
+        engine #(.SER(g == 0 ? 1 : 0), .TXDEPTH(g == 0 ? TXD : 4), .CRC(CRC)) dut (
             .clk(clk), .rst_n(rst_n),
             .cfg_clkdiv(cfg_clkdiv), .cfg_start(cfg_start), .cfg_wrap_bottom(cfg_wrap_bottom), .cfg_wrap_top(cfg_wrap_top),
             .cfg_out_base(cfg_out_base), .cfg_out_count(cfg_out_count), .cfg_set_base(cfg_set_base), .cfg_set_count(cfg_set_count),
@@ -77,7 +79,7 @@ module tb_cosim;
             .cfg_rx_pin(cfg_rx_pin), .cfg_rx_raw(cfg_rx_raw), .cfg_rx_both(cfg_rx_both), .cfg_rxgap(cfg_rxgap),
             .rx_fall(rx_fall), .rx_rise(rx_rise), .mode_wr(mode_wr), .mode_val(mode_val), .rx_arm(rx_arm), .host_bpop(host_bpop),
             .host_bpop_data(host_bpop_data[g]), .buf_ready(buf_ready[g]), .mode(mode_o[g]), .rb_level(rb_level[g]),
-            .rx_held(rx_held[g]), .rx_ready(rx_ready[g]),
+            .rx_held(rx_held[g]), .rx_ready(rx_ready[g]), .rx_words(rx_words[g]),
             .rxstat(rxstat[g]),
             .pc(pc[g]), .x(x[g]), .y(y[g]), .osr(osr[g]), .osr_count(osr_count[g]), .isr(isr[g]), .isr_count(isr_count[g]),
             .delay(delay[g]), .sw(sw[g]), .sw_run(sw_run[g]));
@@ -85,7 +87,7 @@ module tb_cosim;
 
     always #5 clk = ~clk;
 
-    reg [31:0] mem [0:4194303];                   // room for 1000 tests x 800 clocks, or fewer longer ones
+    reg [31:0] mem [0:8388607];                   // room for 1000 tests x 1600 clocks, or fewer longer ones
     integer p, f, t, ntests, ncycles, i, c;
     reg [15:0] popped, bpopped;
     reg        popped_ok, bpopped_ok;
@@ -132,12 +134,12 @@ module tb_cosim;
                 bpopped = host_bpop_data[kind];
                 @(negedge clk);
                 // pc x y osr osr_count isr isr_count delay sw sw_run pins_out out_dir tx rx popped busy under crc
-                $fwrite(f, "%0d %h %h %h %0d %h %0d %0d %h %0d %h %h %0d %0d %s %0d %0d %h %h %s %0d %0d\n",
+                $fwrite(f, "%0d %h %h %h %0d %h %0d %0d %h %0d %h %h %0d %0d %s %0d %0d %h %h %s %0d %0d %0d\n",
                         pc[kind], x[kind], y[kind], osr[kind], osr_count[kind], isr[kind], isr_count[kind], delay[kind],
                         sw[kind], sw_run[kind], out_val[kind], out_dir[kind],
                         tx_level[kind], rx_level[kind], popped_ok ? $sformatf("%h", popped) : "-",
                         ser_busy[kind], ser_under[kind], crc[kind], rxstat[kind],
-                        bpopped_ok ? $sformatf("%h", bpopped) : "-", rb_level[kind], rx_held[kind]);
+                        bpopped_ok ? $sformatf("%h", bpopped) : "-", rb_level[kind], rx_held[kind], rx_words[kind]);
             end
         end
         $fclose(f);
