@@ -16,7 +16,8 @@ bad CRC (`corrupt`: the host must not ACK them; they are sent again) and can mis
 report is sent again with the same toggle; the host must ACK it and throw the copy away).
 
 Everything it checks on the host goes in .errors:
-  - the host's bit rate (within 0.1 % of 1.5 Mbit/s) and every edge within 1.5 clocks of where the rate puts it
+  - the host's bit rate (within 0.05 % of 1.5 Mbit/s, plus one clock of rounding over the packet) and every edge
+    within 1.5 clocks of where the nominal rate puts it
   - stuffing, SYNC, the PID check, CRC5 on tokens, CRC16 on data, whole bytes
   - the EOP: SE0 for 1.875 to 2.25 bit times *(spec, check: low-speed source EOP 1.25 to 1.5 us)*, then J driven by
     the host for 0.75 to 1.25 bit times before it lets go
@@ -81,10 +82,38 @@ class Tx:
         return U.LEVELS[self._sym(t)][0], U.LEVELS[self._sym(t - self.skew)][1]
 
 
+def runs_decode(samples, p, debounce=3):
+    """(D+, D-) one per clock, idle J first: the packet read from its runs of line state, each run counted in bit times
+    of p clocks; runs shorter than `debounce` clocks (crossings) are joined to the run before. Returns (packet bytes,
+    [errors], index of the EOP's SE0-to-J change or None)."""
+    runs = []
+    for i, (dp, dm) in enumerate(samples):
+        s = U.sym_of(dp, dm)
+        if runs and runs[-1][0] == s:
+            runs[-1][2] += 1
+        else:
+            runs.append([s, i, 1])
+    merged = []
+    for s, st, n in runs:
+        if merged and (n < debounce or merged[-1][0] == s):
+            merged[-1][2] += n
+        else:
+            merged.append([s, st, n])
+    try:
+        k0 = next(i for i, r in enumerate(merged) if r[0] == K)
+        k1 = next(i for i, r in enumerate(merged) if r[0] == SE0 and i > k0)
+    except StopIteration:
+        return b"", ["no packet"], None
+    syms = [s for s, _, n in merged[k0:k1] for _ in range(max(1, round(n / p)))]
+    pkt, errs = U.decode(syms + U.EOP)
+    eop = merged[k1][1] + merged[k1][2] if k1 + 1 < len(merged) else None
+    return pkt, errs, eop
+
+
 class UsbKeyboard:
-    def __init__(self, clk_hz, rate=0.0, seed=1, script=(), skew=0.0, naks=(0, 2), corrupt=0, deaf=0,
+    def __init__(self, clk_hz, rate=0.0, seed=1, script=(), skew=0.0, jitter=0.0, naks=(0, 2), corrupt=0, deaf=0,
                  debounce=3):
-        self.clk_hz = clk_hz
+        self.clk_hz, self.jitter = clk_hz, jitter
         self.pn = clk_hz / LS_RATE                  # the nominal bit time, clocks
         self.pd = self.pn * (1 + rate)              # the keyboard's own bit time
         self.rnd = random.Random(seed)
@@ -128,7 +157,7 @@ class UsbKeyboard:
     def clock(self, dp, dm, host=False):
         t = self.t
         self.t += 1
-        if self.tx is not None:
+        if self.tx is not None and t >= self.tx.bounds[0] - 1:   # driving (from the clock before our SYNC)
             if t >= self.tx.end:
                 self._sent()
             else:
@@ -202,7 +231,7 @@ class UsbKeyboard:
         pkt, errs = U.decode(syms + U.EOP)
         total = sum(n)
         period = (t_se0 - t0) / total
-        if abs(period / self.pn - 1) > 1e-3:
+        if abs((t_se0 - t0) - total * self.pn) > 5e-4 * total * self.pn + 1.0:   # 0.05 %, and a clock of rounding
             errs.append(f"bit rate {LS_RATE * self.pn / period:.0f} bit/s")
         worst, pos, acc = 0.0, 0, 0
         for (s, d), k in zip(segs, n):           # every edge where the nominal rate puts it
@@ -227,7 +256,7 @@ class UsbKeyboard:
     # ---- the protocol
     def _send(self, pkt, after, good=True, kind=None):
         ts = after + self.rnd.uniform(2.2, 7.0) * self.pd
-        self.tx = Tx(U.encode(pkt), ts, self.pd, self.skew)
+        self.tx = Tx(U.encode(pkt), ts, self.pd, self.skew, self.jitter, self.rnd)
         self.tx_info = (pkt, good, kind)
 
     def _sent(self):

@@ -90,11 +90,45 @@ def run():
     check("one data bit flipped: CRC16 error", U.check_packet(bytes(p))[1], ["CRC16"])
     p = bytearray(U.token(U.PID_IN, 5, 1)); p[1] ^= 1
     check("one address bit flipped: CRC5 error", U.check_packet(bytes(p))[1], ["CRC5"])
-    check("bad PID check", U.check_packet(bytes([0x6A]))[1], ["PID check", "handshake length"][:1])
+    check("bad PID check", U.check_packet(bytes([0x6A]))[1], ["PID check"])
     return len(fails)
 
 
+PLANTS = [
+    ("CRC5 started at 0", "def crc5_reg(value, nbits, reg=0x1F):", "def crc5_reg(value, nbits, reg=0x00):"),
+    ("CRC16 not complemented", "return crc16_reg(data) ^ 0xFFFF", "return crc16_reg(data)"),
+    ("stuffing after seven 1s", "        if ones == 6:\n            out.append(0)", "        if ones == 7:\n            out.append(0)"),
+    ("NRZI inverted", "        if b == 0:\n            level = K if level == J else J",
+     "        if b == 1:\n            level = K if level == J else J"),
+]
+
+
+def plants():
+    """Each planted bug in usb_line.py must fail this test. `python model/test_usb_line.py plant`"""
+    global U, fails
+    import importlib.util
+    U0, path = U, U.__file__
+    text = open(path, encoding="utf-8").read()
+    caught = 0
+    for name, old, new in PLANTS:
+        assert text.count(old) == 1, name
+        mod = importlib.util.module_from_spec(importlib.util.spec_from_loader("usb_line_planted", loader=None))
+        exec(compile(text.replace(old, new), path, "exec"), mod.__dict__)
+        U, fails = mod, []
+        import io, contextlib
+        with contextlib.redirect_stdout(io.StringIO()):
+            bad = run()
+        print(f"  planted: {name:30s} {'caught' if bad else 'MISSED'}  ({(fails or [''])[0]})")
+        caught += bool(bad)
+    U = U0
+    print("\n==== %s (%d of %d planted bugs caught) ====" % ("PASS" if caught == len(PLANTS) else "FAIL", caught,
+                                                           len(PLANTS)))
+    return caught == len(PLANTS)
+
+
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "plant":
+        sys.exit(0 if plants() else 1)
     bad = run()
     print("\n==== %s (%d problems) ====" % ("FAIL" if bad else "PASS", bad))
     sys.exit(1 if bad else 0)

@@ -173,7 +173,9 @@ class UsbHost:
         for key, idx in (("manufacturer", d[14]), ("product", d[15])):
             s = self.get_descriptor(3, idx, lang=langid) if idx else b"\x02\x03"
             info[key] = s[2:].decode("utf-16-le")
-        rlen = next(c[i + 7] | c[i + 8] << 8 for i in range(len(c) - 1) if c[i] == 9 and c[i + 1] == 0x21)
+        rlen = next((c[i + 7] | c[i + 8] << 8 for i in range(len(c) - 8) if c[i] == 9 and c[i + 1] == 0x21), None)
+        if rlen is None:
+            raise UsbError(f"no HID descriptor in the configuration {c.hex(' ')}")
         info["report_desc"] = self.get_descriptor(0x22, 0, length=rlen, bm=0x81)
         self.control_nodata(self.req(0x00, 9, c[5]))                 # SET_CONFIGURATION
         self.control_nodata(self.req(0x21, 0x0B, 0, 0))              # SET_PROTOCOL boot
