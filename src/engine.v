@@ -150,11 +150,15 @@ module engine #(
     localparam FR  = TXDEPTH - FT;
     localparam FTW = (FT <= 2) ? 1 : (FT <= 4) ? 2 : (FT <= 8) ? 3 : (FT <= 16) ? 4 : (FT <= 32) ? 5 : (FT <= 64) ? 6 :
                      (FT <= 128) ? 7 : (FT <= 256) ? 8 : 9;
-    localparam [TAW-1:0] FT_A  = FT;            // the receive ring's first memory word
-    localparam [TAW-1:0] FR_L  = FR - 1;        // ... and its last offset
+    localparam FRL = FR - 1;
+    localparam RXW = 2 * TXDEPTH - 1;           // the receiver's word count saturates here
     localparam [10:0]    FT_N  = FT;
     localparam [10:0]    FR_N  = FR;
+    localparam [10:0]    FRL_N = FRL;
     localparam [10:0]    TXD_N = TXDEPTH;
+    localparam [10:0]    RXW_N = RXW;
+    localparam [TAW-1:0] FT_A  = FT_N[TAW-1:0];   // the receive ring's first memory word
+    localparam [TAW-1:0] FR_L  = FRL_N[TAW-1:0];  // ... and its last offset
     // TX FIFO: host -> engine (and the serialiser). tx_cnt counts every word in it; tx_head is the word PULL and the
     // serialiser take, valid while tx_ready (docs/isa.md, "Host and FIFO timing").
     reg [TAW-1:0] tx_rd, tx_wr;
@@ -319,7 +323,7 @@ module engine #(
         wire        r_over, r_locked, r_refused, r_idle;
         wire [3:0]  r_left;
         wire [10:0] r_words;
-        receiver #(.WMAX(2 * TXD_N - 11'd1)) u_rx (
+        receiver #(.WMAX(RXW_N)) u_rx (
             .clk(clk), .rst_n(rst_n),
             .cfg_raw(cfg_rx_raw), .cfg_both(cfg_rx_both), .cfg_in_right(cfg_in_right), .cfg_rxgap(cfg_rxgap),
             .rise_in(rx_rise), .fall_in(rx_fall),
