@@ -32,6 +32,8 @@ try:
 except NameError:
     SERDIV = 999
 
+FRAME_MS = 832 * 2 * (SERDIV + 1) * 1000 // CHIP_HZ + 5   # the longest frame here, 104 bytes with the preamble
+
 PC_MAC = bytes([0xD8, 0x3A, 0xDD, 0x12, 0x34, 0x56])
 PC_IP = bytes([192, 168, 77, 1])
 errors = 0
@@ -74,10 +76,10 @@ def send(body):
     words = netstack.words_le(body + netstack.crc32(body).to_bytes(4, "little"))
     feed = [len(words)] + words
     t0 = time.ticks_ms()
-    while feed and time.ticks_diff(time.ticks_ms(), t0) < 3000:
+    while feed and time.ticks_diff(time.ticks_ms(), t0) < 3 * FRAME_MS:
         if chip.read(ENG_A, R_SERSTAT) & 0x7F < RING:
             chip.write(ENG_A, R_TX, feed.pop(0))
-    while chip.read(ENG_A, R_STATUS) & 0x4000 and time.ticks_diff(time.ticks_ms(), t0) < 3000:
+    while chip.read(ENG_A, R_STATUS) & 0x4000 and time.ticks_diff(time.ticks_ms(), t0) < 3 * FRAME_MS:
         time.sleep_ms(1)
     st = chip.read(ENG_A, R_STATUS)
     return len(feed) == 0 and not st & 0xC000
@@ -87,7 +89,7 @@ def receive():
     """The frame the receiver caught (destination address to FCS), or None."""
     t0 = time.ticks_ms()
     st = chip.read(ENG_A, R_RXSTAT)
-    while not st & 1 and time.ticks_diff(time.ticks_ms(), t0) < 1000:
+    while not st & 1 and time.ticks_diff(time.ticks_ms(), t0) < FRAME_MS:
         time.sleep_ms(1)
         st = chip.read(ENG_A, R_RXSTAT)
     if not st & 1 or st & 2:

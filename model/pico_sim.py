@@ -20,7 +20,7 @@ from engine import Engine, Config  # noqa: E402
 
 CHIP_HZ = 40_000_000
 SPI_US = 30                      # one host register access in MicroPython (call, two SPI transfers, CS gaps)
-LOOP_FROM, LOOP_TO = 1, 18
+LOOP_FROM, LOOP_TO = 1, 19
 
 
 class Sim:
