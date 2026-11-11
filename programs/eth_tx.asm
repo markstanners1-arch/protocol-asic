@@ -1,7 +1,7 @@
 ; 10BASE-T Ethernet transmitter on engine 0's serialiser (ISA v0.3, 5 Nov 2026). 16 words.
 ; The host pushes one frame as a word count followed by that many words: 4 preamble words (0x5555, 0x5555, 0x5555, 0xD555:
 ; on the wire 55 55 55 55 55 55 55 D5, each word's low byte first, each byte LSB first), then destination, source, type and
-; payload two bytes a word (46 to 1500 payload bytes; the FIFO holds 64 words, so up to about 100 bytes without a bigger buffer).
+; payload two bytes a word (46 to 1500 payload bytes; the Tiny Tapeout chip's 1024-word buffer holds a full-size frame; the FPGA builds' 64 words, up to about 100 bytes).
 ; The serialiser waits until the FIFO holds the whole count, sends the words, appends the FCS (CRC-32 over everything after the
 ; 4 skipped preamble words, complemented) and the TP_IDL (TD+ high 300 ns), then releases the pins to the levels set here.
 ; Between frames the engine sends a link pulse (TD+ high 100 ns) every 16.4 ms and keeps a 9.6 us gap after each frame.

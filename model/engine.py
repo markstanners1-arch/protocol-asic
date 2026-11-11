@@ -69,7 +69,7 @@ class Config:
     rx_both: bool = True         # RXCFG[6]: sample on both clock edges (else rising only)
     rxgap: int = 6               # RXGAP: the 3/4-bit threshold in half-clocks; end of frame at twice this
                                  # (USB mode: one bit in clocks)
-    # low-speed USB on engine 0 (private design private/usb_ls.md, 10 Nov 2026; model only so far)
+    # low-speed USB on engine 0 (10 Nov 2026; model only so far: documented with the Verilog)
     usb: bool = False            # USBCFG[0]: USB mode of the serialiser and receiver, in force in full duplex
     serfrac: int = 0             # SERFRAC [7:0]: 256ths of a clock added to each half-bit (every serialiser mode)
 
@@ -750,7 +750,7 @@ class Engine:
         self.events["rx_frame"] += 1
         return wrote
 
-    # ---- the receiver's USB mode: one sample a clock, D+ and D- (private/usb_ls.md, section 3) ----
+    # ---- the receiver's USB mode: one sample a clock, D+ and D- ----
     def _usb_rx_clock(self):
         """A D+ edge sets the bit-phase counter to half a bit; at 0 the pair is sampled and the counter set to one bit
         (RXGAP clocks). Returns True if a word was written (never in full duplex: words go to the hold register)."""

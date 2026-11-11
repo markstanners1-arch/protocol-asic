@@ -41,14 +41,17 @@ what the chip is, its layout, verification and bench results. Specs: `docs/core_
   `pnr.sdc` and the SRAM model; re-copy after changes. A gds run starts on every push (~2.5 h with precheck): read it
   with ONE `gh run view`, never watch or poll.
 
-## State (10 Nov 2026)
-- **8x4 tiles** (Jane Street, 9 Nov: confirmed and final). TT branch `tiles-8x4` = main at 8x4, design unchanged.
-- **Design `src/` now has engine 0's buffer at 1024 words** (`TXDEPTH0`, IHP `RM_IHPSG13_1P_1024x16_c2_bm_bist`, macro
-  path `...e.tx_mem.txmem.ram1k.sram`), 512 + 512 in full duplex, new registers 0x38 SERLEVEL and 0x39 RXWORDS; FPGA
-  serialiser builds keep 64 words (pass `TXDEPTH0=64`). Proven: model (`model/test_buffer1024.py`), cosim at both depths
-  (`TXDEPTH0=64`; long runs `RX_FOCUS=1 python model/cosim.py 24 40000 <seed>`), chip test, 4 planted bugs. Not yet in TT.
-- Ethernet into a PC adapter: 1000 of 1000 frames with 100 R per line and 220 pF across the pair (private/eth_nic_test.md).
-- **Previous chip on Tiny Tapeout main** (a994a97, the design's src before the 1024-word buffer): four engines without CRC units, IHP SRAM macros for
+## State (11 Nov 2026)
+- **8x4 tiles** (Jane Street, 9 Nov: confirmed and final).
+- **Tiny Tapeout main = 856c569** (11 Nov): 8x4 tiles, engine 0's buffer at 1024 words (`TXDEPTH0`, IHP
+  `RM_IHPSG13_1P_1024x16_c2_bm_bist`, macro path `...e.tx_mem.txmem.ram1k.sram`), 512 + 512 in full duplex, registers
+  0x38 SERLEVEL and 0x39 RXWORDS; the src as laid out on branch `buffer-1k` (26,827 cells, 41.1 %, setup +7.15 ns,
+  hold +0.135 ns, every job passing). FPGA serialiser builds keep 64 words (pass `TXDEPTH0=64`). Proven: model
+  (`model/test_buffer1024.py`), cosim at both depths (`TXDEPTH0=64`; long runs `RX_FOCUS=1 python model/cosim.py 24
+  40000 <seed>`), chip test, 4 planted bugs; the 1024-word buffer itself not yet on the bench.
+- Ethernet into a PC adapter: 1000 of 1000 frames with 100 R per line and 220 pF across the pair.
+- ARP and ping answered on the model (`pico/netstack.py`, `model/test_netstack.py`); the bench needs a receive front end.
+- **The chip before it on Tiny Tapeout main** (a994a97, 6x4 tiles): four engines without CRC units, IHP SRAM macros for
   the program stores and engine 0's 64-word TX FIFO, 40 MHz, ID 0x0024, with receive and full duplex on engine 0
   (Manchester receiver, keyed mode in SERCFG [8:7], 16/48-word rings, RXDATA 0x37, hardware preamble; receive pin latch
   `sg13cmos5l_dlhq_1` in the wrapper, `test/rtl_cells.v` for the RTL test). Layout clean: 25,457 cells, 46.5 %

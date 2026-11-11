@@ -1,4 +1,4 @@
-; Low-speed USB host turnaround on engine 0 (USB mode: private/usb_ls.md; model only so far, model/test_usb.py).
+; Low-speed USB host turnaround on engine 0 (USB mode: model only so far, model/test_usb.py).
 ; The serialiser sends each packet (NRZI, stuffing, EOP, and the pin directions while it sends); the receiver listens
 ; from our EOP's J and judges the reply; this program decides when to send, waits for the reply, and sends the ACK the
 ; host queued if the reply was a good DATA packet (status bit 10), 2 to 7.5 bit times after it. It also sends a

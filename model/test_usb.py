@@ -1,4 +1,4 @@
-"""Low-speed USB on engine 0 (private/usb_ls.md, build order step 4): the engine model's USB mode against the reference
+"""Low-speed USB on engine 0 (the model stage): the engine model's USB mode against the reference
 (model/usb_line.py), then programs/usb_host.asm and the host logic (model/usb_host.py) with the model keyboard.
 
 1. Transmit, clock for clock: random packets (tokens, data with 0xFF runs, handshakes, raw bytes with six 1s across

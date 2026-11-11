@@ -1,5 +1,5 @@
 """Host side of low-speed USB through the chip, in Python (the Pico's pico/usb_host.py will follow it): everything that
-can wait (private/usb_ls.md, section 5.4). Tokens and their CRC5, data packets and their CRC16, DATA0/DATA1 toggles,
+can wait. Tokens and their CRC5, data packets and their CRC16, DATA0/DATA1 toggles,
 retries, enumeration, decoding boot reports.
 
 It talks to a port with three calls, each standing for what the Pico does over SPI:

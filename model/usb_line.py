@@ -1,5 +1,5 @@
-"""Low-speed USB line reference (USB 2.0 chapters 7 and 8): the calculated values the engine's USB mode (private
-design private/usb_ls.md) and the model keyboard (model/usb_kbd.py) are checked against. Plain and literal.
+"""Low-speed USB line reference (USB 2.0 chapters 7 and 8): the calculated values the engine's USB mode
+and the model keyboard (model/usb_kbd.py) are checked against. Plain and literal.
 
 Line states, low speed (the device's 1.5 k pull-up is on D-):  J = (D+ 0, D- 1)  idle;  K = (1, 0);  SE0 = (0, 0).
 A packet on the wire: SYNC (the byte 0x80, LSB first: KJKJKJKK from idle), the PID byte, any data, all LSB first, with

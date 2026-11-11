@@ -3,7 +3,7 @@
 v0.2 plus the serialiser and CRC registers 0x2B-0x33 and two STATUS bits; the receive and full-duplex registers
 (0x34-0x37, SERCFG `[9:7]`) are marked v0.4, as in `docs/isa.md`.
 
-How a microcontroller (the RP2040 on the Tiny Tapeout board, an ESP32, a Raspberry Pi) talks to the chip.
+How a microcontroller (the RP2350 on the Tiny Tapeout demo board, an ESP32, a Raspberry Pi) talks to the chip.
 The Tiny Tapeout chip has **four engines** (A-D, numbered 0-3); the FPGA builds have one to three
 (`docs/core_design.md`, "Builds"). Read register 0x2A to find out how many.
 

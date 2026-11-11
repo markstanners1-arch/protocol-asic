@@ -19,7 +19,7 @@ Everything it checks on the host goes in .errors:
   - the host's bit rate (within 0.05 % of 1.5 Mbit/s, plus one clock of rounding over the packet) and every edge
     within 1.5 clocks of where the nominal rate puts it
   - stuffing, SYNC, the PID check, CRC5 on tokens, CRC16 on data, whole bytes
-  - the EOP: SE0 for 1.875 to 2.25 bit times *(spec, check: low-speed source EOP 1.25 to 1.5 us)*, then J driven by
+  - the EOP: SE0 for 1.875 to 2.25 bit times (USB 2.0: a low-speed source EOP is 1.25 to 1.5 us), then J driven by
     the host for 0.75 to 1.25 bit times before it lets go
   - at least 2 bit times between any EOP and the host's next packet; the host's ACK 2 to 7.5 bit times after our EOP;
     the DATA after a SETUP or OUT token within 18 bit times
