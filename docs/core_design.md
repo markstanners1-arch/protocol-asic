@@ -249,5 +249,8 @@ public walkthrough for his entry (github.com/kdp1965/ihp-um-janestreet-prism) an
   host that samples MISO late in the bit.
 - **Planted bugs**: each new test is checked by planting a bug (`CHIP_SRC_OVERRIDE=file.v=replacement.v` for the
   whole-chip test) and confirming the test fails.
+- **Host scripts on the model** (`python model/pico_sim.py pico/<script>.py`): a Pico host script runs against the
+  engine model through a stand-in for `pico/chip_host.py`, before the bench. First use, 11 Nov 2026: `pico/net_loop.py`
+  (ARP and ping over the loopback), PASS, 7 of 7 planted faults caught (README, Verification).
 - **FPGA boards** against real devices: `docs/bench_wiring.md`.
 - **Tiny Tapeout repository**: the cocotb test on RTL and on the gate-level netlist, and the precheck.

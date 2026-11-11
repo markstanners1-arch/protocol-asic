@@ -30,7 +30,7 @@ Mark Stanners and Claude (Anthropic). The Tiny Tapeout project is
 
 | Build | Cells | Utilisation | Setup slack (slow corner) | Hold slack (fast corner) | Checks |
 |---|---|---|---|---|---|
-| Tiny Tapeout main: four engines, serialiser, receiver and full duplex | 25,457 + 5 SRAM macros | 46.5 % | +7.08 ns | +0.151 ns | route DRC, KLayout DRC, LVS, antenna 0; gate-level test and precheck pass |
+| Tiny Tapeout main: 8x4 tiles, four engines, serialiser, receiver and full duplex, engine A's 1024-word buffer | 26,827 + 5 SRAM macros | 41.1 % | +7.15 ns | +0.135 ns | route DRC, KLayout DRC, LVS, antenna 0; gate-level test and precheck pass |
 
 The local LibreLane flow (WSL Ubuntu, LibreLane 3.1.0.dev4, the Tiny Tapeout support tools) reproduces GitHub's runs
 metric for metric.
@@ -77,6 +77,15 @@ LED data and others) and pairs wires into buses) and `esp32/` (Arduino sketch
 - **Whole-chip test**: `bash test/run_chip.sh` drives the whole chip only through the SPI host port (programs loaded,
   UART, I2C, SPI, the serialiser's Ethernet frame decoded from the pins, receive and full duplex over a loopback wire);
   options `NENG=2|3|4`, `LATE=1` (the host samples late), `CRC=0`.
+- **Host scripts on the model**: `python model/pico_sim.py pico/<script>.py [NAME=value ...]` runs a Pico host script
+  on the PC against the engine model before it goes to the bench. A stand-in for `pico/chip_host.py` drives engine A
+  through the host registers the script uses (any other register stops the run, so a script cannot pass on one the
+  stand-in ignores); each register access costs 30 us of chip time, and engine pin 1 is wired to pin 19 as the bench's
+  loopback jumper. 11 Nov 2026: `pico/net_loop.py` (an ARP request and a 32-byte ping sent from TD+ into the receiver,
+  answered by `pico/netstack.py`, the answers sent and caught again and checked field by field, the FCS from the host)
+  passes at SERDIV 199 and at the bench's 999. Seven planted faults, all seven caught: the loopback on the wrong pin;
+  an ARP reply with opcode 1; an echo reply left as type 8; the host overfilling the 16-word transmit ring; the FCS left
+  off; the IP header checksum not refilled; received bytes taken high byte first.
 - **Planted bugs**: every new test is checked by planting a bug it should catch; all have been caught.
 - **Gate level**: the Tiny Tapeout gate-level test runs on the routed netlist.
 
