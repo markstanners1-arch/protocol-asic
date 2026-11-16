@@ -6,8 +6,9 @@ of chip time, and sleep_ms / ticks_ms run on the same clock. Pins: engine pin 1 
 loopback jumper of fdx_loop.py, eth_loop_rate.py and net_loop.py.
 Covered: engine A's CTRL, CLKDIV, WRAP, OUTCFG, MISC, INCFG, TX, STATUS, ID, SERCFG (the keyed mode change), SERDIV,
 SERSTAT, RXCFG, RXGAP, RXSTAT, RXDATA, and load_program. Anything else stops the run, so a script cannot pass on a
-register the stand-in ignores. Engine B: stop only. The 64-word build (ser_depth 64), no CRC unit.
-Run:  python model/pico_sim.py pico/net_loop.py [NAME=value ...]     (each NAME=value is set before the script runs)
+register the stand-in ignores. Engine B: stop only. No CRC unit. Default: the Mojo's 64-word build (ID 0x0022);
+TT=1: the Tiny Tapeout chip as on the Colorlight i9 (1024-word buffer, 512 + 512 in full duplex, ID 0x0024).
+Run:  python model/pico_sim.py pico/net_loop.py [TT=1] [NAME=value ...]   (each NAME=value is set before the script runs)
 """
 import os
 import sys
@@ -27,6 +28,7 @@ class Sim:
     def __init__(self):
         self.t = 0                                   # chip clocks since the start
         self.cfg = Config(ser=True, ser_depth=64, crc_unit=False)
+        self.chip_id = 0x0022                        # the Mojo's ser build, two engines
         self.prog = [0] * 32
         self.eng = None                              # None while engine A is stopped (held in reset)
 
@@ -132,7 +134,7 @@ class Chip:
             return e.bpopped or 0
         s.run(1)
         if reg == 0x2A:
-            return 0x0022                                        # the Mojo's ser build, two engines
+            return s.chip_id
         if e is None:
             return {0x2B: s.cfg.sercfg_word(), 0x28: 0, 0x33: 0, 0x36: 0}[reg]
         if reg == 0x28:                                          # STATUS
@@ -168,6 +170,9 @@ def main():
     for a in sys.argv[2:]:
         k, v = a.split("=", 1)
         g[k] = int(v.replace("_", ""), 0)
+    if g.pop("TT", 0):                                           # the Tiny Tapeout chip, as on the i9
+        SIM.cfg = Config(ser=True, ser_depth=1024, crc_unit=False)
+        SIM.chip_id = 0x0024
     sys.path.insert(0, os.path.join(ROOT, "pico"))
     machine = types.ModuleType("machine")                        # enough of it for chip_host to import
     machine.Pin = machine.SPI = lambda *a, **k: None

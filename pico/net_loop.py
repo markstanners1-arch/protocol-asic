@@ -1,17 +1,20 @@
-"""ARP and ping over the chip's own loopback: a jumper from TD+ (engine pin 1, Mojo hole 34) to engine pin 19 (hole 74).
+"""ARP and ping over the chip's own loopback: a jumper from TD+ (engine pin 1) to engine pin 19.
 Engine A, in full duplex with the hardware preamble, sends a frame as Windows would (an ARP request, a ping); its own
 receiver catches it; the host checks it arrived whole, builds the answer with netstack.py and sends that the same way;
 the answer is caught again and checked field by field, as the PC would read it.
   1. ARP "who has 192.168.77.2?": the reply carries the chip's MAC to the PC's.
   2. Ping, Windows' default 32 bytes: echo reply, same identifier, sequence and data, both checksums right.
   3. Not answered: an ARP for another address.
-The FCS is computed by the host (SERCFG without CRC append), as on the Tiny Tapeout chip, which has no CRC unit. The
-transmit ring holds 16 words, so the host tops it up at a slow rate (SERDIV 999, 20 kbit/s, as fdx_loop.py part B);
-the receive ring's 48 words hold either frame whole. This checks the host's side of the conversation on hardware; the
-10 Mbit/s line and a PC come with the receive front end.
-Needs the Mojo build with receive and full duplex (build.sh ser clk40). Prints PASS or FAIL.
+The FCS is computed by the host (SERCFG without CRC append), as on the Tiny Tapeout chip, which has no CRC unit.
+Two boards, told apart by the chip ID:
+- Colorlight i9, the Tiny Tapeout chip (ID 0x0024, `bash fpga/i9/build.sh chip load`): jumper P3 pin 14 (engine pin 1)
+  -> P3 pin 6 (engine pin 19). The transmit ring holds 512 words in full duplex, so each frame is queued whole and
+  sent at 10 Mbit/s (SERDIV 1).
+- Mojo (ID 0x0022, build.sh ser clk40): jumper hole 34 -> hole 74. The transmit ring holds 16 words, so the host tops
+  it up at a slow rate (SERDIV 999, 20 kbit/s); the receive ring's 48 words hold either frame whole.
+Prints PASS or FAIL.
 Run:  pwsh D:/ProtocolASIC/pico/run.ps1 -Script net_loop.py -Seconds 60 -Pre "CHIP_HZ=40_000_000"
-Model check (no hardware):  python model/pico_sim.py pico/net_loop.py
+Model check (no hardware):  python model/pico_sim.py pico/net_loop.py TT=1     (the Mojo: leave out TT=1)
 """
 import time
 from chip_host import Chip, wrap_reg, ENG_A, ENG_B, R_CLKDIV, R_WRAP, R_OUTCFG, R_MISC, R_INCFG, R_STATUS
@@ -22,17 +25,10 @@ R_TX, R_SERCFG, R_SERDIV, R_SERSTAT = 0x26, 0x2B, 0x2C, 0x33
 R_RXCFG, R_RXGAP, R_RXSTAT, R_RXDATA = 0x34, 0x35, 0x36, 0x37
 TDP, RXPIN, KEY, FDX = 1, 19, 0xA000, 0x0100
 SERCFG = 0x020F                       # enable, Manchester, differential, end marker, hardware preamble; no CRC unit
-RING = 16                             # full duplex on the 64-word build: 16 words to send, 48 to receive
 try:
     CHIP_HZ
 except NameError:
     CHIP_HZ = 40_000_000
-try:
-    SERDIV
-except NameError:
-    SERDIV = 999
-
-FRAME_MS = 832 * 2 * (SERDIV + 1) * 1000 // CHIP_HZ + 5   # the longest frame here, 104 bytes with the preamble
 
 PC_MAC = bytes([0xD8, 0x3A, 0xDD, 0x12, 0x34, 0x56])
 PC_IP = bytes([192, 168, 77, 1])
@@ -51,8 +47,17 @@ def u16(b, i):
 
 
 chip = Chip(CHIP_HZ, 4_000_000 if CHIP_HZ >= 32e6 else 1_000_000)
-print("\n==== ARP and ping over the loopback, TD+ (hole 34) -> engine pin 19 (hole 74), SERDIV %d ====" % SERDIV)
-print("  chip ID 0x%04X" % chip.chip_id())
+CHIP_ID = chip.chip_id()
+TT = CHIP_ID == 0x0024                # the Tiny Tapeout chip (on the i9): 512 + 512 words in full duplex
+RING = 512 if TT else 16              # the 64-word Mojo build: 16 words to send, 48 to receive
+try:
+    SERDIV
+except NameError:
+    SERDIV = 1 if TT else 999         # 10 Mbit/s with each frame queued whole; 20 kbit/s topping up 16 words
+FRAME_MS = max(20, 832 * 2 * (SERDIV + 1) * 1000 // CHIP_HZ + 5)   # the longest frame here, 104 bytes with preamble
+JUMPER = "P3 pin 14 -> P3 pin 6 (i9)" if TT else "hole 34 -> hole 74 (Mojo)"
+print("\n==== ARP and ping over the loopback, TD+ (engine pin 1) -> engine pin 19, %s, SERDIV %d ====" % (JUMPER, SERDIV))
+print("  chip ID 0x%04X" % CHIP_ID)
 pw, wb, wt = PROGRAMS["eth_tx"]
 chip.stop(ENG_A)
 chip.stop(ENG_B)
