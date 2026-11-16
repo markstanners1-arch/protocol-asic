@@ -85,7 +85,9 @@ LED data and others) and pairs wires into buses) and `esp32/` (Arduino sketch
   answered by `pico/netstack.py`, the answers sent and caught again and checked field by field, the FCS from the host)
   passes at SERDIV 199 and at the bench's 999. Seven planted faults, all seven caught: the loopback on the wrong pin;
   an ARP reply with opcode 1; an echo reply left as type 8; the host overfilling the 16-word transmit ring; the FCS left
-  off; the IP header checksum not refilled; received bytes taken high byte first.
+  off; the IP header checksum not refilled; received bytes taken high byte first. 16 Nov 2026: with `TT=1` (the Tiny
+  Tapeout chip: 1024-word buffer, 512 + 512 words in full duplex, ID 0x0024) each frame is queued whole and sent at
+  10 Mbit/s: PASS, seven planted faults caught.
 - **Planted bugs**: every new test is checked by planting a bug it should catch; all have been caught.
 - **Gate level**: the Tiny Tapeout gate-level test runs on the routed netlist.
 
@@ -101,7 +103,7 @@ result is a scripted sequence read back line by line. Wiring in [docs/bench_wiri
 | Mojo v3 | serialiser build, 40 MHz, ID 0x0022 | Ethernet frames at 10 Mbit/s, Manchester, differential: 336,100 frames clean; frames captured with a logic analyser at 500 kbit/s and decoded, the FCS equal to zlib's CRC-32; blind identification of WS2811 LED data at 800 kbit/s; full duplex over a loopback wire: 10 Mbit/s with the hardware preamble, and a full Ethernet frame at 20 kbit/s with the host topping up the 16-word ring, every word received back; 500 frames at 10 Mbit/s looped from the TD+ pin to the receiver with 0 wrong bits (`pico/eth_loop_rate.py`); a USB Ethernet adapter (ASIX AX88179) linked at 10 Mbps from the link pulses and, through 100 ohms per line and 220 pF across the pair, received 1000 of 1000 frames at 10 Mbit/s with good FCS (994 of 1000 in another run; 182 of 1000 with the capacitor out, nothing else changed); keyed mode rules; DS18B20 temperature sensor over 1-Wire (`pico/onewire.py`): presence pulse, ROM code and scratchpad with good CRC-8, MATCH ROM with the right code answered and with one bit changed silent, scratchpad written and read back, 60 readings a second apart all with good CRC-8, the reading rising from 19.2 to 28.8 C when held | PASS |
 | Cyclone IV EP4CE6 | 3 engines, 50 MHz, ID 0x0023 | ESP32 regression (UART, B timing A at 432 / 872 / 2608 clocks, IRQ, pins, filter) | PASS |
 | Cyclone IV EP4CE6 | serialiser build, 40 MHz from the PLL, ID 0x0022 | ESP32 regression (344 / 696 / 2080 clocks) | PASS |
-| Colorlight i9 (ECP5 LFE5U-45F) | the Tiny Tapeout chip (main 856c569: 4 engines, 1024-word buffer), 40 MHz, ID 0x0024 | header pins first checked one by one on the oscilloscope; Pico regression (UART at 115200 / 57600 / 19200, B timing A at 344 / 696 / 2080 clocks, IRQ, pins, filter, isolation of all four engines) | PASS |
+| Colorlight i9 (ECP5 LFE5U-45F) | the Tiny Tapeout chip (main 856c569: 4 engines, 1024-word buffer), 40 MHz, ID 0x0024 | header pins first checked one by one on the oscilloscope; Pico regression (UART at 115200 / 57600 / 19200, B timing A at 344 / 696 / 2080 clocks, IRQ, pins, filter, isolation of all four engines); ARP and ping over a loopback wire at 10 Mbit/s (`pico/net_loop.py`): ARP answered, 32-byte ping echoed, both checksums and the FCS right, an ARP for another address unanswered | PASS |
 | Nandland Go Board (iCE40 HX1K) | single blocks | UART (115,804 characters, all correct); SPI host port, 0 errors in 15,372 checks from 0.25 to 4 MHz; switch-bounce meter | PASS |
 
 Proven on the model only so far: the SRAM macros (IHP's
