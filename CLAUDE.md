@@ -39,8 +39,8 @@ what the chip is, its layout, verification and bench results. Specs: `docs/core_
   is 5 V.
 - **Raspberry Pi Pico host** (MicroPython): `pwsh pico/run.ps1 -Script <file>.py -Seconds <n> -Pre "CHIP_HZ=40_000_000"`;
   host library `pico/chip_host.py`, programs from `pico/programs.py`.
-- **Tiny Tapeout repo**: `D:\ProtocolASIC_TT` = github.com/markstanners1-arch/ttihp-protocol-emulator (public; Pages
-  viewer at markstanners1-arch.github.io/ttihp-protocol-emulator; IHP CMOS5L template, 6x4 tiles, 40 MHz, top
+- **Tiny Tapeout repo**: `D:\ProtocolASIC_TT` = github.com/markstanners1-arch/ttihp-protocol-emulator (**private**
+  until submission, Mark 16 Nov: no Pages viewer; 2,000 Actions minutes a month, a gds run ~150; IHP CMOS5L template, 8x4 tiles, 40 MHz, top
   `tt_um_gosforth_protocol_emu`). Its `src/` is a copy of this repo's `src/` plus the wrapper `project.v`, `config.json`,
   `pnr.sdc` and the SRAM model; re-copy after changes. A gds run starts on every push (~2.5 h with precheck): read it
   with ONE `gh run view`, never watch or poll.

@@ -7,9 +7,9 @@ more), time what they see on their pins, and are loaded and driven by a host mic
 Engine A also has a bit-cell serialiser and receiver for Manchester and NRZ lines: 10 Mbit/s Ethernet frames, sent and
 received, in full duplex.
 
-Mark Stanners and Claude (Anthropic). The Tiny Tapeout project is
-[ttihp-protocol-emulator](https://github.com/markstanners1-arch/ttihp-protocol-emulator) (datasheet in its
-`docs/info.md`); its `src/` is a copy of this repository's `src/` plus the Tiny Tapeout wrapper and layout settings.
+Mark Stanners and Claude (Anthropic). The Tiny Tapeout project (the layout) is a separate
+repository, published at submission; its `src/` is a copy of this repository's `src/` plus the Tiny Tapeout wrapper
+and layout settings.
 
 ## The chip
 
