@@ -34,7 +34,8 @@ what the chip is, its layout, verification and bench results. Specs: `docs/core_
   two engines, ID 0x0022). Pins in `fpga/cyclone4/chip_c4.qsf`.
 - **Mojo v3** (Spartan-6 LX9, Xilinx ISE 14.7): `fpga/mojo/` build script, loaded with `fpga/mojo/load.py`.
 - **Colorlight i9** (ECP5 LFE5U-45F on a Muse Lab breakout; programs over the breakout's USB-C, plugged straight into a
-  PC socket): `bash fpga/i9/build.sh` (blink). Host = Pico 2 on header P2 (docs/bench_wiring.md section 15); P2 pin 23
+  PC socket): `bash fpga/i9/build.sh chip [load]` (the Tiny Tapeout chip, 40 MHz; `fpga/i9/sim.sh` its test; plain
+  `build.sh` is the blink). Host = Pico 2 on header P2 (docs/bench_wiring.md section 15); P2 pin 23
   is 5 V.
 - **Raspberry Pi Pico host** (MicroPython): `pwsh pico/run.ps1 -Script <file>.py -Seconds <n> -Pre "CHIP_HZ=40_000_000"`;
   host library `pico/chip_host.py`, programs from `pico/programs.py`.

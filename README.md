@@ -116,7 +116,7 @@ behavioural model), receive-only mode, DALI, and the `pico/w25q.py`, `ds3231.py`
 | Cyclone IV EP4CE6 | serialiser, receiver, full duplex, 2 engines (`build.sh ser`) | 5,702 LEs (91 %) | 43.7 MHz |
 | Mojo v3 (Spartan-6 LX9) | 3 engines | 4,242 LUTs (74 %) | 54.7 MHz |
 | Mojo v3 | serialiser, receiver, full duplex, 2 engines, 40 MHz | 85 % of slices | 42.3 MHz |
-| Colorlight i9 (ECP5 LFE5U-45F) | the Tiny Tapeout chip, 4 engines | 10,461 LUT4s (23 %), 5 block RAMs | 40.07 MHz |
+| Colorlight i9 (ECP5 LFE5U-45F) | the Tiny Tapeout chip, 4 engines (`bash fpga/i9/build.sh chip`) | 10,407 LUT4s (23 %), 5 block RAMs | 40.29 MHz |
 
 Builds are loaded into the FPGA's RAM only (MachXO3L: `openFPGALoader -b machXO3SK file.bit`; Cyclone IV:
 `quartus_pgm -m jtag`; Mojo: `python fpga/mojo/load.py <port> <bin>`; i9: `openFPGALoader -c cmsisdap --vid 0x0d28
